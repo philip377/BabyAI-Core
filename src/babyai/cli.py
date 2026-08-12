@@ -2,11 +2,21 @@ import typer
 
 from .config import BabyAIConfig
 from .identity import Identity, IdentityStore
-from .llm import EchoProvider
+from .llm import EchoProvider, LLMError, LLMProvider, OllamaProvider
 from .memory import MemoryKind, SQLiteMemoryStore
 from .primus import Primus
 
 app = typer.Typer(help="BabyAI Core Engine")
+
+
+def build_provider(config: BabyAIConfig) -> LLMProvider:
+    if config.provider == "echo":
+        return EchoProvider()
+    if config.provider == "ollama":
+        return OllamaProvider(model=config.model, base_url=config.ollama_url)
+    raise typer.BadParameter(
+        f"Unknown BABYAI_PROVIDER={config.provider!r}. Use 'ollama' or 'echo'."
+    )
 
 
 def build_core(owner: str | None = None) -> Primus:
@@ -16,7 +26,15 @@ def build_core(owner: str | None = None) -> Primus:
         Identity(name=config.name, owner=owner or config.owner)
     )
     memory = SQLiteMemoryStore(config.memory_db)
-    return Primus(llm=EchoProvider(), memory=memory, identity=identity)
+    return Primus(llm=build_provider(config), memory=memory, identity=identity)
+
+
+def ask(core: Primus, message: str) -> str:
+    try:
+        return core.think(message)
+    except LLMError as exc:
+        typer.echo(f"Local brain unavailable: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
 
 
 @app.command()
@@ -27,15 +45,39 @@ def chat(
     """Send one message, or start an interactive session when MESSAGE is omitted."""
     core = build_core(owner)
     if message is not None:
-        typer.echo(core.think(message))
+        typer.echo(ask(core, message))
         return
 
-    typer.echo(f"{core.identity.name} {core.identity.version}. Type /exit to leave.")
+    config = BabyAIConfig.default()
+    typer.echo(
+        f"{core.identity.name} {core.identity.version} | brain={config.provider}:{config.model}. "
+        "Type /exit to leave."
+    )
     while True:
         user_input = typer.prompt("you")
         if user_input.strip().lower() in {"/exit", "/quit"}:
             break
-        typer.echo(f"babyai> {core.think(user_input)}")
+        typer.echo(f"babyai> {ask(core, user_input)}")
+
+
+@app.command()
+def doctor() -> None:
+    """Show local BabyAI configuration and test the configured brain."""
+    config = BabyAIConfig.default()
+    typer.echo(f"data_dir={config.data_dir}")
+    typer.echo(f"provider={config.provider}")
+    typer.echo(f"model={config.model}")
+    typer.echo(f"memory={config.memory_db}")
+    if config.provider == "echo":
+        typer.echo("brain=ok (echo diagnostics provider)")
+        return
+    provider = build_provider(config)
+    try:
+        provider.generate("Reply with exactly: OK")
+    except LLMError as exc:
+        typer.echo(f"brain=unavailable ({exc})", err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo("brain=ok")
 
 
 @app.command()
@@ -59,15 +101,9 @@ def memories(
     """Inspect recent memories or search them by text."""
     config = BabyAIConfig.default()
     memory = SQLiteMemoryStore(config.memory_db)
-    records = (
-        memory.search(query, limit=limit, kind=kind)
-        if query
-        else memory.recent(limit=limit, kind=kind)
-    )
+    records = memory.search(query, limit=limit, kind=kind) if query else memory.recent(limit=limit, kind=kind)
     for item in records:
-        typer.echo(
-            f"#{item.id} [{item.kind.value}] {item.role}: {item.content}"
-        )
+        typer.echo(f"#{item.id} [{item.kind.value}] {item.role}: {item.content}")
 
 
 @app.command()
