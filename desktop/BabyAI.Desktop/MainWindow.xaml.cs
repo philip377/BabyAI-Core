@@ -1,3 +1,4 @@
+using H.NotifyIcon;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -13,10 +14,12 @@ public sealed partial class MainWindow : Window
 {
     private readonly BabyAIBridgeClient _bridge = new();
     private readonly DesktopSettingsStore _settings = new();
+    private readonly TrayIconService _tray;
     private OrbState _state = OrbState.Idle;
     private bool _expanded;
     private bool _dragging;
     private bool _dragMoved;
+    private bool _exitRequested;
     private Point _dragOrigin;
     private PointInt32 _windowOrigin;
 
@@ -28,6 +31,14 @@ public sealed partial class MainWindow : Window
         ConfigureWindow();
         RestoreWindowPosition();
         ApplyState(OrbState.Idle);
+        _tray = new TrayIconService(this);
+        AppWindow.Closing += (_, args) =>
+        {
+            if (_exitRequested)
+                return;
+            args.Cancel = true;
+            HideToTray();
+        };
     }
 
     private void ConfigureWindow()
@@ -48,6 +59,26 @@ public sealed partial class MainWindow : Window
         var saved = _settings.Load();
         if (saved is not null)
             AppWindow.Move(new PointInt32(saved.X, saved.Y));
+    }
+
+    public void ShowFromTray()
+    {
+        WindowExtensions.Show(this);
+        Activate();
+    }
+
+    public void HideToTray()
+    {
+        var position = AppWindow.Position;
+        _settings.Save(position.X, position.Y);
+        WindowExtensions.Hide(this);
+    }
+
+    public void RequestExit()
+    {
+        _exitRequested = true;
+        _tray.Dispose();
+        Close();
     }
 
     private async void OrbButton_Click(object sender, RoutedEventArgs e)
