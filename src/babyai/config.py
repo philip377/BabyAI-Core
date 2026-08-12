@@ -56,3 +56,7 @@ class BabyAIConfig:
     @property
     def lesson_candidate_file(self) -> Path:
         return self.data_dir / "lesson_candidate.json"
+
+    @property
+    def curiosity_file(self) -> Path:
+        return self.data_dir / "curiosity.json"
