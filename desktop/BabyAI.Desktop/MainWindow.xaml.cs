@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Windows.Foundation;
 using Windows.Graphics;
+using Windows.UI;
 
 namespace BabyAI.Desktop;
 
@@ -15,6 +16,7 @@ public sealed partial class MainWindow : Window
     private readonly BabyAIBridgeClient _bridge = new();
     private readonly DesktopSettingsStore _settings = new();
     private readonly TrayIconService _tray;
+    private Storyboard? _orbStoryboard;
     private OrbState _state = OrbState.Idle;
     private bool _expanded;
     private bool _dragging;
@@ -255,6 +257,8 @@ public sealed partial class MainWindow : Window
     private void ApplyState(OrbState state)
     {
         _state = state;
+        _orbStoryboard?.Stop();
+
         StateGlyph.Text = state switch
         {
             OrbState.Idle => "•",
@@ -264,8 +268,55 @@ public sealed partial class MainWindow : Window
             OrbState.Error => "×",
             _ => "•"
         };
-        OrbButton.Opacity = state == OrbState.Thinking ? 0.82 : 1.0;
+
+        var visual = state switch
+        {
+            OrbState.Idle => new OrbVisual(1.035, 0.26, 2600, Color.FromArgb(255, 124, 141, 255), Color.FromArgb(255, 184, 200, 255), Color.FromArgb(255, 109, 124, 255)),
+            OrbState.Listening => new OrbVisual(1.09, 0.48, 850, Color.FromArgb(255, 99, 220, 255), Color.FromArgb(255, 126, 220, 255), Color.FromArgb(255, 65, 151, 255)),
+            OrbState.Thinking => new OrbVisual(1.075, 0.58, 650, Color.FromArgb(255, 174, 122, 255), Color.FromArgb(255, 163, 132, 255), Color.FromArgb(255, 111, 90, 255)),
+            OrbState.Approval => new OrbVisual(1.055, 0.62, 1100, Color.FromArgb(255, 255, 190, 86), Color.FromArgb(255, 255, 204, 118), Color.FromArgb(255, 227, 148, 44)),
+            OrbState.Error => new OrbVisual(1.045, 0.64, 420, Color.FromArgb(255, 255, 96, 113), Color.FromArgb(255, 255, 132, 145), Color.FromArgb(255, 208, 62, 84)),
+            _ => new OrbVisual(1.035, 0.26, 2600, Color.FromArgb(255, 124, 141, 255), Color.FromArgb(255, 184, 200, 255), Color.FromArgb(255, 109, 124, 255)),
+        };
+
+        MidStop.Color = visual.Mid;
+        EdgeStop.Color = visual.Edge;
+        OrbGlow.Fill = new SolidColorBrush(visual.Glow);
+        OrbRing.Stroke = new SolidColorBrush(Color.FromArgb(210, visual.Glow.R, visual.Glow.G, visual.Glow.B));
+        OrbButton.Opacity = state == OrbState.Thinking ? 0.94 : 1.0;
+        _orbStoryboard = CreateOrbPulseStoryboard(visual.Scale, visual.GlowOpacity, visual.DurationMs);
+        _orbStoryboard.Begin();
     }
+
+    private Storyboard CreateOrbPulseStoryboard(double peakScale, double peakGlowOpacity, int durationMs)
+    {
+        var storyboard = new Storyboard { RepeatBehavior = RepeatBehavior.Forever, AutoReverse = true };
+        var duration = new Duration(TimeSpan.FromMilliseconds(durationMs));
+
+        var scaleX = new DoubleAnimation { From = 1.0, To = peakScale, Duration = duration, EnableDependentAnimation = true };
+        Storyboard.SetTarget(scaleX, OrbScale);
+        Storyboard.SetTargetProperty(scaleX, "ScaleX");
+        storyboard.Children.Add(scaleX);
+
+        var scaleY = new DoubleAnimation { From = 1.0, To = peakScale, Duration = duration, EnableDependentAnimation = true };
+        Storyboard.SetTarget(scaleY, OrbScale);
+        Storyboard.SetTargetProperty(scaleY, "ScaleY");
+        storyboard.Children.Add(scaleY);
+
+        var glow = new DoubleAnimation { From = Math.Max(0.12, peakGlowOpacity * 0.45), To = peakGlowOpacity, Duration = duration, EnableDependentAnimation = true };
+        Storyboard.SetTarget(glow, OrbGlow);
+        Storyboard.SetTargetProperty(glow, "Opacity");
+        storyboard.Children.Add(glow);
+
+        var ring = new DoubleAnimation { From = 0.48, To = 0.96, Duration = duration, EnableDependentAnimation = true };
+        Storyboard.SetTarget(ring, OrbRing);
+        Storyboard.SetTargetProperty(ring, "Opacity");
+        storyboard.Children.Add(ring);
+
+        return storyboard;
+    }
+
+    private sealed record OrbVisual(double Scale, double GlowOpacity, int DurationMs, Color Glow, Color Mid, Color Edge);
 }
 
 public enum OrbState

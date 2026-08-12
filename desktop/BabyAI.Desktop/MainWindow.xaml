@@ -23,16 +23,20 @@
                 Padding="0"
                 BorderThickness="1">
             <Grid>
-                <Ellipse x:Name="OrbCore" Width="88" Height="88" Opacity="0.92">
+                <Ellipse x:Name="OrbGlow" Width="104" Height="104" Opacity="0.28" Fill="#7C8DFF" />
+                <Ellipse x:Name="OrbCore" Width="88" Height="88" Opacity="0.92" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                        <ScaleTransform x:Name="OrbScale" ScaleX="1" ScaleY="1" />
+                    </Ellipse.RenderTransform>
                     <Ellipse.Fill>
                         <RadialGradientBrush>
-                            <GradientStop Color="#FFF7F9FF" Offset="0" />
-                            <GradientStop Color="#FFB8C8FF" Offset="0.55" />
-                            <GradientStop Color="#FF6D7CFF" Offset="1" />
+                            <GradientStop x:Name="CenterStop" Color="#FFF7F9FF" Offset="0" />
+                            <GradientStop x:Name="MidStop" Color="#FFB8C8FF" Offset="0.55" />
+                            <GradientStop x:Name="EdgeStop" Color="#FF6D7CFF" Offset="1" />
                         </RadialGradientBrush>
                     </Ellipse.Fill>
                 </Ellipse>
-                <Ellipse Width="54" Height="54" StrokeThickness="2" Stroke="#BFFFFFFF" />
+                <Ellipse x:Name="OrbRing" Width="54" Height="54" StrokeThickness="2" Stroke="#BFFFFFFF" Opacity="0.9" />
                 <TextBlock x:Name="StateGlyph"
                            Text="•"
                            FontSize="34"
