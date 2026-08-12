@@ -3,6 +3,7 @@ import typer
 from .agent import AgentExecutor
 from .cognition import Cognition, CognitionProtocolError, TaskProposalStore
 from .config import BabyAIConfig
+from .hypothesis import Hypothesis, HypothesisProtocolError, HypothesisStore
 from .identity import Identity, IdentityStore
 from .llm import EchoProvider, LLMError, LLMProvider, OllamaProvider
 from .memory import MemoryKind, SQLiteMemoryStore
@@ -16,8 +17,10 @@ from .working_memory import TaskState, WorkingMemoryStore
 app = typer.Typer(help="BabyAI Core Engine")
 permissions_app = typer.Typer(help="Manage BabyAI capabilities")
 task_app = typer.Typer(help="Manage BabyAI working task state")
+hypothesis_app = typer.Typer(help="Manage explicit testable hypotheses")
 app.add_typer(permissions_app, name="permissions")
 app.add_typer(task_app, name="task")
+app.add_typer(hypothesis_app, name="hypothesis")
 
 
 def build_provider(config: BabyAIConfig) -> LLMProvider:
@@ -40,6 +43,10 @@ def working_memory_store() -> WorkingMemoryStore:
 
 def task_proposal_store() -> TaskProposalStore:
     return TaskProposalStore(BabyAIConfig.default().task_proposal_file)
+
+
+def hypothesis_store() -> HypothesisStore:
+    return HypothesisStore(BabyAIConfig.default().hypothesis_file)
 
 
 def build_core(owner: str | None = None) -> Primus:
@@ -95,6 +102,7 @@ def doctor() -> None:
     typer.echo(f"memory={config.memory_db}")
     typer.echo(f"working_memory={config.working_memory_file}")
     typer.echo(f"task_proposal={config.task_proposal_file}")
+    typer.echo(f"hypothesis={config.hypothesis_file}")
     typer.echo(f"permissions={config.permissions_file}")
     if config.provider == "echo":
         typer.echo("brain=ok (echo diagnostics provider)")
@@ -106,6 +114,51 @@ def doctor() -> None:
         typer.echo(f"brain=unavailable ({exc})", err=True)
         raise typer.Exit(code=2) from exc
     typer.echo("brain=ok")
+
+
+@hypothesis_app.command("propose")
+def hypothesis_propose(question: str, context: str = typer.Option("")) -> None:
+    config = BabyAIConfig.default()
+    try:
+        record = Hypothesis(build_provider(config)).propose(question, context)
+    except (LLMError, HypothesisProtocolError) as exc:
+        typer.echo(f"Could not create hypothesis: {exc}", err=True)
+        raise typer.Exit(code=5) from exc
+    HypothesisStore(config.hypothesis_file).save(record)
+    typer.echo(record.as_context())
+    typer.echo("No test was executed. Verify it explicitly before changing status.")
+
+
+@hypothesis_app.command("show")
+def hypothesis_show() -> None:
+    record = hypothesis_store().load()
+    typer.echo(record.as_context() if record else "No stored hypothesis.")
+
+
+@hypothesis_app.command("confirm")
+def hypothesis_confirm() -> None:
+    try:
+        record = hypothesis_store().set_status("confirmed")
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=5) from exc
+    typer.echo(record.as_context())
+
+
+@hypothesis_app.command("reject")
+def hypothesis_reject() -> None:
+    try:
+        record = hypothesis_store().set_status("rejected")
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=5) from exc
+    typer.echo(record.as_context())
+
+
+@hypothesis_app.command("clear")
+def hypothesis_clear() -> None:
+    hypothesis_store().clear()
+    typer.echo("Hypothesis cleared.")
 
 
 @task_app.command("set")
