@@ -1,5 +1,6 @@
 import typer
 
+from .agent import AgentExecutor
 from .config import BabyAIConfig
 from .identity import Identity, IdentityStore
 from .llm import EchoProvider, LLMError, LLMProvider, OllamaProvider
@@ -24,6 +25,10 @@ def build_provider(config: BabyAIConfig) -> LLMProvider:
     )
 
 
+def permission_store() -> PermissionStore:
+    return PermissionStore(BabyAIConfig.default().permissions_file)
+
+
 def build_core(owner: str | None = None) -> Primus:
     config = BabyAIConfig.default()
     identity_store = IdentityStore(config.identity_file)
@@ -31,11 +36,13 @@ def build_core(owner: str | None = None) -> Primus:
         Identity(name=config.name, owner=owner or config.owner)
     )
     memory = SQLiteMemoryStore(config.memory_db)
-    return Primus(llm=build_provider(config), memory=memory, identity=identity)
-
-
-def permission_store() -> PermissionStore:
-    return PermissionStore(BabyAIConfig.default().permissions_file)
+    permissions = PermissionStore(config.permissions_file)
+    return Primus(
+        llm=build_provider(config),
+        memory=memory,
+        identity=identity,
+        agent=AgentExecutor(permissions),
+    )
 
 
 def ask(core: Primus, message: str) -> str:
