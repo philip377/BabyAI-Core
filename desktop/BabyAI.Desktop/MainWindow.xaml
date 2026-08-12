@@ -113,7 +113,8 @@
                          AcceptsReturn="True"
                          MinHeight="62"
                          MaxHeight="92"
-                         TextWrapping="Wrap" />
+                         TextWrapping="Wrap"
+                         KeyDown="MessageBox_KeyDown" />
 
                 <Grid Grid.Row="4" ColumnSpacing="8">
                     <Grid.ColumnDefinitions>

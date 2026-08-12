@@ -22,3 +22,16 @@ def test_desktop_live_chat_exposes_transcript_runtime_and_stop_controls() -> Non
     assert "CancellationTokenSource.CreateLinkedTokenSource" in bridge
     assert "process.Kill(entireProcessTree: true)" in bridge
     assert "BabyAI response timed out after 3 minutes." in bridge
+
+
+def test_desktop_chat_keyboard_contract_uses_enter_and_preserves_shift_enter() -> None:
+    root = Path(__file__).resolve().parents[1]
+    xaml = (root / "desktop" / "BabyAI.Desktop" / "MainWindow.xaml").read_text(encoding="utf-8")
+    window = (root / "desktop" / "BabyAI.Desktop" / "MainWindow.xaml.cs").read_text(encoding="utf-8")
+
+    assert 'KeyDown="MessageBox_KeyDown"' in xaml
+    assert "e.Key != VirtualKey.Enter" in window
+    assert "InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)" in window
+    assert "CoreVirtualKeyStates.Down" in window
+    assert "e.Handled = true" in window
+    assert "MessageBox.Focus(FocusState.Programmatic)" in window

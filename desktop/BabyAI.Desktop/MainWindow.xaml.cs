@@ -7,7 +7,9 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Windows.Foundation;
 using Windows.Graphics;
+using Windows.System;
 using Windows.UI;
+using Windows.UI.Core;
 
 namespace BabyAI.Desktop;
 
@@ -107,6 +109,7 @@ public sealed partial class MainWindow : Window
             }
 
             await ExpandPanelAsync();
+            MessageBox.Focus(FocusState.Programmatic);
             ApplyState(OrbState.Thinking);
             SetBusy(true);
             await RefreshStatusAsync();
@@ -118,6 +121,8 @@ public sealed partial class MainWindow : Window
         finally
         {
             SetBusy(false);
+            if (_expanded)
+                MessageBox.Focus(FocusState.Programmatic);
         }
     }
 
@@ -173,6 +178,19 @@ public sealed partial class MainWindow : Window
         ApplyState(status.RequiresApproval ? OrbState.Approval : OrbState.Idle);
     }
 
+    private void MessageBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (_busy || e.Key != VirtualKey.Enter)
+            return;
+
+        var shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
+        if ((shift & CoreVirtualKeyStates.Down) == CoreVirtualKeyStates.Down)
+            return;
+
+        e.Handled = true;
+        SendButton_Click(sender, e);
+    }
+
     private async void SendButton_Click(object sender, RoutedEventArgs e)
     {
         if (_busy)
@@ -215,6 +233,8 @@ public sealed partial class MainWindow : Window
             _chatCancellation?.Dispose();
             _chatCancellation = null;
             SetBusy(false);
+            if (_expanded)
+                MessageBox.Focus(FocusState.Programmatic);
         }
     }
 
@@ -251,6 +271,8 @@ public sealed partial class MainWindow : Window
         finally
         {
             SetBusy(false);
+            if (_expanded)
+                MessageBox.Focus(FocusState.Programmatic);
         }
     }
 
@@ -273,6 +295,8 @@ public sealed partial class MainWindow : Window
         finally
         {
             SetBusy(false);
+            if (_expanded)
+                MessageBox.Focus(FocusState.Programmatic);
         }
     }
 
@@ -295,6 +319,8 @@ public sealed partial class MainWindow : Window
         finally
         {
             SetBusy(false);
+            if (_expanded)
+                MessageBox.Focus(FocusState.Programmatic);
         }
     }
 
