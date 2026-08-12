@@ -52,6 +52,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\run.ps1 -Provider ech
 
 The bootstrap script installs BabyAI Core in editable mode, initializes local state, runs diagnostics, verifies the desktop command bridge and builds the self-contained WinUI client. The run script reuses the built `BabyAI.Desktop.exe` rather than rebuilding on every launch.
 
+If a Windows launch is failing, export a compact support report:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\diagnose.ps1 -Provider echo
+```
+
+This creates `babyai-diagnostics.txt` in the repository root. The report contains platform/runtime versions, Core health exit codes, bridge schema health, Ollama reachability when requested, and whether the desktop EXE exists/runs. It deliberately excludes MEMORIA contents, chats, task/identity contents, permission contents, and user-file contents.
+
 BabyAI state lives in `~/.babyai`. Desktop window position is stored separately under `%LocalAppData%\BabyAI`. Initialization grants no system capabilities.
 
 ## Core quick start
