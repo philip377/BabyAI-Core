@@ -1,6 +1,7 @@
 import typer
 
 from .agent import AgentExecutor
+from .cognition import Cognition, CognitionProtocolError, TaskProposalStore
 from .config import BabyAIConfig
 from .identity import Identity, IdentityStore
 from .llm import EchoProvider, LLMError, LLMProvider, OllamaProvider
@@ -35,6 +36,10 @@ def permission_store() -> PermissionStore:
 
 def working_memory_store() -> WorkingMemoryStore:
     return WorkingMemoryStore(BabyAIConfig.default().working_memory_file)
+
+
+def task_proposal_store() -> TaskProposalStore:
+    return TaskProposalStore(BabyAIConfig.default().task_proposal_file)
 
 
 def build_core(owner: str | None = None) -> Primus:
@@ -89,6 +94,7 @@ def doctor() -> None:
     typer.echo(f"model={config.model}")
     typer.echo(f"memory={config.memory_db}")
     typer.echo(f"working_memory={config.working_memory_file}")
+    typer.echo(f"task_proposal={config.task_proposal_file}")
     typer.echo(f"permissions={config.permissions_file}")
     if config.provider == "echo":
         typer.echo("brain=ok (echo diagnostics provider)")
@@ -109,6 +115,7 @@ def task_set(
     context: str = typer.Option(""),
 ) -> None:
     task = working_memory_store().save(TaskState(goal=goal, status=status, context=context))
+    task_proposal_store().clear()
     typer.echo(task.as_context())
 
 
@@ -121,7 +128,51 @@ def task_show() -> None:
 @task_app.command("clear")
 def task_clear() -> None:
     working_memory_store().clear()
+    task_proposal_store().clear()
     typer.echo("Task cleared.")
+
+
+@task_app.command("propose")
+def task_propose(observation: str) -> None:
+    config = BabyAIConfig.default()
+    task = WorkingMemoryStore(config.working_memory_file).load()
+    if task is None:
+        typer.echo("No active task.", err=True)
+        raise typer.Exit(code=4)
+    try:
+        proposal = Cognition(build_provider(config)).propose(task, observation)
+    except (LLMError, CognitionProtocolError) as exc:
+        typer.echo(f"Could not create task proposal: {exc}", err=True)
+        raise typer.Exit(code=4) from exc
+    TaskProposalStore(config.task_proposal_file).save(proposal)
+    typer.echo(proposal.as_context())
+    typer.echo("Pending only. Run 'babyai task apply' to accept it.")
+
+
+@task_app.command("proposal")
+def task_proposal_show() -> None:
+    proposal = task_proposal_store().load()
+    typer.echo(proposal.as_context() if proposal else "No pending task proposal.")
+
+
+@task_app.command("apply")
+def task_apply() -> None:
+    proposal_store = task_proposal_store()
+    proposal = proposal_store.load()
+    if proposal is None:
+        typer.echo("No pending task proposal.", err=True)
+        raise typer.Exit(code=4)
+    task = working_memory_store().save(
+        TaskState(goal=proposal.goal, status=proposal.status, context=proposal.context)
+    )
+    proposal_store.clear()
+    typer.echo(task.as_context())
+
+
+@task_app.command("reject")
+def task_reject() -> None:
+    task_proposal_store().clear()
+    typer.echo("Pending task proposal rejected.")
 
 
 @permissions_app.command("list")
