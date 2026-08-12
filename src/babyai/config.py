@@ -40,3 +40,7 @@ class BabyAIConfig:
     @property
     def working_memory_file(self) -> Path:
         return self.data_dir / "working_memory.json"
+
+    @property
+    def task_proposal_file(self) -> Path:
+        return self.data_dir / "task_proposal.json"
