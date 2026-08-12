@@ -5,6 +5,7 @@ from .identity import Identity
 from .llm import LLMProvider
 from .memory import MemoryKind, MemoryStore
 from .planner import PlanAction, Planner, PlannerProtocolError
+from .working_memory import WorkingMemoryStore
 
 
 @dataclass(slots=True)
@@ -14,10 +15,14 @@ class Primus:
     identity: Identity
     agent: AgentExecutor | None = None
     planner: Planner | None = None
+    working_memory: WorkingMemoryStore | None = None
     max_context_chars: int = 12_000
 
     def _base_prompt(self, user_input: str) -> str:
         prompt_parts = [self.identity.system_context()]
+        task = self.working_memory.load() if self.working_memory is not None else None
+        if task is not None:
+            prompt_parts.append("Current task state:\n" + task.as_context())
         if self.agent is not None:
             prompt_parts.append(self.agent.catalog())
         prompt_parts.append(f"USER: {user_input}")
@@ -53,6 +58,8 @@ class Primus:
                 break
 
         all_parts = [self.identity.system_context()]
+        if task is not None:
+            all_parts.append("Current task state:\n" + task.as_context())
         all_parts.extend(memory_parts)
         if self.agent is not None:
             all_parts.append(self.agent.catalog())
