@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from .identity import Identity
 from .llm import LLMProvider
 from .memory import MemoryStore
 
@@ -8,11 +9,17 @@ from .memory import MemoryStore
 class Primus:
     llm: LLMProvider
     memory: MemoryStore
+    identity: Identity
 
     def think(self, user_input: str) -> str:
-        context = "\n".join(item.content for item in self.memory.recent())
-        prompt = f"Memory:\n{context}\n\nUser:\n{user_input}" if context else user_input
-        response = self.llm.generate(prompt)
-        self.memory.add(f"USER: {user_input}")
-        self.memory.add(f"BABYAI: {response}")
+        history = "\n".join(
+            f"{item.role.upper()}: {item.content}" for item in self.memory.recent(limit=12)
+        )
+        prompt_parts = [self.identity.system_context()]
+        if history:
+            prompt_parts.append(f"Recent memory:\n{history}")
+        prompt_parts.append(f"USER: {user_input}")
+        response = self.llm.generate("\n\n".join(prompt_parts))
+        self.memory.add("user", user_input)
+        self.memory.add("babyai", response)
         return response
