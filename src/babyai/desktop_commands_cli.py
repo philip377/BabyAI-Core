@@ -9,6 +9,11 @@ from .desktop_commands import DesktopCommandError, DesktopCommands
 app = typer.Typer(help="BabyAI Desktop command bridge")
 
 
+@app.callback()
+def main() -> None:
+    """Local command bridge used by trusted BabyAI desktop clients."""
+
+
 @app.command("exec")
 def exec_command(command: str, payload: str = typer.Option("{}")) -> None:
     try:
