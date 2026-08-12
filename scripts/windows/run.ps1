@@ -35,5 +35,26 @@ if ($LASTEXITCODE -ne 0) {
     throw "BabyAI desktop bridge check failed. Run .\scripts\windows\bootstrap.ps1 again."
 }
 
+$outputRoot = Join-Path $repo "desktop/BabyAI.Desktop/bin/x64/Release"
+$desktopExe = Get-ChildItem -Path $outputRoot -Filter "BabyAI.Desktop.exe" -File -Recurse -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+
+if (-not $desktopExe) {
+    Write-Host "[BabyAI] Release build is missing; building it now..."
+    dotnet build desktop/BabyAI.Desktop/BabyAI.Desktop.csproj -c Release -p:Platform=x64
+    if ($LASTEXITCODE -ne 0) {
+        throw "BabyAI Desktop build failed."
+    }
+    $desktopExe = Get-ChildItem -Path $outputRoot -Filter "BabyAI.Desktop.exe" -File -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+}
+
+if (-not $desktopExe) {
+    throw "BabyAI.Desktop.exe was not found. Run .\scripts\windows\bootstrap.ps1 again."
+}
+
 Write-Host "[BabyAI] Starting Windows Orb ($Provider provider)..."
-dotnet run --project desktop/BabyAI.Desktop/BabyAI.Desktop.csproj -c Debug -p:Platform=x64
+Write-Host "[BabyAI] $($desktopExe.FullName)"
+Start-Process -FilePath $desktopExe.FullName -WorkingDirectory $desktopExe.DirectoryName
