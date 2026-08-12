@@ -48,3 +48,7 @@ class BabyAIConfig:
     @property
     def hypothesis_file(self) -> Path:
         return self.data_dir / "hypothesis.json"
+
+    @property
+    def evidence_file(self) -> Path:
+        return self.data_dir / "evidence.json"
