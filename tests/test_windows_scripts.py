@@ -39,6 +39,20 @@ def test_windows_start_bootstraps_only_when_needed_then_runs() -> None:
     assert "babyai-setup" not in start
 
 
+def test_windows_diagnostics_reports_health_without_reading_private_state() -> None:
+    root = Path(__file__).resolve().parents[1]
+    diagnose = (root / "scripts" / "windows" / "diagnose.ps1").read_text(encoding="utf-8")
+
+    assert "babyai.setup_cli doctor --skip-brain" in diagnose
+    assert "babyai.desktop_commands_cli exec status" in diagnose
+    assert "bridge.snapshot.schema_version" in diagnose
+    assert 'Filter "BabyAI.Desktop.exe"' in diagnose
+    assert "privacy_note=" in diagnose
+    assert "memory.sqlite" not in diagnose
+    assert "working_memory" not in diagnose
+    assert "identity.json" not in diagnose
+
+
 def test_windows_desktop_bundles_windows_app_sdk_runtime() -> None:
     root = Path(__file__).resolve().parents[1]
     project = (root / "desktop" / "BabyAI.Desktop" / "BabyAI.Desktop.csproj").read_text(encoding="utf-8")

@@ -35,6 +35,17 @@ jobs:
           $exe = Get-ChildItem desktop/BabyAI.Desktop/bin/x64/Release -Filter BabyAI.Desktop.exe -File -Recurse | Select-Object -First 1
           if (-not $exe) { throw "BabyAI.Desktop.exe was not produced." }
           Write-Host "Runnable desktop executable: $($exe.FullName)"
+      - name: Verify safe diagnostics export
+        shell: pwsh
+        env:
+          BABYAI_PROVIDER: echo
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "babyai-diagnostics.txt"
+          .\scripts\windows\diagnose.ps1 -Provider echo -OutputPath $report
+          if (-not (Test-Path $report)) { throw "Diagnostics report was not produced." }
+          $content = Get-Content $report -Raw
+          if ($content -notmatch "bridge.ok=true") { throw "Diagnostics report did not confirm the bridge." }
+          if ($content -notmatch "privacy_note=") { throw "Diagnostics report is missing its privacy marker." }
       - uses: actions/upload-artifact@v4
         with:
           name: BabyAI-Windows-x64
