@@ -39,31 +39,49 @@ public sealed class BabyAIBridgeClient
 
     private static async Task<string> ExecuteAsync(string command, string payload)
     {
+        var python = Environment.GetEnvironmentVariable("BABYAI_PYTHON");
+        if (string.IsNullOrWhiteSpace(python))
+            python = "python";
+
         var startInfo = new ProcessStartInfo
         {
-            FileName = "babyai-desktop",
+            FileName = python,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
+        startInfo.ArgumentList.Add("-m");
+        startInfo.ArgumentList.Add("babyai.desktop_commands_cli");
         startInfo.ArgumentList.Add("exec");
         startInfo.ArgumentList.Add(command);
         startInfo.ArgumentList.Add("--payload");
         startInfo.ArgumentList.Add(payload);
 
-        using var process = Process.Start(startInfo)
-            ?? throw new InvalidOperationException("Could not start babyai-desktop bridge.");
-        var stdoutTask = process.StandardOutput.ReadToEndAsync();
-        var stderrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
+        Process? process;
+        try
+        {
+            process = Process.Start(startInfo);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"Could not start BabyAI Python bridge using '{python}'. Run scripts/windows/bootstrap.ps1 first.", ex);
+        }
 
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "BabyAI bridge failed." : stderr.Trim());
+        using (process ?? throw new InvalidOperationException("Could not start BabyAI Python bridge."))
+        {
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
 
-        return stdout.Trim();
+            if (process.ExitCode != 0)
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "BabyAI bridge failed." : stderr.Trim());
+
+            return stdout.Trim();
+        }
     }
 }
 
