@@ -12,32 +12,67 @@ class Primus:
     memory: MemoryStore
     identity: Identity
     agent: AgentExecutor | None = None
+    max_context_chars: int = 12_000
 
     def _base_prompt(self, user_input: str) -> str:
-        episodic = "\n".join(
-            f"{item.role.upper()}: {item.content}"
-            for item in self.memory.recent(limit=12, kind=MemoryKind.EPISODIC)
-        )
-        facts = "\n".join(
-            f"- {item.content}"
-            for item in self.memory.recent(limit=8, kind=MemoryKind.FACT)
-        )
-        knowledge = "\n".join(
-            f"- {item.content}"
-            for item in self.memory.recent(limit=6, kind=MemoryKind.KNOWLEDGE)
-        )
-
         prompt_parts = [self.identity.system_context()]
-        if facts:
-            prompt_parts.append(f"Known facts:\n{facts}")
-        if knowledge:
-            prompt_parts.append(f"Relevant learned knowledge:\n{knowledge}")
-        if episodic:
-            prompt_parts.append(f"Recent episodic memory:\n{episodic}")
         if self.agent is not None:
             prompt_parts.append(self.agent.catalog())
         prompt_parts.append(f"USER: {user_input}")
-        return "\n\n".join(prompt_parts)
+
+        fixed = "\n\n".join(prompt_parts)
+        remaining = max(self.max_context_chars - len(fixed), 0)
+
+        memory_parts: list[str] = []
+        sections = [
+            (
+                "Known facts:",
+                [f"- {item.content}" for item in self.memory.recent(limit=20, kind=MemoryKind.FACT)],
+            ),
+            (
+                "Relevant learned knowledge:",
+                [f"- {item.content}" for item in self.memory.recent(limit=16, kind=MemoryKind.KNOWLEDGE)],
+            ),
+            (
+                "Recent episodic memory:",
+                [
+                    f"{item.role.upper()}: {item.content}"
+                    for item in self.memory.recent(limit=24, kind=MemoryKind.EPISODIC)
+                ],
+            ),
+        ]
+
+        for heading, lines in sections:
+            chunk = self._fit_section(heading, lines, remaining)
+            if chunk:
+                memory_parts.append(chunk)
+                remaining -= len(chunk) + 2
+            if remaining <= 0:
+                break
+
+        all_parts = [self.identity.system_context()]
+        all_parts.extend(memory_parts)
+        if self.agent is not None:
+            all_parts.append(self.agent.catalog())
+        all_parts.append(f"USER: {user_input}")
+        return "\n\n".join(all_parts)
+
+    @staticmethod
+    def _fit_section(heading: str, lines: list[str], budget: int) -> str:
+        if budget <= len(heading):
+            return ""
+        selected: list[str] = []
+        used = len(heading) + 1
+        for line in reversed(lines):
+            cost = len(line) + 1
+            if used + cost > budget:
+                break
+            selected.append(line)
+            used += cost
+        if not selected:
+            return ""
+        selected.reverse()
+        return heading + "\n" + "\n".join(selected)
 
     def think(self, user_input: str) -> str:
         first = self.llm.generate(self._base_prompt(user_input))

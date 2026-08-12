@@ -36,13 +36,14 @@ class AgentExecutor:
             "- filesystem.list {\"path\": \"...\"}\n"
             "- filesystem.read {\"path\": \"...\"}\n"
             "- process.list {}\n"
-            "To call a tool, reply with ONLY one JSON object: "
+            "To call a tool, reply with exactly one JSON object and nothing else: "
             '{"tool":"tool.name","arguments":{...}}. '
+            "A fenced ```json block containing only that object is also accepted. "
             "If no tool is needed, answer normally."
         )
 
     def parse_tool_call(self, text: str) -> ToolCall | None:
-        stripped = text.strip()
+        stripped = self._unwrap_json_block(text)
         if not stripped.startswith("{"):
             return None
         try:
@@ -51,11 +52,21 @@ class AgentExecutor:
             return None
         if not isinstance(data, dict) or "tool" not in data:
             return None
+
+        allowed_keys = {"tool", "arguments"}
+        unexpected = set(data) - allowed_keys
+        if unexpected:
+            raise ToolProtocolError(
+                f"Unexpected tool call fields: {', '.join(sorted(unexpected))}"
+            )
+
         name = data.get("tool")
         arguments = data.get("arguments", {})
-        if not isinstance(name, str) or not isinstance(arguments, dict):
-            raise ToolProtocolError("Invalid tool call schema")
-        return ToolCall(name=name, arguments=arguments)
+        if not isinstance(name, str) or not name.strip():
+            raise ToolProtocolError("Tool name must be a non-empty string")
+        if not isinstance(arguments, dict):
+            raise ToolProtocolError("Tool arguments must be a JSON object")
+        return ToolCall(name=name.strip(), arguments=arguments)
 
     def execute(self, call: ToolCall) -> str:
         handlers: dict[str, Callable[[dict[str, Any]], object]] = {
@@ -71,6 +82,20 @@ class AgentExecutor:
         if isinstance(result, str):
             return result
         return json.dumps(result, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _unwrap_json_block(text: str) -> str:
+        stripped = text.strip()
+        if not stripped.startswith("```"):
+            return stripped
+
+        lines = stripped.splitlines()
+        if len(lines) < 3 or not lines[-1].strip().startswith("```"):
+            return stripped
+        first = lines[0].strip().lower()
+        if first not in {"```", "```json"}:
+            return stripped
+        return "\n".join(lines[1:-1]).strip()
 
     @staticmethod
     def _required_path(arguments: dict[str, Any]) -> str:
