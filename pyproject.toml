@@ -11,6 +11,7 @@ dev = ["pytest>=8.2"]
 [project.scripts]
 babyai = "babyai.cli:app"
 babyai-evidence = "babyai.evidence_cli:app"
+babyai-learn = "babyai.learn_cli:app"
 
 [build-system]
 requires = ["hatchling"]
