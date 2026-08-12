@@ -42,11 +42,11 @@ if ($Provider -eq "ollama") {
 }
 
 Write-Host "[BabyAI] Initializing local state..."
-babyai-setup init
-babyai-setup doctor
+python -m babyai.setup_cli init
+python -m babyai.setup_cli doctor
 
 Write-Host "[BabyAI] Verifying desktop command bridge..."
-babyai-desktop exec status | Out-Host
+python -m babyai.desktop_commands_cli exec status | Out-Host
 
 Write-Host "[BabyAI] Building Windows Orb..."
 dotnet build desktop/BabyAI.Desktop/BabyAI.Desktop.csproj -c Debug -p:Platform=x64
