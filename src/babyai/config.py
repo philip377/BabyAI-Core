@@ -32,3 +32,7 @@ class BabyAIConfig:
     @property
     def identity_file(self) -> Path:
         return self.data_dir / "identity.json"
+
+    @property
+    def permissions_file(self) -> Path:
+        return self.data_dir / "permissions.json"
