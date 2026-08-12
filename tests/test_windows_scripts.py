@@ -10,4 +10,5 @@ def test_windows_scripts_do_not_depend_on_console_scripts_path() -> None:
     assert "python -m babyai.setup_cli doctor" in bootstrap
     assert "python -m babyai.desktop_commands_cli exec status" in bootstrap
     assert "Get-Command babyai-desktop" not in run
-    assert "python -m babyai.desktop_commands_cli exec status" in run
+    assert "$env:BABYAI_PYTHON" in run
+    assert "-m babyai.desktop_commands_cli exec status" in run
