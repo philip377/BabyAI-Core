@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .observer import Observer
@@ -22,6 +22,8 @@ class ToolProtocolError(ValueError):
 @dataclass(slots=True)
 class AgentExecutor:
     permissions: PermissionStore
+    toolset: Toolset = field(init=False)
+    observer: Observer = field(init=False)
 
     def __post_init__(self) -> None:
         self.toolset = Toolset(self.permissions)
