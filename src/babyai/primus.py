@@ -4,6 +4,7 @@ from .agent import AgentExecutor, ToolProtocolError
 from .identity import Identity
 from .llm import LLMProvider
 from .memory import MemoryKind, MemoryStore
+from .planner import PlanAction, Planner, PlannerProtocolError
 
 
 @dataclass(slots=True)
@@ -12,6 +13,7 @@ class Primus:
     memory: MemoryStore
     identity: Identity
     agent: AgentExecutor | None = None
+    planner: Planner | None = None
     max_context_chars: int = 12_000
 
     def _base_prompt(self, user_input: str) -> str:
@@ -74,17 +76,37 @@ class Primus:
         selected.reverse()
         return heading + "\n" + "\n".join(selected)
 
+    def _plan(self, user_input: str):
+        if self.planner is None:
+            return None
+        planning_prompt = self._base_prompt(user_input) + "\n\n" + self.planner.prompt()
+        raw = self.llm.generate(planning_prompt)
+        return self.planner.parse(raw)
+
     def think(self, user_input: str) -> str:
-        first = self.llm.generate(self._base_prompt(user_input))
+        try:
+            plan = self._plan(user_input)
+        except PlannerProtocolError:
+            plan = None
+
+        base = self._base_prompt(user_input)
+        if plan is not None:
+            base += f"\n\nIntent: {plan.intent}"
+            if plan.action is PlanAction.ANSWER:
+                base += "\nAnswer the user directly. Do not call a tool."
+            else:
+                base += "\nUse at most one available tool if needed."
+
+        first = self.llm.generate(base)
         response = first
 
-        if self.agent is not None:
+        if self.agent is not None and (plan is None or plan.action is PlanAction.TOOL):
             try:
                 call = self.agent.parse_tool_call(first)
                 if call is not None:
                     tool_result = self.agent.execute(call)
                     followup = (
-                        self._base_prompt(user_input)
+                        base
                         + "\n\nThe tool call was executed successfully.\n"
                         + f"TOOL: {call.name}\nRESULT:\n{tool_result}\n\n"
                         + "Answer the user using the tool result. Do not emit another tool call."
