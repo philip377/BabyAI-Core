@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 
 from .autodidact import LessonCandidateStore
@@ -7,7 +8,7 @@ from .config import BabyAIConfig
 from .curiosa import CuriosityStore
 from .evidence import EvidenceStore
 from .hypothesis import HypothesisStore
-from .identity import Identity, IdentityStore
+from .identity import Identity
 from .learning_loop import LearningLoop
 from .permissions import Capability, PermissionStore
 from .working_memory import WorkingMemoryStore
@@ -30,12 +31,17 @@ class DesktopSnapshot:
         }
 
 
+def _read_identity(config: BabyAIConfig) -> Identity:
+    if not config.identity_file.exists():
+        return Identity(name=config.name, owner=config.owner)
+    data = json.loads(config.identity_file.read_text(encoding="utf-8"))
+    return Identity(**data)
+
+
 def build_desktop_snapshot(config: BabyAIConfig | None = None) -> DesktopSnapshot:
     config = config or BabyAIConfig.default()
 
-    identity = IdentityStore(config.identity_file).load_or_create(
-        Identity(name=config.name, owner=config.owner)
-    )
+    identity = _read_identity(config)
     task = WorkingMemoryStore(config.working_memory_file).load()
     hypothesis = HypothesisStore(config.hypothesis_file).load()
     evidence = EvidenceStore(config.evidence_file).load()
