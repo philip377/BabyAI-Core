@@ -48,9 +48,21 @@ python -m babyai.setup_cli doctor
 Write-Host "[BabyAI] Verifying desktop command bridge..."
 python -m babyai.desktop_commands_cli exec status | Out-Host
 
-Write-Host "[BabyAI] Building Windows Orb..."
-dotnet build desktop/BabyAI.Desktop/BabyAI.Desktop.csproj -c Debug -p:Platform=x64
+Write-Host "[BabyAI] Building runnable Windows Orb..."
+dotnet build desktop/BabyAI.Desktop/BabyAI.Desktop.csproj -c Release -p:Platform=x64
+if ($LASTEXITCODE -ne 0) {
+    throw "BabyAI Desktop build failed."
+}
+
+$outputRoot = Join-Path $repo "desktop/BabyAI.Desktop/bin/x64/Release"
+$desktopExe = Get-ChildItem -Path $outputRoot -Filter "BabyAI.Desktop.exe" -File -Recurse -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+if (-not $desktopExe) {
+    throw "BabyAI.Desktop.exe was not found after a successful build."
+}
 
 Write-Host ""
 Write-Host "BabyAI Windows MVP is ready."
+Write-Host "Desktop: $($desktopExe.FullName)"
 Write-Host "Run:  powershell -ExecutionPolicy Bypass -File .\scripts\windows\run.ps1 -Provider $Provider"
