@@ -10,10 +10,13 @@ from .permissions import Capability, PermissionStore
 from .planner import Planner
 from .primus import Primus
 from .tools import Toolset
+from .working_memory import TaskState, TaskStatus, WorkingMemoryStore
 
 app = typer.Typer(help="BabyAI Core Engine")
 permissions_app = typer.Typer(help="Manage BabyAI capabilities")
+task_app = typer.Typer(help="Manage the current working task")
 app.add_typer(permissions_app, name="permissions")
+app.add_typer(task_app, name="task")
 
 
 def build_provider(config: BabyAIConfig) -> LLMProvider:
@@ -30,6 +33,10 @@ def permission_store() -> PermissionStore:
     return PermissionStore(BabyAIConfig.default().permissions_file)
 
 
+def working_memory_store() -> WorkingMemoryStore:
+    return WorkingMemoryStore(BabyAIConfig.default().working_memory_file)
+
+
 def build_core(owner: str | None = None) -> Primus:
     config = BabyAIConfig.default()
     identity_store = IdentityStore(config.identity_file)
@@ -44,6 +51,7 @@ def build_core(owner: str | None = None) -> Primus:
         identity=identity,
         agent=AgentExecutor(permissions),
         planner=Planner(),
+        working_memory=WorkingMemoryStore(config.working_memory_file),
     )
 
 
@@ -87,6 +95,7 @@ def doctor() -> None:
     typer.echo(f"model={config.model}")
     typer.echo(f"memory={config.memory_db}")
     typer.echo(f"permissions={config.permissions_file}")
+    typer.echo(f"working_memory={config.working_memory_file}")
     if config.provider == "echo":
         typer.echo("brain=ok (echo diagnostics provider)")
         return
@@ -97,6 +106,59 @@ def doctor() -> None:
         typer.echo(f"brain=unavailable ({exc})", err=True)
         raise typer.Exit(code=2) from exc
     typer.echo("brain=ok")
+
+
+@task_app.command("set")
+def task_set(
+    goal: str,
+    summary: str = typer.Option("", help="Short working context for the task."),
+) -> None:
+    """Create or replace the current working task."""
+    working_memory_store().save(TaskState(goal=goal, summary=summary))
+    typer.echo("task=active")
+
+
+@task_app.command("show")
+def task_show() -> None:
+    """Show the current working task."""
+    state = working_memory_store().load()
+    if state is None:
+        typer.echo("task=none")
+        return
+    typer.echo(state.as_context())
+
+
+@task_app.command("status")
+def task_status(status: TaskStatus) -> None:
+    """Change the current task status."""
+    store = working_memory_store()
+    state = store.load()
+    if state is None:
+        typer.echo("No current task.", err=True)
+        raise typer.Exit(code=4)
+    state.status = status
+    store.save(state)
+    typer.echo(f"task={status.value}")
+
+
+@task_app.command("summary")
+def task_summary(summary: str) -> None:
+    """Replace the current task's short working summary."""
+    store = working_memory_store()
+    state = store.load()
+    if state is None:
+        typer.echo("No current task.", err=True)
+        raise typer.Exit(code=4)
+    state.summary = summary
+    store.save(state)
+    typer.echo("task_summary=updated")
+
+
+@task_app.command("clear")
+def task_clear() -> None:
+    """Clear the current working task."""
+    working_memory_store().clear()
+    typer.echo("task=none")
 
 
 @permissions_app.command("list")
