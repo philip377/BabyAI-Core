@@ -1,0 +1,19 @@
+[project]
+name = "babyai-core"
+version = "0.1.0"
+description = "Portable personal AI core engine"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.8", "typer>=0.12"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2"]
+
+[project.scripts]
+babyai = "babyai.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
