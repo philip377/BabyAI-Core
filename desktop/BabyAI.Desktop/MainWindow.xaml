@@ -17,6 +17,9 @@
                 HorizontalAlignment="Center"
                 VerticalAlignment="Top"
                 Click="OrbButton_Click"
+                PointerPressed="OrbButton_PointerPressed"
+                PointerMoved="OrbButton_PointerMoved"
+                PointerReleased="OrbButton_PointerReleased"
                 Padding="0"
                 BorderThickness="1">
             <Grid>
@@ -49,7 +52,13 @@
                 Background="#A8171B27"
                 BorderBrush="#42FFFFFF"
                 BorderThickness="1"
+                Opacity="0"
                 Visibility="Collapsed">
+            <Border.Transitions>
+                <TransitionCollection>
+                    <RepositionThemeTransition />
+                </TransitionCollection>
+            </Border.Transitions>
             <Grid Padding="20" RowSpacing="12">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
