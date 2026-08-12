@@ -5,6 +5,8 @@ namespace BabyAI.Desktop;
 
 public sealed class BabyAIBridgeClient
 {
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(3);
+
     public async Task<DesktopStatus> StatusAsync()
     {
         var json = await ExecuteAsync("status", "{}");
@@ -25,10 +27,10 @@ public sealed class BabyAIBridgeClient
             requiresApproval);
     }
 
-    public async Task<string> ChatAsync(string message)
+    public async Task<string> ChatAsync(string message, CancellationToken cancellationToken = default)
     {
         var payload = JsonSerializer.Serialize(new { message });
-        var json = await ExecuteAsync("chat", payload);
+        var json = await ExecuteAsync("chat", payload, cancellationToken);
         using var document = JsonDocument.Parse(json);
         return document.RootElement.GetProperty("reply").GetString() ?? string.Empty;
     }
@@ -37,7 +39,10 @@ public sealed class BabyAIBridgeClient
 
     public Task RejectLessonAsync() => ExecuteAsync("lesson.reject", "{}");
 
-    private static async Task<string> ExecuteAsync(string command, string payload)
+    private static async Task<string> ExecuteAsync(
+        string command,
+        string payload,
+        CancellationToken cancellationToken = default)
     {
         var python = Environment.GetEnvironmentVariable("BABYAI_PYTHON");
         if (string.IsNullOrWhiteSpace(python))
@@ -70,10 +75,34 @@ public sealed class BabyAIBridgeClient
         }
 
         using (process ?? throw new InvalidOperationException("Could not start BabyAI Python bridge."))
+        using (var timeout = new CancellationTokenSource(RequestTimeout))
+        using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token))
         {
             var stdoutTask = process.StandardOutput.ReadToEndAsync();
             var stderrTask = process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
+
+            try
+            {
+                await process.WaitForExitAsync(linked.Token);
+            }
+            catch (OperationCanceledException) when (linked.IsCancellationRequested)
+            {
+                TryKill(process);
+                try
+                {
+                    await process.WaitForExitAsync();
+                }
+                catch
+                {
+                    // The process is already being torn down; preserve the cancellation result.
+                }
+
+                if (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                    throw new TimeoutException("BabyAI response timed out after 3 minutes.");
+
+                throw;
+            }
+
             var stdout = await stdoutTask;
             var stderr = await stderrTask;
 
@@ -81,6 +110,19 @@ public sealed class BabyAIBridgeClient
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "BabyAI bridge failed." : stderr.Trim());
 
             return stdout.Trim();
+        }
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            // Best effort: cancellation still returns control to the desktop UI.
         }
     }
 }

@@ -63,7 +63,7 @@
                     <RepositionThemeTransition />
                 </TransitionCollection>
             </Border.Transitions>
-            <Grid Padding="20" RowSpacing="12">
+            <Grid Padding="20" RowSpacing="10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -75,30 +75,44 @@
                 <StackPanel Grid.Row="0" Spacing="2">
                     <TextBlock x:Name="IdentityText" Text="BabyAI" FontSize="20" FontWeight="SemiBold" />
                     <TextBlock x:Name="TaskText" Text="No active task" Opacity="0.65" TextWrapping="Wrap" />
-                    <TextBlock x:Name="CoreStatusText" Text="Core: not checked" FontSize="12" Opacity="0.5" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <TextBlock x:Name="CoreStatusText" Text="Core: not checked" FontSize="12" Opacity="0.5" />
+                        <TextBlock x:Name="RuntimeText" Text="Runtime: unknown" FontSize="12" Opacity="0.5" />
+                    </StackPanel>
                 </StackPanel>
 
-                <Border Grid.Row="1" Background="#22FFFFFF" CornerRadius="16" Padding="12">
-                    <Grid RowSpacing="8">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <TextBlock x:Name="ReplyText" Grid.Row="0" Text="Ready." TextWrapping="Wrap" />
+                <Border Grid.Row="1" Background="#22FFFFFF" CornerRadius="14" Padding="10">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ReplyText" Grid.Column="0" Text="Ready." TextWrapping="Wrap" FontSize="12" />
                         <Button x:Name="RetryButton"
-                                Grid.Row="1"
+                                Grid.Column="1"
                                 Content="Retry Core"
-                                HorizontalAlignment="Left"
                                 Click="RetryButton_Click"
                                 Visibility="Collapsed" />
                     </Grid>
+                </Border>
+
+                <Border Grid.Row="2" Background="#16FFFFFF" CornerRadius="16" Padding="12">
+                    <ScrollViewer x:Name="ConversationScroller"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <TextBlock x:Name="ConversationText"
+                                   Text="Чат готов. Напиши первое сообщение ниже."
+                                   TextWrapping="Wrap"
+                                   IsTextSelectionEnabled="True" />
+                    </ScrollViewer>
                 </Border>
 
                 <TextBox x:Name="MessageBox"
                          Grid.Row="3"
                          PlaceholderText="Напиши BabyAI..."
                          AcceptsReturn="True"
-                         MinHeight="72"
+                         MinHeight="62"
+                         MaxHeight="92"
                          TextWrapping="Wrap" />
 
                 <Grid Grid.Row="4" ColumnSpacing="8">
@@ -106,10 +120,12 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button x:Name="SendButton" Grid.Column="0" Content="Send" Click="SendButton_Click" />
-                    <Button x:Name="ApproveButton" Grid.Column="1" Content="Approve" Click="ApproveButton_Click" Visibility="Collapsed" />
-                    <Button x:Name="RejectButton" Grid.Column="2" Content="Reject" Click="RejectButton_Click" Visibility="Collapsed" />
+                    <Button x:Name="StopButton" Grid.Column="1" Content="Stop" Click="StopButton_Click" Visibility="Collapsed" />
+                    <Button x:Name="ApproveButton" Grid.Column="2" Content="Approve" Click="ApproveButton_Click" Visibility="Collapsed" />
+                    <Button x:Name="RejectButton" Grid.Column="3" Content="Reject" Click="RejectButton_Click" Visibility="Collapsed" />
                 </Grid>
             </Grid>
         </Border>

@@ -16,7 +16,9 @@ public sealed partial class MainWindow : Window
     private readonly BabyAIBridgeClient _bridge = new();
     private readonly DesktopSettingsStore _settings = new();
     private readonly TrayIconService _tray;
+    private readonly List<string> _conversation = [];
     private Storyboard? _orbStoryboard;
+    private CancellationTokenSource? _chatCancellation;
     private OrbState _state = OrbState.Idle;
     private bool _expanded;
     private bool _dragging;
@@ -31,6 +33,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         Title = "BabyAI";
         SystemBackdrop = new DesktopAcrylicBackdrop();
+        RuntimeText.Text = BuildRuntimeLabel();
         ConfigureWindow();
         RestoreWindowPosition();
         ApplyState(OrbState.Idle);
@@ -80,6 +83,7 @@ public sealed partial class MainWindow : Window
     public void RequestExit()
     {
         _exitRequested = true;
+        _chatCancellation?.Cancel();
         _tray.Dispose();
         Close();
     }
@@ -162,6 +166,7 @@ public sealed partial class MainWindow : Window
         IdentityText.Text = status.Name;
         TaskText.Text = string.IsNullOrWhiteSpace(status.TaskGoal) ? "No active task" : status.TaskGoal;
         CoreStatusText.Text = "Core: connected";
+        RuntimeText.Text = BuildRuntimeLabel();
         RetryButton.Visibility = Visibility.Collapsed;
         ApproveButton.Visibility = status.RequiresApproval ? Visibility.Visible : Visibility.Collapsed;
         RejectButton.Visibility = status.RequiresApproval ? Visibility.Visible : Visibility.Collapsed;
@@ -177,17 +182,29 @@ public sealed partial class MainWindow : Window
         if (message.Length == 0)
             return;
 
+        _chatCancellation?.Dispose();
+        _chatCancellation = new CancellationTokenSource();
+        AppendConversation("You", message);
+        MessageBox.Text = string.Empty;
+
         try
         {
-            SetBusy(true);
+            SetBusy(true, canStop: true);
             ApplyState(OrbState.Thinking);
             CoreStatusText.Text = "Core: thinking";
             RetryButton.Visibility = Visibility.Collapsed;
             ReplyText.Text = "Thinking…";
-            var reply = await _bridge.ChatAsync(message);
-            ReplyText.Text = reply;
-            MessageBox.Text = string.Empty;
+            var reply = await _bridge.ChatAsync(message, _chatCancellation.Token);
+            ReplyText.Text = "Response complete.";
+            AppendConversation("BabyAI", reply);
             await RefreshStatusAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            CoreStatusText.Text = "Core: connected";
+            ReplyText.Text = "Generation stopped.";
+            AppendConversation("System", "Generation stopped by user.");
+            ApplyState(OrbState.Idle);
         }
         catch (Exception ex)
         {
@@ -195,8 +212,21 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            _chatCancellation?.Dispose();
+            _chatCancellation = null;
             SetBusy(false);
         }
+    }
+
+    private void StopButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_chatCancellation is null || _chatCancellation.IsCancellationRequested)
+            return;
+
+        CoreStatusText.Text = "Core: stopping";
+        ReplyText.Text = "Stopping generation…";
+        StopButton.IsEnabled = false;
+        _chatCancellation.Cancel();
     }
 
     private async void RetryButton_Click(object sender, RoutedEventArgs e)
@@ -268,7 +298,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void SetBusy(bool busy)
+    private void SetBusy(bool busy, bool canStop = false)
     {
         _busy = busy;
         SendButton.IsEnabled = !busy;
@@ -276,6 +306,39 @@ public sealed partial class MainWindow : Window
         ApproveButton.IsEnabled = !busy;
         RejectButton.IsEnabled = !busy;
         MessageBox.IsEnabled = !busy;
+        StopButton.Visibility = busy && canStop ? Visibility.Visible : Visibility.Collapsed;
+        StopButton.IsEnabled = busy && canStop;
+    }
+
+    private void AppendConversation(string speaker, string text)
+    {
+        text = text.Trim();
+        if (text.Length == 0)
+            return;
+
+        _conversation.Add($"{speaker}: {text}");
+        if (_conversation.Count > 24)
+            _conversation.RemoveAt(0);
+
+        ConversationText.Text = string.Join("\n\n", _conversation);
+        ConversationScroller.UpdateLayout();
+        ConversationScroller.ChangeView(null, ConversationScroller.ScrollableHeight, null);
+    }
+
+    private static string BuildRuntimeLabel()
+    {
+        var provider = Environment.GetEnvironmentVariable("BABYAI_PROVIDER");
+        if (string.IsNullOrWhiteSpace(provider))
+            provider = "ollama";
+
+        if (provider.Equals("echo", StringComparison.OrdinalIgnoreCase))
+            return "Runtime: echo";
+
+        var model = Environment.GetEnvironmentVariable("BABYAI_MODEL");
+        if (string.IsNullOrWhiteSpace(model))
+            model = "qwen3:8b";
+
+        return $"Runtime: {provider} · {model}";
     }
 
     private void ShowBridgeError(Exception exception)
@@ -290,6 +353,9 @@ public sealed partial class MainWindow : Window
     {
         var raw = exception.Message.Trim();
         var lower = raw.ToLowerInvariant();
+
+        if (exception is TimeoutException || lower.Contains("timed out"))
+            return "Ответ BabyAI занял слишком много времени. Проверь Ollama/модель и попробуй снова.";
 
         if (lower.Contains("no module named") || lower.Contains("babyai core is not installed"))
             return "BabyAI Core не найден. Запусти scripts\\windows\\start.ps1 или bootstrap.ps1, затем нажми Retry Core.";
