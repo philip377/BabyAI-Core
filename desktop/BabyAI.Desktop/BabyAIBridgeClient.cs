@@ -11,11 +11,18 @@ public sealed class BabyAIBridgeClient
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
         var snapshot = root.GetProperty("snapshot");
+        var identity = snapshot.GetProperty("identity");
         var learning = snapshot.GetProperty("learning");
+        var task = snapshot.TryGetProperty("task", out var taskElement) && taskElement.ValueKind != JsonValueKind.Null
+            ? taskElement.GetProperty("goal").GetString()
+            : null;
         var requiresApproval = learning.TryGetProperty("lesson", out var lesson)
             && lesson.ValueKind != JsonValueKind.Null;
 
-        return new DesktopStatus(requiresApproval);
+        return new DesktopStatus(
+            identity.GetProperty("name").GetString() ?? "BabyAI",
+            task,
+            requiresApproval);
     }
 
     public async Task<string> ChatAsync(string message)
@@ -25,6 +32,10 @@ public sealed class BabyAIBridgeClient
         using var document = JsonDocument.Parse(json);
         return document.RootElement.GetProperty("reply").GetString() ?? string.Empty;
     }
+
+    public Task ApproveLessonAsync() => ExecuteAsync("lesson.approve", "{}");
+
+    public Task RejectLessonAsync() => ExecuteAsync("lesson.reject", "{}");
 
     private static async Task<string> ExecuteAsync(string command, string payload)
     {
@@ -56,4 +67,4 @@ public sealed class BabyAIBridgeClient
     }
 }
 
-public sealed record DesktopStatus(bool RequiresApproval);
+public sealed record DesktopStatus(string Name, string? TaskGoal, bool RequiresApproval);
