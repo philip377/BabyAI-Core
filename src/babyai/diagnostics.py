@@ -64,7 +64,7 @@ def run_local_diagnostics(config: BabyAIConfig) -> DiagnosticReport:
 
     try:
         permissions = PermissionStore(config.permissions_file)
-        granted = [cap.value for cap in permissions.granted()]
+        granted = [cap.value for cap in permissions.list()]
         detail = "none granted" if not granted else f"granted={','.join(granted)}"
         checks.append(DiagnosticCheck("permissions", True, detail))
     except (OSError, ValueError) as exc:
