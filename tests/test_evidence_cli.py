@@ -30,7 +30,7 @@ def test_assess_requires_hypothesis(monkeypatch, tmp_path) -> None:
     EvidenceStore(BabyAIConfig.default().evidence_file).add("Observation")
     result = runner.invoke(app, ["assess"])
     assert result.exit_code == 6
-    assert "No stored hypothesis" in result.stdout
+    assert "No stored hypothesis" in result.stderr
 
 
 def test_assess_with_echo_fails_safely_without_mutating_hypothesis(monkeypatch, tmp_path) -> None:
