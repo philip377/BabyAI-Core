@@ -22,6 +22,7 @@ public sealed partial class MainWindow : Window
     private bool _dragging;
     private bool _dragMoved;
     private bool _exitRequested;
+    private bool _busy;
     private Point _dragOrigin;
     private PointInt32 _windowOrigin;
 
@@ -103,12 +104,16 @@ public sealed partial class MainWindow : Window
 
             await ExpandPanelAsync();
             ApplyState(OrbState.Thinking);
+            SetBusy(true);
             await RefreshStatusAsync();
         }
         catch (Exception ex)
         {
-            ReplyText.Text = ex.Message;
-            ApplyState(OrbState.Error);
+            ShowBridgeError(ex);
+        }
+        finally
+        {
+            SetBusy(false);
         }
     }
 
@@ -156,6 +161,8 @@ public sealed partial class MainWindow : Window
         var status = await _bridge.StatusAsync();
         IdentityText.Text = status.Name;
         TaskText.Text = string.IsNullOrWhiteSpace(status.TaskGoal) ? "No active task" : status.TaskGoal;
+        CoreStatusText.Text = "Core: connected";
+        RetryButton.Visibility = Visibility.Collapsed;
         ApproveButton.Visibility = status.RequiresApproval ? Visibility.Visible : Visibility.Collapsed;
         RejectButton.Visibility = status.RequiresApproval ? Visibility.Visible : Visibility.Collapsed;
         ApplyState(status.RequiresApproval ? OrbState.Approval : OrbState.Idle);
@@ -163,13 +170,19 @@ public sealed partial class MainWindow : Window
 
     private async void SendButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy)
+            return;
+
         var message = MessageBox.Text.Trim();
         if (message.Length == 0)
             return;
 
         try
         {
+            SetBusy(true);
             ApplyState(OrbState.Thinking);
+            CoreStatusText.Text = "Core: thinking";
+            RetryButton.Visibility = Visibility.Collapsed;
             ReplyText.Text = "Thinking…";
             var reply = await _bridge.ChatAsync(message);
             ReplyText.Text = reply;
@@ -178,39 +191,121 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            ReplyText.Text = ex.Message;
-            ApplyState(OrbState.Error);
+            ShowBridgeError(ex);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private async void RetryButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+            return;
+
+        try
+        {
+            SetBusy(true);
+            ApplyState(OrbState.Thinking);
+            CoreStatusText.Text = "Core: checking";
+            ReplyText.Text = "Checking BabyAI Core…";
+            RetryButton.Visibility = Visibility.Collapsed;
+            await RefreshStatusAsync();
+            ReplyText.Text = "Core connection restored.";
+        }
+        catch (Exception ex)
+        {
+            ShowBridgeError(ex);
+        }
+        finally
+        {
+            SetBusy(false);
         }
     }
 
     private async void ApproveButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy)
+            return;
+
         try
         {
+            SetBusy(true);
             await _bridge.ApproveLessonAsync();
             ReplyText.Text = "Lesson approved and saved to MEMORIA.";
             await RefreshStatusAsync();
         }
         catch (Exception ex)
         {
-            ReplyText.Text = ex.Message;
-            ApplyState(OrbState.Error);
+            ShowBridgeError(ex);
+        }
+        finally
+        {
+            SetBusy(false);
         }
     }
 
     private async void RejectButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy)
+            return;
+
         try
         {
+            SetBusy(true);
             await _bridge.RejectLessonAsync();
             ReplyText.Text = "Lesson rejected.";
             await RefreshStatusAsync();
         }
         catch (Exception ex)
         {
-            ReplyText.Text = ex.Message;
-            ApplyState(OrbState.Error);
+            ShowBridgeError(ex);
         }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private void SetBusy(bool busy)
+    {
+        _busy = busy;
+        SendButton.IsEnabled = !busy;
+        RetryButton.IsEnabled = !busy;
+        ApproveButton.IsEnabled = !busy;
+        RejectButton.IsEnabled = !busy;
+        MessageBox.IsEnabled = !busy;
+    }
+
+    private void ShowBridgeError(Exception exception)
+    {
+        CoreStatusText.Text = "Core: unavailable";
+        ReplyText.Text = FriendlyBridgeError(exception);
+        RetryButton.Visibility = Visibility.Visible;
+        ApplyState(OrbState.Error);
+    }
+
+    private static string FriendlyBridgeError(Exception exception)
+    {
+        var raw = exception.Message.Trim();
+        var lower = raw.ToLowerInvariant();
+
+        if (lower.Contains("no module named") || lower.Contains("babyai core is not installed"))
+            return "BabyAI Core не найден. Запусти scripts\\windows\\start.ps1 или bootstrap.ps1, затем нажми Retry Core.";
+
+        if (lower.Contains("could not start") && lower.Contains("python"))
+            return "Python не удалось запустить. Проверь Python 3.11+ и снова запусти scripts\\windows\\start.ps1.";
+
+        if (lower.Contains("ollama") || lower.Contains("11434") || lower.Contains("connection refused") || lower.Contains("actively refused"))
+            return "Ollama недоступна. Запусти Ollama либо стартуй BabyAI с -Provider echo, затем нажми Retry Core.";
+
+        if (raw.Length > 360)
+            raw = raw[..360] + "…";
+
+        return string.IsNullOrWhiteSpace(raw)
+            ? "BabyAI Core недоступен. Запусти scripts\\windows\\start.ps1 и нажми Retry Core."
+            : $"BabyAI Core недоступен: {raw}";
     }
 
     private async Task ExpandPanelAsync()
