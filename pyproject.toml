@@ -14,6 +14,7 @@ babyai-evidence = "babyai.evidence_cli:app"
 babyai-learn = "babyai.learn_cli:app"
 babyai-curiosa = "babyai.curiosa_cli:app"
 babyai-loop = "babyai.learning_loop_cli:app"
+babyai-setup = "babyai.setup_cli:app"
 
 [build-system]
 requires = ["hatchling"]
