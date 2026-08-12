@@ -17,3 +17,7 @@ class BabyAIConfig:
     @property
     def memory_db(self) -> Path:
         return self.data_dir / "memory.sqlite3"
+
+    @property
+    def identity_file(self) -> Path:
+        return self.data_dir / "identity.json"
