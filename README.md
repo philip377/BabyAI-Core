@@ -25,24 +25,32 @@ Genesis is the first MVP milestone. It includes:
 
 Requirements: Windows 10/11 x64, Python 3.11+ and the .NET 10 SDK. Ollama is optional for the first UI smoke test.
 
-From PowerShell in the repository root, first run the zero-dependency echo mode:
+From PowerShell in the repository root, the simplest first run is now one command:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\bootstrap.ps1 -Provider echo
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\run.ps1 -Provider echo
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start.ps1 -Provider echo
 ```
+
+`start.ps1` checks whether Core and the runnable Orb already exist. On the first run (or after a broken/incomplete setup) it automatically runs bootstrap; on later runs it launches the existing executable directly. The first build can take noticeably longer because .NET restores and builds the self-contained WinUI application.
 
 This should open the BabyAI Orb. Click the Orb to expand the Acrylic chat panel. Echo mode is only for verifying that the full Windows application, bridge, state initialization and UI work on your machine.
 
 For the real local AI brain, install Ollama and then run:
 
 ```powershell
-ollama pull qwen3:8b
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\bootstrap.ps1 -Provider ollama
-powershell -ExecutionPolicy Bypass -File .\scripts\windows\run.ps1 -Provider ollama
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\start.ps1 -Provider ollama
 ```
 
-The bootstrap script installs BabyAI Core in editable mode, initializes local state, runs diagnostics, verifies the desktop command bridge and compiles the WinUI client before telling you it is ready.
+If `qwen3:8b` is missing, bootstrap pulls it automatically. The Orb reports whether Core is connected and exposes `Retry Core` if Python/Core/Ollama temporarily becomes unavailable.
+
+For troubleshooting or manual control, the two underlying steps remain available:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\bootstrap.ps1 -Provider echo
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\run.ps1 -Provider echo
+```
+
+The bootstrap script installs BabyAI Core in editable mode, initializes local state, runs diagnostics, verifies the desktop command bridge and builds the self-contained WinUI client. The run script reuses the built `BabyAI.Desktop.exe` rather than rebuilding on every launch.
 
 BabyAI state lives in `~/.babyai`. Desktop window position is stored separately under `%LocalAppData%\BabyAI`. Initialization grants no system capabilities.
 

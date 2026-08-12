@@ -25,6 +25,20 @@ def test_windows_scripts_build_and_reuse_release_executable() -> None:
     assert "Start-Process -FilePath $desktopExe.FullName" in run
 
 
+def test_windows_start_bootstraps_only_when_needed_then_runs() -> None:
+    root = Path(__file__).resolve().parents[1]
+    start = (root / "scripts" / "windows" / "start.ps1").read_text(encoding="utf-8")
+
+    assert 'Join-Path $PSScriptRoot "bootstrap.ps1"' in start
+    assert 'Join-Path $PSScriptRoot "run.ps1"' in start
+    assert '-c "import babyai"' in start
+    assert 'Filter "BabyAI.Desktop.exe"' in start
+    assert "& $bootstrap -Provider $Provider" in start
+    assert "& $run -Provider $Provider" in start
+    assert "babyai-desktop" not in start
+    assert "babyai-setup" not in start
+
+
 def test_windows_desktop_bundles_windows_app_sdk_runtime() -> None:
     root = Path(__file__).resolve().parents[1]
     project = (root / "desktop" / "BabyAI.Desktop" / "BabyAI.Desktop.csproj").read_text(encoding="utf-8")
