@@ -1,28 +1,65 @@
 # BabyAI Core Engine
 
-Portable personal AI core that learns with its owner, remembers context, develops skills, and safely connects to devices and external systems.
+BabyAI Core is a local-first personal AI engine that keeps its identity and state on your machine, learns only through explicit approval, and uses system capabilities through deny-by-default permissions.
 
-## Current capabilities
+## v0.1.0 Genesis
 
-- PRIMUS orchestration loop
+Genesis is the first MVP milestone. It includes:
+
+- PRIMUS orchestration and one-step agent loop
 - MEMORIA typed persistent memory on SQLite
-- persistent identity
-- local Ollama brain (default model: `qwen3:8b`)
-- OBSERVER system snapshot
-- capability-based permission store (deny by default)
-- permissioned read-only filesystem tools
-- diagnostics and CLI smoke tests
+- persistent identity and bounded prompt context
+- local Ollama brain (default: `qwen3:8b`)
+- Planner v1 and Working Memory task state
+- COGNITION proposal-only task updates
+- HYPOTHESIS + Evidence reasoning flow
+- CURIOSA explicit uncertainty questions
+- AUTODIDACT lesson proposals with explicit approval before durable learning
+- Learning Loop status and next-step guidance
+- OBSERVER plus permissioned read-only filesystem tools
+- capability permissions with deny-by-default behavior
+- setup diagnostics and end-to-end cognitive smoke coverage
 
 ## Quick start
+
+Requirements: Python 3.11+ and Ollama for the default local provider.
 
 ```bash
 python -m pip install -e ".[dev]"
 ollama pull qwen3:8b
-babyai doctor
+babyai-setup init
+babyai-setup doctor
 babyai chat
 ```
 
-BabyAI state lives in `~/.babyai` by default.
+BabyAI state lives in `~/.babyai` by default. Initialization creates local state only and grants no system capabilities.
+
+For diagnostics without Ollama, use the echo provider:
+
+```bash
+BABYAI_PROVIDER=echo babyai-setup doctor
+```
+
+## Core workflow
+
+Set a task and inspect the controlled learning loop:
+
+```bash
+babyai task set "Understand a problem"
+babyai hypothesis propose "What explanation should we test?"
+babyai-evidence add "An explicit observation"
+babyai-evidence assess
+babyai-loop status
+```
+
+When evidence is insufficient, CURIOSA can propose one missing question. When a durable lesson is available, AUTODIDACT can propose it, but MEMORIA is changed only after explicit approval:
+
+```bash
+babyai-curiosa propose "Current task, hypothesis and evidence context"
+babyai-learn propose "Verified learning context"
+babyai-learn show
+babyai-learn approve
+```
 
 ## Permissions
 
@@ -57,12 +94,15 @@ Environment variables:
 
 ## Protocol roadmap
 
-PRIMUS · MEMORIA · AUTODIDACT · CURIOSA · HYPOTHESIS · METAMORPHOSIS · LINGUA · TEMPUS · COGNITION · OBSERVER · PHANTOM · EVOLUTIO · CURA
+Implemented foundations: PRIMUS · MEMORIA · AUTODIDACT · CURIOSA · HYPOTHESIS · COGNITION · OBSERVER.
+
+Future protocol work: METAMORPHOSIS · LINGUA · TEMPUS · PHANTOM · EVOLUTIO · CURA.
 
 ## Principles
 
 - Local-first
 - Portable state
 - Explicit permissions
+- Human-approved durable learning
 - Modular providers
-- Safe self-improvement through evaluation before promotion
+- Small, testable capability increments
