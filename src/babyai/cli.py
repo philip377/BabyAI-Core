@@ -7,6 +7,7 @@ from .llm import EchoProvider, LLMError, LLMProvider, OllamaProvider
 from .memory import MemoryKind, SQLiteMemoryStore
 from .observer import Observer
 from .permissions import Capability, PermissionStore
+from .planner import Planner
 from .primus import Primus
 from .tools import Toolset
 
@@ -42,6 +43,7 @@ def build_core(owner: str | None = None) -> Primus:
         memory=memory,
         identity=identity,
         agent=AgentExecutor(permissions),
+        planner=Planner(),
     )
 
 
