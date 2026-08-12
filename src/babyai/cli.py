@@ -10,10 +10,13 @@ from .permissions import Capability, PermissionStore
 from .planner import Planner
 from .primus import Primus
 from .tools import Toolset
+from .working_memory import TaskState, WorkingMemoryStore
 
 app = typer.Typer(help="BabyAI Core Engine")
 permissions_app = typer.Typer(help="Manage BabyAI capabilities")
+task_app = typer.Typer(help="Manage BabyAI working task state")
 app.add_typer(permissions_app, name="permissions")
+app.add_typer(task_app, name="task")
 
 
 def build_provider(config: BabyAIConfig) -> LLMProvider:
@@ -30,6 +33,10 @@ def permission_store() -> PermissionStore:
     return PermissionStore(BabyAIConfig.default().permissions_file)
 
 
+def working_memory_store() -> WorkingMemoryStore:
+    return WorkingMemoryStore(BabyAIConfig.default().working_memory_file)
+
+
 def build_core(owner: str | None = None) -> Primus:
     config = BabyAIConfig.default()
     identity_store = IdentityStore(config.identity_file)
@@ -44,6 +51,7 @@ def build_core(owner: str | None = None) -> Primus:
         identity=identity,
         agent=AgentExecutor(permissions),
         planner=Planner(),
+        working_memory=WorkingMemoryStore(config.working_memory_file),
     )
 
 
@@ -60,17 +68,12 @@ def chat(
     message: str | None = typer.Argument(default=None),
     owner: str | None = typer.Option(None, help="Owner name used when identity is first created."),
 ) -> None:
-    """Send one message, or start an interactive session when MESSAGE is omitted."""
     core = build_core(owner)
     if message is not None:
         typer.echo(ask(core, message))
         return
-
     config = BabyAIConfig.default()
-    typer.echo(
-        f"{core.identity.name} {core.identity.version} | brain={config.provider}:{config.model}. "
-        "Type /exit to leave."
-    )
+    typer.echo(f"{core.identity.name} {core.identity.version} | brain={config.provider}:{config.model}. Type /exit to leave.")
     while True:
         user_input = typer.prompt("you")
         if user_input.strip().lower() in {"/exit", "/quit"}:
@@ -80,12 +83,12 @@ def chat(
 
 @app.command()
 def doctor() -> None:
-    """Show local BabyAI configuration and test the configured brain."""
     config = BabyAIConfig.default()
     typer.echo(f"data_dir={config.data_dir}")
     typer.echo(f"provider={config.provider}")
     typer.echo(f"model={config.model}")
     typer.echo(f"memory={config.memory_db}")
+    typer.echo(f"working_memory={config.working_memory_file}")
     typer.echo(f"permissions={config.permissions_file}")
     if config.provider == "echo":
         typer.echo("brain=ok (echo diagnostics provider)")
@@ -99,9 +102,30 @@ def doctor() -> None:
     typer.echo("brain=ok")
 
 
+@task_app.command("set")
+def task_set(
+    goal: str,
+    status: str = typer.Option("active"),
+    context: str = typer.Option(""),
+) -> None:
+    task = working_memory_store().save(TaskState(goal=goal, status=status, context=context))
+    typer.echo(task.as_context())
+
+
+@task_app.command("show")
+def task_show() -> None:
+    task = working_memory_store().load()
+    typer.echo(task.as_context() if task else "No active task.")
+
+
+@task_app.command("clear")
+def task_clear() -> None:
+    working_memory_store().clear()
+    typer.echo("Task cleared.")
+
+
 @permissions_app.command("list")
 def permissions_list() -> None:
-    """List all capabilities and whether they are granted."""
     store = permission_store()
     for capability in Capability:
         state = "granted" if store.is_granted(capability) else "denied"
@@ -110,21 +134,18 @@ def permissions_list() -> None:
 
 @permissions_app.command("grant")
 def permissions_grant(capability: Capability) -> None:
-    """Explicitly grant one capability."""
     permission_store().grant(capability)
     typer.echo(f"granted {capability.value}")
 
 
 @permissions_app.command("revoke")
 def permissions_revoke(capability: Capability) -> None:
-    """Revoke one capability."""
     permission_store().revoke(capability)
     typer.echo(f"revoked {capability.value}")
 
 
 @app.command()
 def observe() -> None:
-    """Capture a permissioned system snapshot."""
     try:
         snapshot = Observer(permission_store()).system_snapshot()
     except PermissionError as exc:
@@ -135,7 +156,6 @@ def observe() -> None:
 
 @app.command("ls")
 def list_directory(path: str = ".") -> None:
-    """List a directory through the permissioned tool layer."""
     try:
         for item in Toolset(permission_store()).list_directory(path):
             typer.echo(item)
@@ -146,7 +166,6 @@ def list_directory(path: str = ".") -> None:
 
 @app.command("cat")
 def read_file(path: str) -> None:
-    """Read a text file through the permissioned tool layer."""
     try:
         typer.echo(Toolset(permission_store()).read_text(path))
     except (PermissionError, OSError, ValueError) as exc:
@@ -155,24 +174,18 @@ def read_file(path: str) -> None:
 
 
 @app.command()
-def remember(
-    text: str,
-    kind: MemoryKind = typer.Option(MemoryKind.FACT, help="Memory type."),
-) -> None:
-    """Store an explicit durable memory."""
+def remember(text: str, kind: MemoryKind = typer.Option(MemoryKind.FACT)) -> None:
     config = BabyAIConfig.default()
-    memory = SQLiteMemoryStore(config.memory_db)
-    record = memory.add("owner", text, kind=kind)
+    record = SQLiteMemoryStore(config.memory_db).add("owner", text, kind=kind)
     typer.echo(f"remembered #{record.id} [{record.kind.value}]")
 
 
 @app.command()
 def memories(
     query: str | None = typer.Argument(default=None),
-    kind: MemoryKind | None = typer.Option(None, help="Filter by memory type."),
+    kind: MemoryKind | None = typer.Option(None),
     limit: int = typer.Option(20, min=1, max=200),
 ) -> None:
-    """Inspect recent memories or search them by text."""
     config = BabyAIConfig.default()
     memory = SQLiteMemoryStore(config.memory_db)
     records = memory.search(query, limit=limit, kind=kind) if query else memory.recent(limit=limit, kind=kind)
@@ -182,14 +195,9 @@ def memories(
 
 @app.command()
 def identity() -> None:
-    """Show the persisted BabyAI identity."""
     config = BabyAIConfig.default()
-    stored = IdentityStore(config.identity_file).load_or_create(
-        Identity(name=config.name, owner=config.owner)
-    )
-    typer.echo(
-        f"name={stored.name}\nowner={stored.owner}\nversion={stored.version}\npurpose={stored.purpose}"
-    )
+    stored = IdentityStore(config.identity_file).load_or_create(Identity(name=config.name, owner=config.owner))
+    typer.echo(f"name={stored.name}\nowner={stored.owner}\nversion={stored.version}\npurpose={stored.purpose}")
 
 
 if __name__ == "__main__":
