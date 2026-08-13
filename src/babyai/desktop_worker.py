@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import traceback
 from typing import TextIO
 
 from .desktop_commands import DesktopCommandError, DesktopCommands
@@ -68,6 +69,16 @@ def serve(
                     response = {"id": request_id, **command_surface.execute(command, payload)}
             except (json.JSONDecodeError, DesktopCommandError, ValueError) as exc:
                 response = {"id": request_id, "ok": False, "error": str(exc)}
+            except Exception as exc:
+                # One bad legacy state file or command must not kill the persistent
+                # desktop worker. Keep the JSONL protocol alive and preserve the full
+                # traceback on stderr for diagnostics.
+                traceback.print_exc(file=sys.stderr)
+                response = {
+                    "id": request_id,
+                    "ok": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
 
             output_stream.write(json.dumps(response, ensure_ascii=False) + "\n")
             output_stream.flush()
