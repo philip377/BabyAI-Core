@@ -10,10 +10,16 @@ $repo = Resolve-Path (Join-Path $PSScriptRoot "../..")
 Set-Location $repo
 $env:BABYAI_PROVIDER = $Provider
 if ($NativeModel) {
-    $env:BABYAI_NATIVE_MODEL = $NativeModel
+    if (-not (Test-Path -LiteralPath $NativeModel -PathType Leaf)) {
+        throw "Native GGUF model was not found: $NativeModel"
+    }
+    $env:BABYAI_NATIVE_MODEL = (Resolve-Path -LiteralPath $NativeModel).Path
 }
 if ($NativeRuntime) {
-    $env:BABYAI_NATIVE_RUNTIME = $NativeRuntime
+    if (-not (Test-Path -LiteralPath $NativeRuntime -PathType Leaf)) {
+        throw "BabyAI native runtime was not found: $NativeRuntime"
+    }
+    $env:BABYAI_NATIVE_RUNTIME = (Resolve-Path -LiteralPath $NativeRuntime).Path
 }
 
 $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
