@@ -11,6 +11,18 @@ if (NOT BABYAI_LLAMA_CPP_DIR)
     message(FATAL_ERROR "BABYAI_LLAMA_CPP_DIR must point to a llama.cpp checkout")
 endif()
 
+set(BABYAI_NATIVE_BACKEND "cpu" CACHE STRING "BabyAI native backend: cpu or vulkan")
+set_property(CACHE BABYAI_NATIVE_BACKEND PROPERTY STRINGS cpu vulkan)
+string(TOLOWER "${BABYAI_NATIVE_BACKEND}" BABYAI_NATIVE_BACKEND_NORMALIZED)
+
+if (BABYAI_NATIVE_BACKEND_NORMALIZED STREQUAL "vulkan")
+    set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+elseif (BABYAI_NATIVE_BACKEND_NORMALIZED STREQUAL "cpu")
+    set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+else()
+    message(FATAL_ERROR "BABYAI_NATIVE_BACKEND must be either cpu or vulkan")
+endif()
+
 # BabyAI owns the public DLL boundary. Keep llama.cpp/ggml static inside it so
 # callers only need babyai_native.dll and never bind upstream structs directly.
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -28,9 +40,16 @@ add_subdirectory("${BABYAI_LLAMA_CPP_DIR}" "${CMAKE_BINARY_DIR}/llama.cpp" EXCLU
 
 add_library(babyai_native SHARED
     src/babyai_native.cpp
+    src/babyai_native_backend.cpp
 )
 
 target_compile_definitions(babyai_native PRIVATE BABYAI_NATIVE_BUILD)
+if (BABYAI_NATIVE_BACKEND_NORMALIZED STREQUAL "vulkan")
+    target_compile_definitions(babyai_native PRIVATE BABYAI_NATIVE_BACKEND_VULKAN=1)
+else()
+    target_compile_definitions(babyai_native PRIVATE BABYAI_NATIVE_BACKEND_CPU=1)
+endif()
+
 target_include_directories(babyai_native
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
