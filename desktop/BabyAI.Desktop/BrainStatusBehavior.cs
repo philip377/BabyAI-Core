@@ -105,6 +105,7 @@ public static class BrainStatusBehavior
         {
             text.Text = "Brain: status unavailable · retrying automatically · click to recheck";
             ToolTipService.SetToolTip(text, Limit(ex.Message));
+            (Application.Current as App)?.MainWindow?.ApplyStartupFailureFromIndicator();
             StartRecovery(text);
         }
         finally

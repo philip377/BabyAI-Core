@@ -80,6 +80,11 @@
                         <TextBlock x:Name="CoreStatusText" Text="Core: not checked" FontSize="12" Opacity="0.5" />
                         <TextBlock x:Name="RuntimeText" Text="Runtime: unknown" FontSize="12" Opacity="0.5" />
                     </StackPanel>
+                    <TextBlock x:Name="StartupText"
+                               Text="Startup: checking Core / Ollama / model…"
+                               FontSize="12"
+                               Opacity="0.58"
+                               TextWrapping="Wrap" />
                     <TextBlock x:Name="BrainText"
                                Text="Brain: checking…"
                                FontSize="12"
