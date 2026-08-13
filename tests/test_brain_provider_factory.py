@@ -5,7 +5,7 @@ import pytest
 from babyai.brain import BrainProviderError, build_brain_provider, supported_brain_providers
 from babyai.config import BabyAIConfig
 from babyai.desktop_commands import DesktopCommandError, DesktopCommands
-from babyai.llm import EchoProvider, LLMError, OllamaProvider
+from babyai.llm import EchoProvider, OllamaProvider
 from babyai.native_brain import NativeBrainProvider
 
 
@@ -32,9 +32,9 @@ def test_factory_builds_ollama_provider_from_config(tmp_path):
     assert provider.base_url == "http://127.0.0.1:9999"
 
 
-def test_factory_builds_reserved_native_provider(tmp_path):
+def test_factory_builds_native_generation_provider(tmp_path):
     model_path = tmp_path / "models" / "babyai.gguf"
-    runtime_path = tmp_path / "runtime" / "llama.dll"
+    runtime_path = tmp_path / "runtime" / "babyai_native.dll"
     config = BabyAIConfig(
         data_dir=tmp_path,
         provider="native",
@@ -47,8 +47,9 @@ def test_factory_builds_reserved_native_provider(tmp_path):
     assert isinstance(provider, NativeBrainProvider)
     assert provider.model_path == model_path
     assert provider.runtime_path == runtime_path
-    with pytest.raises(LLMError, match="Native brain inference is not implemented"):
-        provider.generate("hello")
+    assert provider.max_tokens == 256
+    assert provider.n_ctx == 4096
+    assert provider.n_batch == 4096
 
 
 def test_factory_exposes_supported_provider_names():
