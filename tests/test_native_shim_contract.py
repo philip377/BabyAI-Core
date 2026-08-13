@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_native_shim_exposes_stable_abi_v5_next_token_contract():
+def test_native_shim_exposes_stable_abi_v6_append_decode_contract():
     root = Path(__file__).resolve().parents[1]
     header = (root / "native" / "BabyAI.NativeBridge" / "include" / "babyai_native.h").read_text(
         encoding="utf-8"
@@ -12,7 +12,7 @@ def test_native_shim_exposes_stable_abi_v5_next_token_contract():
         encoding="utf-8"
     )
 
-    assert "#define BABYAI_NATIVE_ABI_VERSION 5u" in header
+    assert "#define BABYAI_NATIVE_ABI_VERSION 6u" in header
     for symbol in (
         "babyai_native_abi_version",
         "babyai_native_runtime_create",
@@ -20,17 +20,20 @@ def test_native_shim_exposes_stable_abi_v5_next_token_contract():
         "babyai_native_model_open",
         "babyai_native_model_close",
         "babyai_native_model_tokenize",
+        "babyai_native_model_token_to_piece",
         "babyai_native_context_create",
         "babyai_native_context_destroy",
         "babyai_native_context_prefill",
         "babyai_native_context_token_count",
         "babyai_native_context_sample_greedy",
+        "babyai_native_context_decode_sampled",
         "babyai_native_last_error",
     ):
         assert symbol in header
         assert symbol in source
 
     assert "llama_tokenize" in source
+    assert "llama_token_to_piece" in source
     assert "llama_decode" in source
     assert "llama_sampler_init_greedy" in source
     assert "llama_sampler_sample" in source
@@ -38,10 +41,11 @@ def test_native_shim_exposes_stable_abi_v5_next_token_contract():
     assert "llama_vocab_is_eog" in source
     assert "LLAMA_TOKEN_NULL" in source
 
-    # ABI v5 samples one token from the existing prompt logits but does not
-    # decode/append it or convert it to text yet.
-    assert source.count("llama_decode(") == 1
-    assert "llama_token_to_piece" not in source
+    # ABI v6 keeps prompt prefill and adds one-token append decode, while
+    # preserving BabyAI-owned batches instead of exposing llama.cpp structs.
+    assert source.count("llama_decode(") == 2
+    assert "sampled_token" in source
+    assert "decode_failed" in source
     assert "llama_batch_get_one(" not in source
     assert "llama_get_logits" not in source
 
