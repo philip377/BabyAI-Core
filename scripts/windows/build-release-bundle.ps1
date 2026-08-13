@@ -50,7 +50,7 @@ $manifest = [ordered]@{
     version = $Version
     platform = "windows-x64"
     model_included = $false
-    minimum_python = "3.11"
+    python_versions = @("3.11", "3.12", "3.13")
     runtimes = @("cpu", "vulkan")
 } | ConvertTo-Json -Depth 4
 Set-Content (Join-Path $stageRoot "release.json") $manifest -Encoding UTF8
