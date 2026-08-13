@@ -14,8 +14,9 @@ The native path is intentionally incremental:
 8. **Decode prefill** — ABI v4 added one bounded initial prompt decode into a fresh context.
 9. **Deterministic next token** — ABI v5 samples exactly one greedy next token from the retained final-prompt logits and reports whether it is EOG.
 10. **Append decode + token pieces** — ABI v6 appends the exact sampled token at the next position, refreshes logits, and converts token IDs to bounded raw text pieces.
-11. **Bounded generation** — next: iterate sample/decode with cancellation, context and output limits, then combine token-piece bytes into UTF-8 text.
-12. **Packaging** — ship the tested shim and model next to BabyAI so Ollama becomes optional rather than required.
+11. **Bounded generation** — managed generation now iterates sample/piece/decode with token, context and output bounds, cooperative cancellation, EOG handling, and combined UTF-8 decoding.
+12. **Provider integration** — next: let `NativeBrainProvider` own a runtime/model session and expose bounded native generation through the normal `LLMProvider.generate()` path.
+13. **Packaging** — ship the tested shim and model next to BabyAI so Ollama becomes optional rather than required.
 
 ## Safety and compatibility boundaries
 
@@ -31,8 +32,12 @@ The native path is intentionally incremental:
 - Any non-zero prefill or append decode result makes the context non-retriable; callers create a fresh context.
 - Greedy sampling is deterministic and produces one pending token. Another sample is rejected until that exact token is appended.
 - Append decode never accepts an arbitrary replacement token and never writes beyond the actual native context size.
-- Token pieces are raw bytes, not independently decoded strings, because a UTF-8 code point may span token boundaries. The generation layer will combine bounded pieces before decoding text.
-- Ollama remains the default until native generation passes Core, Windows Desktop, Native Shim CI, and manual Windows smoke testing.
+- Managed generation stops before sampling when no append position remains, so it never creates a token it cannot commit for continued generation.
+- Managed generation caps one request at 4,096 generated tokens and requires an explicit positive output-byte limit.
+- Cancellation is cooperative at token boundaries; it does not interrupt a native `llama_decode` already in progress.
+- Token pieces remain raw bytes until the generation layer combines them. This preserves UTF-8 code points split across tokens.
+- If a caller-imposed stop lands on a partial UTF-8 code point, only the incomplete suffix is omitted. EOG-complete output must be valid UTF-8 or generation fails explicitly.
+- Ollama remains the default until native provider integration passes Core, Windows Desktop, Native Shim CI, and manual Windows smoke testing.
 - Core permissions, MEMORIA, identity, and learning semantics remain independent of the inference backend.
 
 ## BabyAI native ABI v6
@@ -65,9 +70,19 @@ The shim constructs one BabyAI-owned batch at position `token_count`, sequence 0
 
 `babyai_native_model_token_to_piece` is a two-pass caller-owned byte-buffer contract over the pinned llama.cpp vocabulary. The first call reports the required byte count; the second copies the piece bytes into a bounded caller buffer.
 
-The managed `NativeModelHandle.token_to_piece()` returns `bytes` rather than eagerly decoding each piece as UTF-8. This preserves byte sequences when one Unicode code point is split across multiple tokens. Bounded generation will concatenate pieces and decode the combined stream.
+The managed `NativeModelHandle.token_to_piece()` returns `bytes` rather than eagerly decoding each piece as UTF-8. This preserves byte sequences when one Unicode code point is split across multiple tokens.
 
-The pinned llama.cpp simple example follows the same evaluate → sample → token-to-piece → next-token-decode sequence; BabyAI keeps each operation behind its own stable ABI and explicit state checks.
+## Managed bounded generation
+
+`babyai.native_generation.generate_greedy()` composes ABI v6 without adding another native ABI revision. It tokenizes the prompt, creates one bounded context, performs prefill, then repeats:
+
+`sample -> token piece bytes -> append decode -> sample`
+
+Generation stops on EOG, `max_tokens`, context capacity, output-byte capacity, or a cooperative cancellation check. The result records generated token count, raw output byte count and the stop reason alongside text.
+
+Pieces are accumulated before UTF-8 decoding. At EOG the complete byte stream must decode strictly. At caller-imposed boundaries, an incomplete trailing code point can remain buffered and is omitted instead of emitting a replacement character.
+
+The pinned llama.cpp simple example follows the same evaluate → sample → token-to-piece → next-token-decode sequence; BabyAI keeps each native operation behind its own stable ABI and the iteration policy in managed Core code.
 
 ## Pinned llama.cpp revision
 
