@@ -14,6 +14,7 @@ public sealed partial class MainWindow
         if (!_expanded || _applyingAdaptiveLayout)
             return;
 
+        CompactBrainTextBehavior.SetEnabled(BrainText, true);
         ApplyAdaptiveExpandedLayout();
     }
 
