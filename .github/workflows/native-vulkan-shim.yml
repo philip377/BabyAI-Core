@@ -1,0 +1,82 @@
+name: Native Vulkan Shim
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/native-vulkan-shim.yml"
+      - "native/BabyAI.NativeBridge/**"
+      - "src/babyai/native_backend.py"
+      - "tests/test_native_vulkan_workflow.py"
+
+permissions:
+  contents: read
+
+jobs:
+  native-vulkan-build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      VULKAN_SDK_VERSION: "1.4.350.0"
+      VULKAN_SDK_SHA256: "855b27ba05d2d8119c5114c5d4ff870ca38f2c632b11e1bb9923b9b7e6ecfe7b"
+
+    steps:
+      - name: Checkout BabyAI
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned llama.cpp
+        shell: pwsh
+        run: |
+          $llama = Join-Path $env:RUNNER_TEMP "llama.cpp"
+          git clone --filter=blob:none https://github.com/ggml-org/llama.cpp.git $llama
+          git -C $llama checkout --detach e79e4bf660e19f2ad851e06c6913f7a8c5852621
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install pinned Vulkan SDK
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "vulkan_sdk.exe"
+          $sdkRoot = Join-Path $env:RUNNER_TEMP "VulkanSDK"
+          $url = "https://sdk.lunarg.com/sdk/download/$env:VULKAN_SDK_VERSION/windows/vulkan_sdk.exe"
+
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          $actual = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLowerInvariant()
+          if ($actual -ne $env:VULKAN_SDK_SHA256) {
+            throw "Vulkan SDK SHA256 mismatch: $actual"
+          }
+
+          & $installer --root $sdkRoot --accept-licenses --default-answer --confirm-command install copy_only=1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Vulkan SDK installer exited with code $LASTEXITCODE"
+          }
+
+          "VULKAN_SDK=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CMAKE_PREFIX_PATH=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          (Join-Path $sdkRoot "Bin") | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Configure Vulkan native shim
+        shell: pwsh
+        run: |
+          $llama = Join-Path $env:RUNNER_TEMP "llama.cpp"
+          cmake -S native/BabyAI.NativeBridge -B native/build-vulkan -A x64 "-DBABYAI_LLAMA_CPP_DIR=$llama" -DBABYAI_NATIVE_BACKEND=vulkan
+
+      - name: Build Vulkan native shim
+        shell: pwsh
+        run: cmake --build native/build-vulkan --config Release --parallel
+
+      - name: Verify Vulkan build metadata
+        shell: pwsh
+        run: |
+          $dll = Resolve-Path "native/build-vulkan/Release/babyai_native.dll"
+          python -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path('src').resolve())); from babyai.native_backend import inspect_native_backend; info=inspect_native_backend(Path(r'$dll')); assert info.build_backend == 'vulkan', info; print(f'BabyAI Vulkan metadata OK: abi={info.abi_version}; backend={info.build_backend}')"
+
+      - name: Upload Vulkan native shim
+        uses: actions/upload-artifact@v4
+        with:
+          name: BabyAI-Native-Shim-Vulkan-x64
+          path: native/build-vulkan/Release/babyai_native.dll
+          if-no-files-found: error
