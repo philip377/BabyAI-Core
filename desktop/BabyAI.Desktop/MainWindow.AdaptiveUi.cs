@@ -1,5 +1,6 @@
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
@@ -10,6 +11,7 @@ namespace BabyAI.Desktop;
 public sealed partial class MainWindow
 {
     private bool _applyingAdaptiveLayout;
+    private bool _orbPresenceReady;
     private TextBlock? _elapsedText;
     private StackPanel? _quickPromptLayer;
 
@@ -23,6 +25,7 @@ public sealed partial class MainWindow
         FriendlyDesktopTextBehavior.SetEnabled(ReplyText, true);
         EnsureElapsedIndicator();
         EnsureQuickPrompts();
+        EnsureOrbPresence();
         ApplyAdaptiveExpandedLayout();
     }
 
@@ -118,6 +121,33 @@ public sealed partial class MainWindow
             || transcript.Contains("BabyAI: ", StringComparison.Ordinal)
             || transcript.Contains("System: ", StringComparison.Ordinal);
         _quickPromptLayer.Visibility = hasMessages ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void EnsureOrbPresence()
+    {
+        if (_orbPresenceReady)
+            return;
+
+        _orbPresenceReady = true;
+        StateGlyph.RegisterPropertyChangedCallback(
+            TextBlock.TextProperty,
+            (_, _) => UpdateOrbPresence());
+        UpdateOrbPresence();
+    }
+
+    private void UpdateOrbPresence()
+    {
+        var label = StateGlyph.Text.Trim() switch
+        {
+            "≈" => "BabyAI · слушаю",
+            "✦" => "BabyAI · думаю",
+            "!" => "BabyAI · ждёт решения",
+            "×" => "BabyAI · ошибка",
+            _ => "BabyAI · готов",
+        };
+
+        ToolTipService.SetToolTip(OrbButton, label);
+        AutomationProperties.SetName(OrbButton, label);
     }
 
     private void ApplyAdaptiveExpandedLayout()
