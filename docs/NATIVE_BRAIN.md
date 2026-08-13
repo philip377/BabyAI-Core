@@ -5,28 +5,38 @@ BabyAI currently supports `ollama`, `echo`, and the reserved `native` provider.
 The native path is intentionally incremental:
 
 1. **Provider boundary** — Core constructs every brain through one factory.
-2. **GGUF + runtime configuration** — `BABYAI_NATIVE_MODEL` points to a local GGUF file and `BABYAI_NATIVE_RUNTIME` points to the local llama.cpp shared library. Defaults live under `~/.babyai/models` and `~/.babyai/runtime`.
-3. **Runtime loader** — `NativeRuntimeLoader` explicitly loads the shared library and verifies BabyAI's minimum llama.cpp ABI. Status/readiness checks do not dynamically load the library.
-4. **Model lifecycle** — next: initialize llama.cpp, load the configured GGUF model, create/free a context, and expose deterministic smoke generation.
-5. **Generation** — tokenization, decode loop, sampling, cancellation, context limits, and error translation.
-6. **Packaging** — ship the tested runtime next to BabyAI so Ollama becomes optional rather than required.
+2. **GGUF + runtime configuration** — `BABYAI_NATIVE_MODEL` points to a local GGUF file and `BABYAI_NATIVE_RUNTIME` points to BabyAI's own native shim library. Defaults live under `~/.babyai/models` and `~/.babyai/runtime`.
+3. **Runtime loader** — `NativeRuntimeLoader` explicitly loads the BabyAI shim and verifies `BABYAI_NATIVE_ABI_VERSION`. Status/readiness checks do not dynamically load the library.
+4. **Stable native shim** — `babyai_native.dll` owns the public C ABI while a pinned llama.cpp build is linked behind it. The first ABI exposes backend runtime create/destroy and GGUF model open/close without leaking llama.cpp structs to Python.
+5. **Context lifecycle** — next: create/free a llama context behind an opaque BabyAI handle.
+6. **Generation** — tokenization, decode loop, sampling, cancellation, context limits, and error translation behind the same stable ABI.
+7. **Packaging** — ship the tested shim and model next to BabyAI so Ollama becomes optional rather than required.
 
 ## Safety and compatibility boundaries
 
 - Native mode never downloads a model or runtime automatically.
 - Native mode never shells out to `llama-cli` or `llama-server`.
 - Dynamic library loading happens only through an explicit native-runtime call, not during ordinary status polling.
-- Ollama remains the default until native generation passes Core and Windows Desktop CI plus manual Windows smoke testing.
+- The shim is the only ABI BabyAI Core binds to. Upstream llama.cpp structs and function signatures remain isolated in C++.
+- llama.cpp is pinned in CI before native artifacts are built; upgrades are intentional compatibility changes.
+- Ollama remains the default until native generation passes Core, Windows Desktop, Native Shim CI, and manual Windows smoke testing.
 - Core permissions, MEMORIA, identity, and learning semantics are independent of the selected inference backend.
 
-## llama.cpp ABI v1
+## BabyAI native ABI v1
 
-The first loader contract verifies the public lifecycle symbols BabyAI will need for the next model-loading step:
+The public header is `native/BabyAI.NativeBridge/include/babyai_native.h`. ABI v1 exports:
 
-- `llama_backend_init` / `llama_backend_free`
-- `llama_model_default_params`
-- `llama_context_default_params`
-- `llama_model_load_from_file` / `llama_model_free`
-- `llama_init_from_model` / `llama_free`
+- `babyai_native_abi_version`
+- `babyai_native_runtime_create` / `babyai_native_runtime_destroy`
+- `babyai_native_model_open` / `babyai_native_model_close`
+- `babyai_native_last_error`
 
-No function is invoked by the loader contract yet; the loader only resolves the library and verifies symbol presence.
+`runtime_create` acquires the process-wide llama.cpp backend and `runtime_destroy` releases it through a reference count. `model_open` uses llama.cpp default model parameters plus the requested GPU-layer count, then opens a local GGUF file. The model is still opaque to Python.
+
+## Pinned llama.cpp revision
+
+Native Shim CI currently builds against:
+
+`e79e4bf660e19f2ad851e06c6913f7a8c5852621`
+
+Changing this revision should happen in a focused compatibility PR that rebuilds and smoke-tests the shim before merge.
