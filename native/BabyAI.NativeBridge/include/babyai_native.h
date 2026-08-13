@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define BABYAI_NATIVE_ABI_VERSION 3u
+#define BABYAI_NATIVE_ABI_VERSION 4u
 
 typedef struct babyai_native_runtime babyai_native_runtime;
 typedef struct babyai_native_model babyai_native_model;
@@ -31,6 +31,9 @@ typedef enum babyai_native_result {
     BABYAI_NATIVE_CONTEXT_CREATE_FAILED = 5,
     BABYAI_NATIVE_BUFFER_TOO_SMALL = 6,
     BABYAI_NATIVE_TOKENIZE_FAILED = 7,
+    BABYAI_NATIVE_PREFILL_TOO_LARGE = 8,
+    BABYAI_NATIVE_CONTEXT_NOT_EMPTY = 9,
+    BABYAI_NATIVE_DECODE_FAILED = 10,
 } babyai_native_result;
 
 BABYAI_NATIVE_API uint32_t babyai_native_abi_version(void);
@@ -78,6 +81,17 @@ BABYAI_NATIVE_API uint32_t babyai_native_context_n_ctx(
     const babyai_native_context * context);
 
 BABYAI_NATIVE_API uint32_t babyai_native_context_n_batch(
+    const babyai_native_context * context);
+
+// Decode one initial prompt into a fresh context. ABI v4 deliberately accepts
+// only one bounded prefill batch; chunked/append decode is a later contract.
+BABYAI_NATIVE_API int32_t babyai_native_context_prefill(
+    babyai_native_runtime * runtime,
+    babyai_native_context * context,
+    const int32_t * tokens,
+    int32_t token_count);
+
+BABYAI_NATIVE_API uint32_t babyai_native_context_token_count(
     const babyai_native_context * context);
 
 // Pointer remains valid until the next operation on this runtime or runtime destroy.
