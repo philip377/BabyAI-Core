@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define BABYAI_NATIVE_ABI_VERSION 2u
+#define BABYAI_NATIVE_ABI_VERSION 3u
 
 typedef struct babyai_native_runtime babyai_native_runtime;
 typedef struct babyai_native_model babyai_native_model;
@@ -29,6 +29,8 @@ typedef enum babyai_native_result {
     BABYAI_NATIVE_MODEL_LOAD_FAILED = 3,
     BABYAI_NATIVE_INTERNAL_ERROR = 4,
     BABYAI_NATIVE_CONTEXT_CREATE_FAILED = 5,
+    BABYAI_NATIVE_BUFFER_TOO_SMALL = 6,
+    BABYAI_NATIVE_TOKENIZE_FAILED = 7,
 } babyai_native_result;
 
 BABYAI_NATIVE_API uint32_t babyai_native_abi_version(void);
@@ -47,6 +49,19 @@ BABYAI_NATIVE_API int32_t babyai_native_model_open(
 
 BABYAI_NATIVE_API void babyai_native_model_close(
     babyai_native_model * model);
+
+// Two-pass caller-owned tokenization. Pass tokens_out=NULL and token_capacity=0
+// to query the required token count through out_token_count.
+BABYAI_NATIVE_API int32_t babyai_native_model_tokenize(
+    babyai_native_runtime * runtime,
+    babyai_native_model * model,
+    const char * text_utf8,
+    int32_t text_len,
+    int32_t add_special,
+    int32_t parse_special,
+    int32_t * tokens_out,
+    int32_t token_capacity,
+    int32_t * out_token_count);
 
 BABYAI_NATIVE_API int32_t babyai_native_context_create(
     babyai_native_runtime * runtime,
