@@ -6,7 +6,8 @@ public sealed record DesktopSettings(int X, int Y);
 
 public sealed record DesktopUiSettings(
     bool AlwaysOnTop = true,
-    bool CheckForUpdatesOnStartup = true);
+    bool CheckForUpdatesOnStartup = true,
+    string NativeAcceleration = "cpu");
 
 public sealed class DesktopSettingsStore
 {
@@ -74,7 +75,13 @@ public sealed class DesktopUiSettingsStore
             {
                 settings = settings with { CheckForUpdatesOnStartup = true };
             }
-            return settings;
+            if (!document.RootElement.TryGetProperty(
+                    nameof(DesktopUiSettings.NativeAcceleration),
+                    out _))
+            {
+                settings = settings with { NativeAcceleration = "cpu" };
+            }
+            return settings with { NativeAcceleration = NormalizeAcceleration(settings.NativeAcceleration) };
         }
         catch
         {
@@ -84,8 +91,20 @@ public sealed class DesktopUiSettingsStore
 
     public void Save(DesktopUiSettings settings)
     {
+        settings = settings with { NativeAcceleration = NormalizeAcceleration(settings.NativeAcceleration) };
         File.WriteAllText(
             _path,
             JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    internal static string NormalizeAcceleration(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "auto" => "auto",
+            "vulkan" => "vulkan",
+            "cpu" => "cpu",
+            _ => "cpu",
+        };
     }
 }
