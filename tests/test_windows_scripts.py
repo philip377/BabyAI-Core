@@ -33,10 +33,45 @@ def test_windows_start_bootstraps_only_when_needed_then_runs() -> None:
     assert 'Join-Path $PSScriptRoot "run.ps1"' in start
     assert '-c "import babyai"' in start
     assert 'Filter "BabyAI.Desktop.exe"' in start
-    assert "& $bootstrap -Provider $Provider" in start
-    assert "& $run -Provider $Provider" in start
+    assert "& $bootstrap -Provider $Provider -NativeModel $NativeModel -NativeRuntime $NativeRuntime" in start
+    assert "& $run -Provider $Provider -NativeModel $NativeModel -NativeRuntime $NativeRuntime" in start
     assert "babyai-desktop" not in start
     assert "babyai-setup" not in start
+
+
+def test_windows_launchers_accept_native_without_downloading_a_model() -> None:
+    root = Path(__file__).resolve().parents[1]
+    scripts = [
+        (root / "scripts" / "windows" / name).read_text(encoding="utf-8")
+        for name in ("start.ps1", "bootstrap.ps1", "run.ps1")
+    ]
+
+    for script in scripts:
+        assert 'ValidateSet("echo", "ollama", "native")' in script
+        assert "BABYAI_NATIVE_MODEL" in script
+        assert "BABYAI_NATIVE_RUNTIME" in script
+
+    bootstrap = scripts[1]
+    assert "BabyAI will not download a model automatically" in bootstrap
+    assert "ollama pull" in bootstrap
+    native_block = bootstrap.split('if ($Provider -eq "native")', 1)[1]
+    assert "ollama pull" not in native_block
+
+
+def test_windows_native_smoke_uses_normal_desktop_chat_path() -> None:
+    root = Path(__file__).resolve().parents[1]
+    smoke = (root / "scripts" / "windows" / "native-smoke.ps1").read_text(encoding="utf-8")
+
+    assert '$env:BABYAI_PROVIDER = "native"' in smoke
+    assert "BABYAI_NATIVE_MODEL" in smoke
+    assert "BABYAI_NATIVE_RUNTIME" in smoke
+    assert "-m babyai.desktop_commands_cli exec status" in smoke
+    assert "-m babyai.desktop_commands_cli exec chat --payload $payload" in smoke
+    assert "ConvertTo-Json -Compress" in smoke
+    assert "[BabyAI native smoke] PASS" in smoke
+    assert "Invoke-WebRequest" not in smoke
+    assert "Invoke-RestMethod" not in smoke
+    assert "Start-Process" not in smoke
 
 
 def test_windows_diagnostics_reports_health_without_reading_private_state() -> None:

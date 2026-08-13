@@ -1,6 +1,8 @@
 param(
-    [ValidateSet("echo", "ollama")]
-    [string]$Provider = "echo"
+    [ValidateSet("echo", "ollama", "native")]
+    [string]$Provider = "echo",
+    [string]$NativeModel = "",
+    [string]$NativeRuntime = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,6 +10,13 @@ $repo = Resolve-Path (Join-Path $PSScriptRoot "../..")
 $bootstrap = Join-Path $PSScriptRoot "bootstrap.ps1"
 $run = Join-Path $PSScriptRoot "run.ps1"
 Set-Location $repo
+
+if ($NativeModel) {
+    $env:BABYAI_NATIVE_MODEL = $NativeModel
+}
+if ($NativeRuntime) {
+    $env:BABYAI_NATIVE_RUNTIME = $NativeRuntime
+}
 
 $needsBootstrap = $false
 $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
@@ -42,8 +51,8 @@ if ($Provider -eq "ollama") {
 
 if ($needsBootstrap) {
     Write-Host "[BabyAI] First-run setup or repair is required."
-    & $bootstrap -Provider $Provider
+    & $bootstrap -Provider $Provider -NativeModel $NativeModel -NativeRuntime $NativeRuntime
 }
 
 Write-Host "[BabyAI] Launching..."
-& $run -Provider $Provider
+& $run -Provider $Provider -NativeModel $NativeModel -NativeRuntime $NativeRuntime

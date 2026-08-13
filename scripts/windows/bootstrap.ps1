@@ -1,6 +1,8 @@
 param(
-    [ValidateSet("echo", "ollama")]
-    [string]$Provider = "echo"
+    [ValidateSet("echo", "ollama", "native")]
+    [string]$Provider = "echo",
+    [string]$NativeModel = "",
+    [string]$NativeRuntime = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,6 +33,13 @@ Write-Host "[BabyAI] Installing Core..."
 python -m pip install -e .
 
 $env:BABYAI_PROVIDER = $Provider
+if ($NativeModel) {
+    $env:BABYAI_NATIVE_MODEL = $NativeModel
+}
+if ($NativeRuntime) {
+    $env:BABYAI_NATIVE_RUNTIME = $NativeRuntime
+}
+
 if ($Provider -eq "ollama") {
     Require-Command "ollama" "Install Ollama, then run: ollama pull qwen3:8b"
     Write-Host "[BabyAI] Checking Ollama model..."
@@ -39,6 +48,19 @@ if ($Provider -eq "ollama") {
         Write-Host "[BabyAI] qwen3:8b is missing. Pulling it now..."
         ollama pull qwen3:8b
     }
+}
+
+if ($Provider -eq "native") {
+    $resolvedModel = python -c "from babyai.config import BabyAIConfig; print(BabyAIConfig.default().native_model_file)"
+    $resolvedRuntime = python -c "from babyai.config import BabyAIConfig; print(BabyAIConfig.default().native_runtime_file)"
+    if (-not (Test-Path -LiteralPath $resolvedModel -PathType Leaf)) {
+        throw "Native GGUF model was not found at '$resolvedModel'. Pass -NativeModel <model.gguf> or set BABYAI_NATIVE_MODEL. BabyAI will not download a model automatically."
+    }
+    if (-not (Test-Path -LiteralPath $resolvedRuntime -PathType Leaf)) {
+        throw "BabyAI native runtime was not found at '$resolvedRuntime'. Pass -NativeRuntime <babyai_native.dll> or set BABYAI_NATIVE_RUNTIME."
+    }
+    Write-Host "[BabyAI] Native model: $resolvedModel"
+    Write-Host "[BabyAI] Native runtime: $resolvedRuntime"
 }
 
 Write-Host "[BabyAI] Initializing local state..."
@@ -65,4 +87,7 @@ if (-not $desktopExe) {
 Write-Host ""
 Write-Host "BabyAI Windows MVP is ready."
 Write-Host "Desktop: $($desktopExe.FullName)"
+if ($Provider -eq "native") {
+    Write-Host "Smoke: powershell -ExecutionPolicy Bypass -File .\scripts\windows\native-smoke.ps1 -NativeModel `"$resolvedModel`" -NativeRuntime `"$resolvedRuntime`""
+}
 Write-Host "Run:  powershell -ExecutionPolicy Bypass -File .\scripts\windows\run.ps1 -Provider $Provider"
