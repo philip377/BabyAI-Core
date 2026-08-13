@@ -8,6 +8,7 @@ namespace BabyAI.Desktop;
 public sealed partial class MainWindow
 {
     private bool _applyingAdaptiveLayout;
+    private TextBlock? _elapsedText;
 
     private void Panel_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -15,7 +16,28 @@ public sealed partial class MainWindow
             return;
 
         CompactBrainTextBehavior.SetEnabled(BrainText, true);
+        EnsureElapsedIndicator();
         ApplyAdaptiveExpandedLayout();
+    }
+
+    private void EnsureElapsedIndicator()
+    {
+        if (_elapsedText is not null || ReplyText.Parent is not Grid statusGrid)
+            return;
+
+        statusGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(RetryButton, 3);
+
+        _elapsedText = new TextBlock
+        {
+            FontSize = 10,
+            Opacity = 0.52,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+        };
+        Grid.SetColumn(_elapsedText, 2);
+        ReplyElapsedBehavior.SetSource(_elapsedText, ReplyText);
+        statusGrid.Children.Add(_elapsedText);
     }
 
     private void ApplyAdaptiveExpandedLayout()
@@ -80,11 +102,37 @@ public sealed partial class MainWindow
             XamlRoot = Root.XamlRoot,
             Title = "BabyAI · Диагностика",
             Content = details,
+            PrimaryButtonText = "Обновить статус",
+            SecondaryButtonText = "Очистить чат",
             CloseButtonText = "Закрыть",
             DefaultButton = ContentDialogButton.Close,
         };
 
-        await dialog.ShowAsync();
+        var result = await dialog.ShowAsync();
+        if (result == ContentDialogResult.Primary)
+        {
+            try
+            {
+                SetBusy(true);
+                ReplyText.Text = "Проверяю состояние…";
+                await RefreshStatusAsync();
+                ReplyText.Text = "Статус обновлён.";
+            }
+            catch (Exception ex)
+            {
+                ShowBridgeError(ex);
+            }
+            finally
+            {
+                SetBusy(false);
+            }
+        }
+        else if (result == ContentDialogResult.Secondary)
+        {
+            _conversation.Clear();
+            ConversationText.Text = string.Empty;
+            ReplyText.Text = "Чат очищен.";
+        }
     }
 
     private static UIElement CreateDiagnosticRow(string label, string value)
