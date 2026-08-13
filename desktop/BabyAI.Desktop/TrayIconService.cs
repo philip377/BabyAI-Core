@@ -75,6 +75,12 @@ public sealed class TrayIconService : IDisposable
         _icon.ForceCreate();
     }
 
+    public void SetUpdateAvailable(string? version)
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+            _icon.ToolTipText = $"BabyAI · доступно обновление {version}";
+    }
+
     public void Dispose()
     {
         _icon.Dispose();
