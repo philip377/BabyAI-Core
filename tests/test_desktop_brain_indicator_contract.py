@@ -16,7 +16,9 @@ def test_desktop_brain_indicator_uses_core_readiness_snapshot() -> None:
     assert "status.Brain" in behavior
     assert '"model_missing"' in behavior
     assert '"unavailable"' in behavior
-    assert "click to recheck" in behavior
+    assert "start Ollama" in behavior
+    assert "ollama pull {brain.Model}" in behavior
+    assert "Install the configured model manually" in behavior
     assert "DispatcherTimer" in behavior
     assert "TimeSpan.FromSeconds(15)" in behavior
     assert "RecoveryTimer.Start()" in behavior
