@@ -5,9 +5,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/windows-release.yml"
-      - "scripts/windows/build-release-bundle.ps1"
-      - "scripts/windows/install-release.ps1"
-      - "scripts/windows/start-release.ps1"
+      - "scripts/windows/*release*.ps1"
       - "desktop/**"
       - "src/**"
       - "native/**"
@@ -59,7 +57,6 @@ jobs:
           $desktopMatch = [regex]::Match($desktop, '<Version>([^<]+)</Version>')
           if (-not $desktopMatch.Success) { throw "Could not read desktop version." }
           $desktopVersion = $desktopMatch.Groups[1].Value
-
           if ($projectVersion -ne $desktopVersion) {
             throw "Version mismatch: Core=$projectVersion Desktop=$desktopVersion"
           }
@@ -76,14 +73,9 @@ jobs:
           "BABYAI_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "BabyAI release version: $version"
 
-      - name: Build offline Core wheels
+      - name: Prepare offline Core wheels
         shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force release-wheels | Out-Null
-          python -m pip download . --dest release-wheels
-          if (-not (Get-ChildItem release-wheels -Filter "babyai_core-*.whl" -File)) {
-            throw "BabyAI Core wheel was not produced."
-          }
+        run: .\scripts\windows\prepare-release-wheels.ps1 -OutputDir release-wheels -Python python
 
       - name: Publish WinUI Desktop
         shell: pwsh
@@ -139,28 +131,9 @@ jobs:
             -VulkanRuntime native/build-release-vulkan/Release/babyai_native.dll `
             -OutputDir dist-release
 
-      - name: Verify release bundle
+      - name: Verify release bundle and installer
         shell: pwsh
-        run: |
-          $zip = Resolve-Path "dist-release/BabyAI-$env:BABYAI_RELEASE_VERSION-windows-x64.zip"
-          $expanded = Join-Path $env:RUNNER_TEMP "babyai-release-check"
-          Expand-Archive $zip $expanded -Force
-          $root = Join-Path $expanded "BabyAI-$env:BABYAI_RELEASE_VERSION-windows-x64"
-          foreach ($required in @(
-            "release.json",
-            "SHA256SUMS.txt",
-            "install.ps1",
-            "start.ps1",
-            "app/BabyAI.Desktop.exe",
-            "runtime/cpu/babyai_native.dll",
-            "runtime/vulkan/babyai_native.dll"
-          )) {
-            if (-not (Test-Path (Join-Path $root $required) -PathType Leaf)) {
-              throw "Release bundle is missing $required"
-            }
-          }
-          $manifest = Get-Content (Join-Path $root "release.json") -Raw | ConvertFrom-Json
-          if ([string]$manifest.version -ne $env:BABYAI_RELEASE_VERSION) { throw "Release manifest version mismatch." }
+        run: .\scripts\windows\verify-release-bundle.ps1 -Version $env:BABYAI_RELEASE_VERSION -OutputDir dist-release -Python python
 
       - uses: actions/upload-artifact@v4
         with:
@@ -178,4 +151,11 @@ jobs:
         run: |
           $zip = "dist-release/BabyAI-$env:BABYAI_RELEASE_VERSION-windows-x64.zip"
           $sha = "$zip.sha256"
-          gh release create $env:GITHUB_REF_NAME $zip $sha --title "BabyAI $env:GITHUB_REF_NAME" --generate-notes
+          $releaseExists = $false
+          gh release view $env:GITHUB_REF_NAME *> $null
+          if ($LASTEXITCODE -eq 0) { $releaseExists = $true }
+          if ($releaseExists) {
+            gh release upload $env:GITHUB_REF_NAME $zip $sha --clobber
+          } else {
+            gh release create $env:GITHUB_REF_NAME $zip $sha --title "BabyAI $env:GITHUB_REF_NAME" --generate-notes
+          }
