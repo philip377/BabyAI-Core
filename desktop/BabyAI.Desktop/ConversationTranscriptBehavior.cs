@@ -79,30 +79,41 @@ public static class ConversationTranscriptBehavior
         {
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(14, 24, 14, 14),
-            Spacing = 4,
+            Margin = new Thickness(18, 34, 18, 20),
+            Spacing = 6,
             Children =
             {
-                new TextBlock
+                new Border
                 {
-                    Text = "✦",
-                    FontSize = 22,
-                    Foreground = Brush(154, 174, 255, 230),
-                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Width = 42,
+                    Height = 42,
+                    CornerRadius = new CornerRadius(21),
+                    Background = Brush(124, 141, 255, 22),
+                    BorderBrush = Brush(154, 174, 255, 42),
+                    BorderThickness = new Thickness(1),
+                    Child = new TextBlock
+                    {
+                        Text = "✦",
+                        FontSize = 21,
+                        Foreground = Brush(174, 190, 255, 235),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                    },
                 },
                 new TextBlock
                 {
                     Text = "BabyAI готов",
-                    FontSize = 13,
+                    FontSize = 14,
                     FontWeight = FontWeights.SemiBold,
-                    Foreground = Brush(248, 250, 255, 230),
+                    Foreground = Brush(248, 250, 255, 235),
                     HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 3, 0, 0),
                 },
                 new TextBlock
                 {
-                    Text = "Напиши сообщение ниже",
+                    Text = "Напиши сообщение — начнём с него",
                     FontSize = 11,
-                    Foreground = Brush(255, 255, 255, 135),
+                    Foreground = Brush(255, 255, 255, 125),
                     HorizontalAlignment = HorizontalAlignment.Center,
                 },
             },
@@ -121,11 +132,13 @@ public static class ConversationTranscriptBehavior
         {
             Text = isUser ? "ВЫ" : isSystem ? "СИСТЕМА" : "BABYAI",
             FontSize = 9,
-            CharacterSpacing = 90,
+            CharacterSpacing = 95,
             FontWeight = FontWeights.SemiBold,
-            Foreground = Brush(255, 255, 255, isSystem ? (byte)100 : (byte)125),
+            Foreground = isUser
+                ? Brush(184, 194, 255, 145)
+                : isSystem ? Brush(255, 255, 255, 90) : Brush(184, 200, 255, 150),
             HorizontalAlignment = alignment,
-            Margin = new Thickness(6, 0, 6, 0),
+            Margin = new Thickness(7, 0, 7, 0),
         };
 
         var body = new TextBlock
@@ -134,20 +147,23 @@ public static class ConversationTranscriptBehavior
             FontSize = isSystem ? 11 : 13,
             TextWrapping = TextWrapping.Wrap,
             IsTextSelectionEnabled = true,
-            Foreground = Brush(248, 250, 255, isSystem ? (byte)175 : (byte)240),
+            Foreground = Brush(248, 250, 255, isSystem ? (byte)170 : (byte)242),
+            LineHeight = isSystem ? 17 : 20,
         };
 
         var bubble = new Border
         {
-            MaxWidth = isSystem ? 280 : 292,
-            Padding = isSystem ? new Thickness(10, 6, 10, 6) : new Thickness(12, 9, 12, 9),
+            MaxWidth = isSystem ? 320 : 352,
+            Padding = isSystem ? new Thickness(11, 7, 11, 7) : new Thickness(14, 11, 14, 11),
             CornerRadius = isSystem
-                ? new CornerRadius(12)
-                : isUser ? new CornerRadius(17, 17, 5, 17) : new CornerRadius(17, 17, 17, 5),
+                ? new CornerRadius(13)
+                : isUser ? new CornerRadius(19, 19, 6, 19) : new CornerRadius(19, 19, 19, 6),
             Background = isSystem
-                ? Brush(255, 255, 255, 14)
-                : isUser ? Brush(91, 112, 255, 145) : Brush(255, 255, 255, 27),
-            BorderBrush = isUser ? Brush(145, 160, 255, 75) : Brush(255, 255, 255, 24),
+                ? Brush(255, 255, 255, 13)
+                : isUser ? Brush(91, 112, 255, 150) : Brush(255, 255, 255, 30),
+            BorderBrush = isSystem
+                ? Brush(255, 255, 255, 18)
+                : isUser ? Brush(151, 164, 255, 82) : Brush(171, 187, 255, 30),
             BorderThickness = new Thickness(1),
             Child = body,
             HorizontalAlignment = alignment,
@@ -155,10 +171,10 @@ public static class ConversationTranscriptBehavior
 
         var card = new StackPanel
         {
-            MaxWidth = 300,
+            MaxWidth = isSystem ? 330 : 362,
             HorizontalAlignment = alignment,
-            Spacing = 3,
-            Margin = new Thickness(0, 0, 0, 7),
+            Spacing = 4,
+            Margin = new Thickness(0, 0, 0, 9),
         };
         card.Children.Add(label);
         card.Children.Add(bubble);
