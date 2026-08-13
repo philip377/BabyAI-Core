@@ -2,17 +2,27 @@
 
 #include "llama.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <mutex>
 #include <new>
 #include <string>
+#include <vector>
 
 struct babyai_native_runtime {
     std::string last_error;
+    std::vector<babyai_native_model *> models;
 };
 
 struct babyai_native_model {
     llama_model * handle = nullptr;
+    babyai_native_runtime * runtime = nullptr;
+    std::vector<babyai_native_context *> contexts;
+};
+
+struct babyai_native_context {
+    llama_context * handle = nullptr;
+    babyai_native_model * model = nullptr;
 };
 
 namespace {
@@ -37,6 +47,11 @@ void backend_release() {
     if (g_backend_ref_count == 0) {
         llama_backend_free();
     }
+}
+
+template <typename T>
+void erase_pointer(std::vector<T *> & items, T * value) {
+    items.erase(std::remove(items.begin(), items.end(), value), items.end());
 }
 
 int32_t fail(babyai_native_runtime * runtime, babyai_native_result code, const char * message) {
@@ -85,6 +100,10 @@ void babyai_native_runtime_destroy(babyai_native_runtime * runtime) {
         return;
     }
 
+    while (!runtime->models.empty()) {
+        babyai_native_model_close(runtime->models.back());
+    }
+
     backend_release();
     delete runtime;
 }
@@ -116,6 +135,15 @@ int32_t babyai_native_model_open(
         }
 
         wrapper->handle = model;
+        wrapper->runtime = runtime;
+        try {
+            runtime->models.push_back(wrapper);
+        } catch (...) {
+            llama_model_free(model);
+            delete wrapper;
+            return fail(runtime, BABYAI_NATIVE_OUT_OF_MEMORY, "Could not register the BabyAI native model handle.");
+        }
+
         *out_model = wrapper;
         return static_cast<int32_t>(BABYAI_NATIVE_OK);
     } catch (...) {
@@ -127,11 +155,115 @@ void babyai_native_model_close(babyai_native_model * model) {
     if (model == nullptr) {
         return;
     }
+
+    while (!model->contexts.empty()) {
+        babyai_native_context_destroy(model->contexts.back());
+    }
+
     if (model->handle != nullptr) {
         llama_model_free(model->handle);
         model->handle = nullptr;
     }
+
+    if (model->runtime != nullptr) {
+        erase_pointer(model->runtime->models, model);
+        model->runtime = nullptr;
+    }
+
     delete model;
+}
+
+int32_t babyai_native_context_create(
+    babyai_native_runtime * runtime,
+    babyai_native_model * model,
+    uint32_t n_ctx,
+    uint32_t n_batch,
+    int32_t n_threads,
+    babyai_native_context ** out_context) {
+    if (runtime == nullptr || model == nullptr || out_context == nullptr) {
+        return static_cast<int32_t>(BABYAI_NATIVE_INVALID_ARGUMENT);
+    }
+    *out_context = nullptr;
+    runtime->last_error.clear();
+
+    if (model->runtime != runtime || model->handle == nullptr) {
+        return fail(runtime, BABYAI_NATIVE_INVALID_ARGUMENT, "Native model does not belong to this runtime.");
+    }
+
+    try {
+        llama_context_params params = llama_context_default_params();
+        if (n_ctx > 0) {
+            params.n_ctx = n_ctx;
+        }
+        if (n_batch > 0) {
+            params.n_batch = n_batch;
+            if (params.n_ubatch > params.n_batch) {
+                params.n_ubatch = params.n_batch;
+            }
+        }
+        if (n_threads > 0) {
+            params.n_threads = n_threads;
+            params.n_threads_batch = n_threads;
+        }
+
+        llama_context * context = llama_init_from_model(model->handle, params);
+        if (context == nullptr) {
+            return fail(runtime, BABYAI_NATIVE_CONTEXT_CREATE_FAILED, "llama.cpp could not create a context for the configured model.");
+        }
+
+        auto * wrapper = new (std::nothrow) babyai_native_context();
+        if (wrapper == nullptr) {
+            llama_free(context);
+            return fail(runtime, BABYAI_NATIVE_OUT_OF_MEMORY, "Could not allocate the BabyAI native context handle.");
+        }
+
+        wrapper->handle = context;
+        wrapper->model = model;
+        try {
+            model->contexts.push_back(wrapper);
+        } catch (...) {
+            llama_free(context);
+            delete wrapper;
+            return fail(runtime, BABYAI_NATIVE_OUT_OF_MEMORY, "Could not register the BabyAI native context handle.");
+        }
+
+        *out_context = wrapper;
+        return static_cast<int32_t>(BABYAI_NATIVE_OK);
+    } catch (...) {
+        return fail(runtime, BABYAI_NATIVE_INTERNAL_ERROR, "Unexpected native context lifecycle error.");
+    }
+}
+
+void babyai_native_context_destroy(babyai_native_context * context) {
+    if (context == nullptr) {
+        return;
+    }
+
+    if (context->handle != nullptr) {
+        llama_free(context->handle);
+        context->handle = nullptr;
+    }
+
+    if (context->model != nullptr) {
+        erase_pointer(context->model->contexts, context);
+        context->model = nullptr;
+    }
+
+    delete context;
+}
+
+uint32_t babyai_native_context_n_ctx(const babyai_native_context * context) {
+    if (context == nullptr || context->handle == nullptr) {
+        return 0;
+    }
+    return llama_n_ctx(context->handle);
+}
+
+uint32_t babyai_native_context_n_batch(const babyai_native_context * context) {
+    if (context == nullptr || context->handle == nullptr) {
+        return 0;
+    }
+    return llama_n_batch(context->handle);
 }
 
 const char * babyai_native_last_error(const babyai_native_runtime * runtime) {
