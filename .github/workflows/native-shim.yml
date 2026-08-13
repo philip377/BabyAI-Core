@@ -1,0 +1,66 @@
+name: Native Shim
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "native/**"
+      - "src/babyai/native_*.py"
+      - "src/babyai/config.py"
+      - "src/babyai/brain.py"
+      - "scripts/native_shim_smoke.py"
+      - ".github/workflows/native-shim.yml"
+      - "tests/test_native*.py"
+  pull_request:
+    paths:
+      - "native/**"
+      - "src/babyai/native_*.py"
+      - "src/babyai/config.py"
+      - "src/babyai/brain.py"
+      - "scripts/native_shim_smoke.py"
+      - ".github/workflows/native-shim.yml"
+      - "tests/test_native*.py"
+
+jobs:
+  native-shim-build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout BabyAI
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: e79e4bf660e19f2ad851e06c6913f7a8c5852621
+          path: external/llama.cpp
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure native shim
+        shell: pwsh
+        run: |
+          $llama = Join-Path $env:GITHUB_WORKSPACE "external\llama.cpp"
+          cmake -S native/BabyAI.NativeBridge -B native/build -A x64 "-DBABYAI_LLAMA_CPP_DIR=$llama"
+
+      - name: Build native shim
+        shell: pwsh
+        run: cmake --build native/build --config Release --target babyai_native --parallel 2
+
+      - name: Smoke native ABI and backend lifecycle
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem native/build -Filter babyai_native.dll -File -Recurse | Select-Object -First 1
+          if (-not $dll) { throw "babyai_native.dll was not produced." }
+          python scripts/native_shim_smoke.py $dll.FullName
+
+      - name: Upload native shim
+        uses: actions/upload-artifact@v4
+        with:
+          name: BabyAI-Native-Shim-x64
+          path: native/build/**/babyai_native.dll
+          if-no-files-found: error
