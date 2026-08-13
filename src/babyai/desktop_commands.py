@@ -38,12 +38,18 @@ class DesktopCommands:
             Identity(name=self.config.name, owner=self.config.owner)
         )
         permissions = PermissionStore(self.config.permissions_file)
+        # Native generation currently loads the local GGUF for every LLM call. A
+        # separate planner call therefore doubles model-load/inference work even for
+        # a simple greeting. Primus already supports planner=None and still parses a
+        # tool call from the first model answer, so native desktop chat uses that
+        # single-call path until a resident native session makes planning cheap.
+        planner = None if self.config.provider == "native" else Planner()
         return Primus(
             llm=self._provider(),
             memory=SQLiteMemoryStore(self.config.memory_db),
             identity=identity,
             agent=AgentExecutor(permissions),
-            planner=Planner(),
+            planner=planner,
             working_memory=WorkingMemoryStore(self.config.working_memory_file),
         )
 
