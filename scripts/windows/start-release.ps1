@@ -22,7 +22,7 @@ if ([string]::IsNullOrWhiteSpace($versionDir) -or -not (Test-Path $versionDir -P
 
 $launch = @{
     provider = "native"
-    acceleration = "cpu"
+    acceleration = "auto"
     model = ""
 }
 if (Test-Path $launchPath -PathType Leaf) {
