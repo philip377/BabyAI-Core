@@ -127,9 +127,9 @@ def test_desktop_bridge_reports_missing_native_runtime(tmp_path):
     assert str(config.native_runtime_file) in runtime["detail"]
 
 
-def test_desktop_bridge_reports_native_inference_pending_when_files_exist(tmp_path):
+def test_desktop_bridge_reports_native_ready_when_files_exist(tmp_path):
     model = tmp_path / "babyai.gguf"
-    runtime_file = tmp_path / "llama.dll"
+    runtime_file = tmp_path / "babyai_native.dll"
     model.write_bytes(b"GGUF-placeholder-for-contract-test")
     runtime_file.write_bytes(b"DLL-placeholder-for-readiness-test")
     config = BabyAIConfig(
@@ -142,6 +142,6 @@ def test_desktop_bridge_reports_native_inference_pending_when_files_exist(tmp_pa
     runtime = build_desktop_snapshot(config).as_dict()["runtime"]
 
     assert runtime["provider"] == "native"
-    assert runtime["state"] == "native_inference_pending"
-    assert runtime["ready"] is False
-    assert "in-process inference wiring" in runtime["detail"].lower()
+    assert runtime["state"] == "ready"
+    assert runtime["ready"] is True
+    assert "validated when generation is explicitly requested" in runtime["detail"].lower()
