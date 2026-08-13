@@ -15,7 +15,9 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        _window = new MainWindow();
+        var mainWindow = new MainWindow();
+        mainWindow.ApplyStartupUiSettings();
+        _window = mainWindow;
         _window.Activate();
     }
 }
