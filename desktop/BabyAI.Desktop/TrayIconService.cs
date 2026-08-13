@@ -9,6 +9,7 @@ public sealed class TrayIconService : IDisposable
 {
     private readonly MainWindow _window;
     private readonly TaskbarIcon _icon;
+    private bool _created;
 
     public TrayIconService(MainWindow window)
     {
@@ -71,8 +72,18 @@ public sealed class TrayIconService : IDisposable
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 93, 108, 255)),
             },
         };
+    }
 
-        _icon.ForceCreate();
+    public void EnsureCreated()
+    {
+        if (_created)
+            return;
+
+        // H.NotifyIcon can interact badly with a WinUI system backdrop when the
+        // tray HWND is created before the main Window is activated. Also keep
+        // Windows 11 Efficiency Mode disabled for Windows 10 compatibility.
+        _icon.ForceCreate(enablesEfficiencyMode: false);
+        _created = true;
     }
 
     public void SetUpdateAvailable(string? version)
