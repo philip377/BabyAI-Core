@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $false)]
-    [string]$BundleRoot = (Split-Path -Parent $PSScriptRoot),
+    [string]$BundleRoot = $PSScriptRoot,
 
     [Parameter(Mandatory = $false)]
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "BabyAI"),
