@@ -10,6 +10,7 @@ public sealed class TrayIconService : IDisposable
     private readonly MainWindow _window;
     private readonly TaskbarIcon _icon;
     private bool _created;
+    private bool _createAttempted;
 
     public TrayIconService(MainWindow window)
     {
@@ -72,28 +73,39 @@ public sealed class TrayIconService : IDisposable
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 93, 108, 255)),
             },
         };
+
+        _window.Activated += Window_Activated;
     }
 
-    public void EnsureCreated()
+    private void Window_Activated(object sender, WindowActivatedEventArgs args)
     {
-        if (_created)
+        if (_createAttempted)
             return;
 
-        // H.NotifyIcon can interact badly with a WinUI system backdrop when the
-        // tray HWND is created before the main Window is activated. Also keep
-        // Windows 11 Efficiency Mode disabled for Windows 10 compatibility.
-        _icon.ForceCreate(enablesEfficiencyMode: false);
-        _created = true;
+        _createAttempted = true;
+        try
+        {
+            // Register the tray HWND only after the WinUI Window is active.
+            // Disable the Windows 11 Efficiency Mode path for Windows 10.
+            _icon.ForceCreate(enablesEfficiencyMode: false);
+            _created = true;
+        }
+        catch
+        {
+            // Tray support is optional. Never take down the Orb because the
+            // shell/tray integration is unavailable on a particular system.
+        }
     }
 
     public void SetUpdateAvailable(string? version)
     {
-        if (!string.IsNullOrWhiteSpace(version))
+        if (_created && !string.IsNullOrWhiteSpace(version))
             _icon.ToolTipText = $"BabyAI · доступно обновление {version}";
     }
 
     public void Dispose()
     {
+        _window.Activated -= Window_Activated;
         _icon.Dispose();
     }
 }
