@@ -1,12 +1,20 @@
 param(
-    [ValidateSet("echo", "ollama")]
-    [string]$Provider = "echo"
+    [ValidateSet("echo", "ollama", "native")]
+    [string]$Provider = "echo",
+    [string]$NativeModel = "",
+    [string]$NativeRuntime = ""
 )
 
 $ErrorActionPreference = "Stop"
 $repo = Resolve-Path (Join-Path $PSScriptRoot "../..")
 Set-Location $repo
 $env:BABYAI_PROVIDER = $Provider
+if ($NativeModel) {
+    $env:BABYAI_NATIVE_MODEL = $NativeModel
+}
+if ($NativeRuntime) {
+    $env:BABYAI_NATIVE_RUNTIME = $NativeRuntime
+}
 
 $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
 if (-not $pythonCommand) {
@@ -28,6 +36,17 @@ if ($Provider -eq "ollama") {
         throw "Ollama is not installed. Install it or run with -Provider echo."
     }
     $null = Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 3
+}
+
+if ($Provider -eq "native") {
+    $resolvedModel = & $env:BABYAI_PYTHON -c "from babyai.config import BabyAIConfig; print(BabyAIConfig.default().native_model_file)"
+    $resolvedRuntime = & $env:BABYAI_PYTHON -c "from babyai.config import BabyAIConfig; print(BabyAIConfig.default().native_runtime_file)"
+    if (-not (Test-Path -LiteralPath $resolvedModel -PathType Leaf)) {
+        throw "Native GGUF model was not found at '$resolvedModel'. Pass -NativeModel <model.gguf> or set BABYAI_NATIVE_MODEL."
+    }
+    if (-not (Test-Path -LiteralPath $resolvedRuntime -PathType Leaf)) {
+        throw "BabyAI native runtime was not found at '$resolvedRuntime'. Pass -NativeRuntime <babyai_native.dll> or set BABYAI_NATIVE_RUNTIME."
+    }
 }
 
 & $env:BABYAI_PYTHON -m babyai.desktop_commands_cli exec status | Out-Null
@@ -56,5 +75,9 @@ if (-not $desktopExe) {
 }
 
 Write-Host "[BabyAI] Starting Windows Orb ($Provider provider)..."
+if ($Provider -eq "native") {
+    Write-Host "[BabyAI] Native model: $resolvedModel"
+    Write-Host "[BabyAI] Native runtime: $resolvedRuntime"
+}
 Write-Host "[BabyAI] $($desktopExe.FullName)"
 Start-Process -FilePath $desktopExe.FullName -WorkingDirectory $desktopExe.DirectoryName
