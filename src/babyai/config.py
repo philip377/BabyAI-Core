@@ -16,12 +16,15 @@ class BabyAIConfig:
     ollama_url: str = "http://127.0.0.1:11434"
     native_model_path: Path | None = None
     native_runtime_path: Path | None = None
+    native_vulkan_runtime_path: Path | None = None
+    native_acceleration: str = "cpu"
 
     @classmethod
     def default(cls) -> "BabyAIConfig":
         data_dir = Path(os.getenv("BABYAI_DATA_DIR", Path.home() / ".babyai"))
         native_model = os.getenv("BABYAI_NATIVE_MODEL")
         native_runtime = os.getenv("BABYAI_NATIVE_RUNTIME")
+        native_vulkan_runtime = os.getenv("BABYAI_NATIVE_VULKAN_RUNTIME")
         return cls(
             data_dir=data_dir,
             owner=os.getenv("BABYAI_OWNER", "owner"),
@@ -31,6 +34,8 @@ class BabyAIConfig:
             ollama_url=os.getenv("BABYAI_OLLAMA_URL", "http://127.0.0.1:11434"),
             native_model_path=Path(native_model) if native_model else None,
             native_runtime_path=Path(native_runtime) if native_runtime else None,
+            native_vulkan_runtime_path=Path(native_vulkan_runtime) if native_vulkan_runtime else None,
+            native_acceleration=os.getenv("BABYAI_NATIVE_ACCELERATION", "cpu").strip().lower(),
         )
 
     @property
@@ -48,6 +53,13 @@ class BabyAIConfig:
         else:
             filename = "libbabyai_native.so"
         return self.data_dir / "runtime" / filename
+
+    @property
+    def native_vulkan_runtime_file(self) -> Path:
+        if self.native_vulkan_runtime_path is not None:
+            return self.native_vulkan_runtime_path
+        cpu_runtime = self.native_runtime_file
+        return cpu_runtime.parent / "vulkan" / cpu_runtime.name
 
     @property
     def memory_db(self) -> Path:
