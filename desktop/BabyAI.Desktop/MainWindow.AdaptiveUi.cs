@@ -13,6 +13,7 @@ public sealed partial class MainWindow
     private bool _applyingAdaptiveLayout;
     private bool _composerDraftingReady;
     private bool _orbPresenceReady;
+    private bool _statusPresentationReady;
     private TextBlock? _elapsedText;
     private StackPanel? _quickPromptLayer;
 
@@ -28,6 +29,7 @@ public sealed partial class MainWindow
         EnsureQuickPrompts();
         EnsureOrbPresence();
         EnsureComposerDrafting();
+        EnsureStatusPresentation();
         ApplyAdaptiveExpandedLayout();
     }
 
@@ -172,6 +174,63 @@ public sealed partial class MainWindow
     {
         if (!MessageBox.IsEnabled)
             MessageBox.IsEnabled = true;
+    }
+
+    private void EnsureStatusPresentation()
+    {
+        if (_statusPresentationReady)
+            return;
+
+        _statusPresentationReady = true;
+        BrainText.RegisterPropertyChangedCallback(
+            TextBlock.TextProperty,
+            (_, _) => UpdateBrainPill());
+        UpdateBrainPill();
+
+        AutomationProperties.SetName(SendButton, "Отправить сообщение");
+        AutomationProperties.SetHelpText(SendButton, "Enter");
+        AutomationProperties.SetName(StopButton, "Остановить генерацию");
+        AutomationProperties.SetName(RetryButton, "Повторить проверку BabyAI");
+        AutomationProperties.SetName(DetailsButton, "Открыть диагностику BabyAI");
+    }
+
+    private void UpdateBrainPill()
+    {
+        if (BrainText.Parent is not Border pill)
+            return;
+
+        var status = BrainText.Text.Trim().ToLowerInvariant();
+
+        if (status.Contains("готов") || status.Contains("ready"))
+        {
+            pill.Background = new SolidColorBrush(Color.FromArgb(24, 76, 212, 145));
+            pill.BorderBrush = new SolidColorBrush(Color.FromArgb(54, 108, 236, 173));
+            BrainText.Foreground = new SolidColorBrush(Color.FromArgb(225, 218, 255, 238));
+            return;
+        }
+
+        if (status.Contains("не найден") || status.Contains("missing"))
+        {
+            pill.Background = new SolidColorBrush(Color.FromArgb(26, 236, 169, 72));
+            pill.BorderBrush = new SolidColorBrush(Color.FromArgb(58, 255, 196, 92));
+            BrainText.Foreground = new SolidColorBrush(Color.FromArgb(230, 255, 233, 190));
+            return;
+        }
+
+        if (status.Contains("ошиб")
+            || status.Contains("недоступ")
+            || status.Contains("offline")
+            || status.Contains("unavailable"))
+        {
+            pill.Background = new SolidColorBrush(Color.FromArgb(28, 232, 82, 104));
+            pill.BorderBrush = new SolidColorBrush(Color.FromArgb(62, 255, 112, 130));
+            BrainText.Foreground = new SolidColorBrush(Color.FromArgb(232, 255, 216, 222));
+            return;
+        }
+
+        pill.Background = new SolidColorBrush(Color.FromArgb(22, 124, 141, 255));
+        pill.BorderBrush = new SolidColorBrush(Color.FromArgb(42, 160, 174, 255));
+        BrainText.Foreground = new SolidColorBrush(Color.FromArgb(220, 240, 244, 255));
     }
 
     private void ApplyAdaptiveExpandedLayout()
