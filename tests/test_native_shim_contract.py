@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_native_shim_exposes_stable_abi_v4_prefill_contract():
+def test_native_shim_exposes_stable_abi_v5_next_token_contract():
     root = Path(__file__).resolve().parents[1]
     header = (root / "native" / "BabyAI.NativeBridge" / "include" / "babyai_native.h").read_text(
         encoding="utf-8"
@@ -12,7 +12,7 @@ def test_native_shim_exposes_stable_abi_v4_prefill_contract():
         encoding="utf-8"
     )
 
-    assert "#define BABYAI_NATIVE_ABI_VERSION 4u" in header
+    assert "#define BABYAI_NATIVE_ABI_VERSION 5u" in header
     for symbol in (
         "babyai_native_abi_version",
         "babyai_native_runtime_create",
@@ -22,34 +22,28 @@ def test_native_shim_exposes_stable_abi_v4_prefill_contract():
         "babyai_native_model_tokenize",
         "babyai_native_context_create",
         "babyai_native_context_destroy",
-        "babyai_native_context_n_ctx",
-        "babyai_native_context_n_batch",
         "babyai_native_context_prefill",
         "babyai_native_context_token_count",
+        "babyai_native_context_sample_greedy",
         "babyai_native_last_error",
     ):
         assert symbol in header
         assert symbol in source
 
-    assert "llama_backend_init();" in source
-    assert "llama_backend_free();" in source
-    assert "llama_model_load_from_file" in source
-    assert "llama_model_get_vocab" in source
     assert "llama_tokenize" in source
-    assert "llama_context_default_params" in source
-    assert "llama_init_from_model" in source
-    assert "llama_n_ctx" in source
-    assert "llama_n_batch" in source
     assert "llama_decode" in source
-    assert "std::vector<llama_token> native_tokens" in source
-    assert "llama_batch batch" in source
+    assert "llama_sampler_init_greedy" in source
+    assert "llama_sampler_sample" in source
+    assert "llama_sampler_free" in source
+    assert "llama_vocab_is_eog" in source
+    assert "LLAMA_TOKEN_NULL" in source
 
-    # Prefill owns its temporary batch storage through C++ RAII rather than the
-    # pinned llama.cpp raw-malloc batch helper, and sampling remains out of scope.
-    assert "llama_batch_init(" not in source
+    # ABI v5 samples one token from the existing prompt logits but does not
+    # decode/append it or convert it to text yet.
+    assert source.count("llama_decode(") == 1
+    assert "llama_token_to_piece" not in source
     assert "llama_batch_get_one(" not in source
     assert "llama_get_logits" not in source
-    assert "llama_sampler_sample" not in source
 
 
 def test_native_shim_ci_pins_upstream_and_runs_managed_lifecycle_smoke():

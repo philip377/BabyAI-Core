@@ -11,9 +11,11 @@ The native path is intentionally incremental:
 5. **Managed model lifecycle** — runtime/model handles are context-manager-safe and defensively owned in C++ too.
 6. **Context lifecycle** — ABI v2 added opaque context create/destroy and actual context/batch size queries.
 7. **Tokenization** — ABI v3 added bounded two-pass UTF-8 -> token ID conversion with caller-owned buffers.
-8. **Decode prefill** — ABI v4 adds one bounded initial prompt decode into a fresh context.
-9. **Sampling + text generation** — next: sample a single next token from the retained final-prompt logits, then add bounded iterative generation and token-to-text conversion.
-10. **Packaging** — ship the tested shim and model next to BabyAI so Ollama becomes optional rather than required.
+8. **Decode prefill** — ABI v4 added one bounded initial prompt decode into a fresh context.
+9. **Deterministic next token** — ABI v5 samples exactly one greedy next token from the retained final-prompt logits and reports whether it is EOG.
+10. **Append decode + token text** — next: decode the selected token at the next position, refresh logits, and convert token IDs to UTF-8 pieces.
+11. **Bounded generation** — iterate sample/decode with cancellation and context limits, then add configurable sampling.
+12. **Packaging** — ship the tested shim and model next to BabyAI so Ollama becomes optional rather than required.
 
 ## Safety and compatibility boundaries
 
@@ -24,33 +26,32 @@ The native path is intentionally incremental:
 - llama.cpp is pinned in CI; upgrades are focused compatibility changes.
 - Native/managed ownership releases contexts before models and models before the backend.
 - Token buffers are caller-owned and Python caps tokenization at 1,000,000 tokens before allocation.
-- ABI v4 prefill is deliberately one-shot and must fit both the actual `n_ctx` and actual `n_batch` of a fresh context.
-- If `llama_decode` returns any non-zero result, that context is not retried because upstream documents that some failure/abort paths may leave partial memory state. Create a fresh context instead.
+- Prompt prefill is one-shot and must fit both actual `n_ctx` and actual `n_batch`.
+- Any non-zero prefill decode result makes that context non-retriable; callers create a fresh context.
+- ABI v5 sampling is deliberately deterministic greedy sampling and is one-shot for the current logits. It does not append the sampled token to KV state.
 - Ollama remains the default until native generation passes Core, Windows Desktop, Native Shim CI, and manual Windows smoke testing.
 - Core permissions, MEMORIA, identity, and learning semantics remain independent of the inference backend.
 
-## BabyAI native ABI v4
+## BabyAI native ABI v5
 
-The public header is `native/BabyAI.NativeBridge/include/babyai_native.h`. ABI v4 exports the existing runtime/model/tokenization/context lifecycle plus:
+ABI v5 keeps the runtime, model, tokenization, context and prefill contracts and adds:
 
-- `babyai_native_context_prefill`
-- `babyai_native_context_token_count`
+- `babyai_native_context_sample_greedy`
 
-### Tokenization
+### Prefill
 
-`babyai_native_model_tokenize` remains a two-pass caller-owned contract: first query the required count, validate/allocate in the caller, then receive `int32_t` token IDs. Python performs UTF-8 encoding, count validation and the allocation safety cap.
+`babyai_native_context_prefill` uses C++-owned temporary vectors to construct one internal `llama_batch`, decodes the prompt, records the committed token count, and requests output only for the final prompt token. No logits cross the BabyAI ABI.
 
-### Decode prefill
+### Greedy next-token sampling
 
-`babyai_native_context_prefill` accepts a non-empty caller-owned `int32_t` token array and only operates on a fresh context. Before allocating a temporary batch it verifies the token count fits both `llama_n_ctx()` and `llama_n_batch()`.
+`babyai_native_context_sample_greedy` requires a successful prefill and may be called only once for the current logits. It creates a temporary `llama_sampler_init_greedy()` sampler, calls `llama_sampler_sample(sampler, context, -1)` to sample from the final output of the last evaluation, frees the sampler immediately, validates against `LLAMA_TOKEN_NULL`, and reports:
 
-The temporary `llama_batch` never crosses the BabyAI ABI. Its token, position, sequence and output arrays are backed by C++ `std::vector`, so allocation failures are translated through BabyAI errors instead of depending on llama.cpp's raw-malloc batch helper. Sequence 0 and explicit positions `0..N-1` are used for this first prompt. Only the last prompt token requests an internal logits output so the next sampling milestone can consume it later; logits are not exposed by ABI v4.
+- the sampled `int32_t` token ID;
+- an integer EOG flag determined by `llama_vocab_is_eog`.
 
-On successful `llama_decode`, the native context records the committed token count. On decode failure the context records that a prefill attempt occurred and rejects retries; callers should destroy it and create a fresh context.
+Sampling does not call `llama_decode`, change `token_count`, append KV state, or convert the token to text. Python exposes the result as immutable `NativeSample(token_id, is_eog)` and blocks sampling before prefill or a second sampling attempt.
 
-`NativeContextHandle.prefill()` mirrors these limits in Python before crossing the ABI, validates token IDs, calls native prefill, and verifies the committed count returned by `babyai_native_context_token_count`.
-
-ABI v4 intentionally does **not** expose logits, samplers, token pieces, or generated text.
+The pinned llama.cpp simple example uses the same decode-then-`llama_sampler_sample(..., -1)` sequence; BabyAI keeps it behind its own stable ABI and uses greedy sampling first so this inference milestone is deterministic.
 
 ## Pinned llama.cpp revision
 

@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define BABYAI_NATIVE_ABI_VERSION 4u
+#define BABYAI_NATIVE_ABI_VERSION 5u
 
 typedef struct babyai_native_runtime babyai_native_runtime;
 typedef struct babyai_native_model babyai_native_model;
@@ -34,6 +34,9 @@ typedef enum babyai_native_result {
     BABYAI_NATIVE_PREFILL_TOO_LARGE = 8,
     BABYAI_NATIVE_CONTEXT_NOT_EMPTY = 9,
     BABYAI_NATIVE_DECODE_FAILED = 10,
+    BABYAI_NATIVE_SAMPLE_NOT_READY = 11,
+    BABYAI_NATIVE_SAMPLE_ALREADY_TAKEN = 12,
+    BABYAI_NATIVE_SAMPLER_FAILED = 13,
 } babyai_native_result;
 
 BABYAI_NATIVE_API uint32_t babyai_native_abi_version(void);
@@ -53,8 +56,6 @@ BABYAI_NATIVE_API int32_t babyai_native_model_open(
 BABYAI_NATIVE_API void babyai_native_model_close(
     babyai_native_model * model);
 
-// Two-pass caller-owned tokenization. Pass tokens_out=NULL and token_capacity=0
-// to query the required token count through out_token_count.
 BABYAI_NATIVE_API int32_t babyai_native_model_tokenize(
     babyai_native_runtime * runtime,
     babyai_native_model * model,
@@ -83,8 +84,6 @@ BABYAI_NATIVE_API uint32_t babyai_native_context_n_ctx(
 BABYAI_NATIVE_API uint32_t babyai_native_context_n_batch(
     const babyai_native_context * context);
 
-// Decode one initial prompt into a fresh context. ABI v4 deliberately accepts
-// only one bounded prefill batch; chunked/append decode is a later contract.
 BABYAI_NATIVE_API int32_t babyai_native_context_prefill(
     babyai_native_runtime * runtime,
     babyai_native_context * context,
@@ -93,6 +92,14 @@ BABYAI_NATIVE_API int32_t babyai_native_context_prefill(
 
 BABYAI_NATIVE_API uint32_t babyai_native_context_token_count(
     const babyai_native_context * context);
+
+// Deterministically sample exactly one token from the final output of the
+// successful prefill. This does not decode/append the sampled token.
+BABYAI_NATIVE_API int32_t babyai_native_context_sample_greedy(
+    babyai_native_runtime * runtime,
+    babyai_native_context * context,
+    int32_t * out_token,
+    int32_t * out_is_eog);
 
 // Pointer remains valid until the next operation on this runtime or runtime destroy.
 BABYAI_NATIVE_API const char * babyai_native_last_error(

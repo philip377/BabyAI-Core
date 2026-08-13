@@ -26,6 +26,7 @@ struct babyai_native_context {
     babyai_native_model * model = nullptr;
     uint32_t token_count = 0;
     bool prefill_attempted = false;
+    bool sample_taken = false;
 };
 
 namespace {
@@ -382,8 +383,6 @@ int32_t babyai_native_context_prefill(
             positions[index] = static_cast<llama_pos>(index);
             sequence_ids[index] = &sequence_storage[index];
         }
-        // Keep the final prompt logits inside llama.cpp for the future sampling step,
-        // but do not expose them through BabyAI ABI v4.
         outputs[count - 1] = 1;
 
         llama_batch batch = {
@@ -420,6 +419,51 @@ uint32_t babyai_native_context_token_count(const babyai_native_context * context
         return 0;
     }
     return context->token_count;
+}
+
+int32_t babyai_native_context_sample_greedy(
+    babyai_native_runtime * runtime,
+    babyai_native_context * context,
+    int32_t * out_token,
+    int32_t * out_is_eog) {
+    if (runtime == nullptr || context == nullptr || out_token == nullptr || out_is_eog == nullptr) {
+        return static_cast<int32_t>(BABYAI_NATIVE_INVALID_ARGUMENT);
+    }
+    *out_token = -1;
+    *out_is_eog = 0;
+    runtime->last_error.clear();
+
+    if (context->handle == nullptr || context->model == nullptr || context->model->runtime != runtime) {
+        return fail(runtime, BABYAI_NATIVE_INVALID_ARGUMENT, "Native context does not belong to this runtime.");
+    }
+    if (!context->prefill_attempted || context->token_count == 0) {
+        return fail(runtime, BABYAI_NATIVE_SAMPLE_NOT_READY, "Native context must complete prefill before sampling.");
+    }
+    if (context->sample_taken) {
+        return fail(runtime, BABYAI_NATIVE_SAMPLE_ALREADY_TAKEN, "Native context already sampled the current logits.");
+    }
+
+    const llama_vocab * vocab = llama_model_get_vocab(context->model->handle);
+    if (vocab == nullptr) {
+        return fail(runtime, BABYAI_NATIVE_INTERNAL_ERROR, "Native model vocabulary is unavailable for sampling.");
+    }
+
+    llama_sampler * sampler = llama_sampler_init_greedy();
+    if (sampler == nullptr) {
+        return fail(runtime, BABYAI_NATIVE_SAMPLER_FAILED, "Could not create the native greedy sampler.");
+    }
+
+    const llama_token token = llama_sampler_sample(sampler, context->handle, -1);
+    llama_sampler_free(sampler);
+
+    if (token == LLAMA_TOKEN_NULL) {
+        return fail(runtime, BABYAI_NATIVE_SAMPLER_FAILED, "Native greedy sampler returned LLAMA_TOKEN_NULL.");
+    }
+
+    *out_token = static_cast<int32_t>(token);
+    *out_is_eog = llama_vocab_is_eog(vocab, token) ? 1 : 0;
+    context->sample_taken = true;
+    return static_cast<int32_t>(BABYAI_NATIVE_OK);
 }
 
 const char * babyai_native_last_error(const babyai_native_runtime * runtime) {

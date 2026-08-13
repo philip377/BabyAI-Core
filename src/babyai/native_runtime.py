@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-BABYAI_NATIVE_ABI_VERSION = 4
+BABYAI_NATIVE_ABI_VERSION = 5
 BABYAI_NATIVE_OK = 0
 BABYAI_NATIVE_BUFFER_TOO_SMALL = 6
 MAX_NATIVE_TOKEN_COUNT = 1_000_000
@@ -19,6 +19,12 @@ MAX_NATIVE_TOKEN_ID = 2_147_483_647
 
 class NativeRuntimeError(RuntimeError):
     """Raised when the configured BabyAI native runtime cannot be used safely."""
+
+
+@dataclass(frozen=True, slots=True)
+class NativeSample:
+    token_id: int
+    is_eog: bool
 
 
 REQUIRED_BABYAI_SYMBOLS: tuple[str, ...] = (
@@ -34,6 +40,7 @@ REQUIRED_BABYAI_SYMBOLS: tuple[str, ...] = (
     "babyai_native_context_n_batch",
     "babyai_native_context_prefill",
     "babyai_native_context_token_count",
+    "babyai_native_context_sample_greedy",
     "babyai_native_last_error",
 )
 
@@ -93,6 +100,13 @@ def _configure_abi(library: Any) -> None:
     library.babyai_native_context_prefill.restype = ctypes.c_int32
     library.babyai_native_context_token_count.argtypes = [ctypes.c_void_p]
     library.babyai_native_context_token_count.restype = ctypes.c_uint32
+    library.babyai_native_context_sample_greedy.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_int32),
+        ctypes.POINTER(ctypes.c_int32),
+    ]
+    library.babyai_native_context_sample_greedy.restype = ctypes.c_int32
 
     library.babyai_native_last_error.argtypes = [ctypes.c_void_p]
     library.babyai_native_last_error.restype = ctypes.c_char_p
@@ -118,6 +132,7 @@ class NativeContextHandle:
     context_size: int
     batch_size: int
     token_count: int = 0
+    _sample_taken: bool = False
     _closed: bool = False
 
     @property
@@ -176,6 +191,41 @@ class NativeContextHandle:
             )
         self.token_count = actual
         return actual
+
+    def sample_greedy(self) -> NativeSample:
+        """Select exactly one deterministic next token from current prefill logits."""
+
+        if self._closed or not self.pointer.value:
+            raise NativeRuntimeError("Native context handle is closed.")
+        if self.token_count <= 0:
+            raise NativeRuntimeError("Native context must be prefilled before sampling.")
+        if self._sample_taken:
+            raise NativeRuntimeError("Native context already sampled the current logits.")
+
+        library = self.model.runtime.handle.library
+        out_token = ctypes.c_int32(-1)
+        out_is_eog = ctypes.c_int32(0)
+        result = int(
+            library.babyai_native_context_sample_greedy(
+                self.model.runtime.pointer,
+                self.pointer,
+                ctypes.byref(out_token),
+                ctypes.byref(out_is_eog),
+            )
+        )
+        if result != BABYAI_NATIVE_OK:
+            detail = _last_error(library, self.model.runtime.pointer)
+            suffix = f": {detail}" if detail else ""
+            raise NativeRuntimeError(f"Could not sample native next token (code {result}){suffix}")
+
+        token_id = int(out_token.value)
+        if token_id < 0 or token_id > MAX_NATIVE_TOKEN_ID:
+            raise NativeRuntimeError(f"Native sampler returned invalid token ID {token_id}.")
+        if out_is_eog.value not in (0, 1):
+            raise NativeRuntimeError(f"Native sampler returned invalid EOG flag {out_is_eog.value}.")
+
+        self._sample_taken = True
+        return NativeSample(token_id=token_id, is_eog=bool(out_is_eog.value))
 
     def close(self) -> None:
         if self._closed:
@@ -436,12 +486,7 @@ class NativeRuntimeHandle:
 
 @dataclass(slots=True)
 class NativeRuntimeLoader:
-    """Explicitly load BabyAI's stable native shim and validate its ABI.
-
-    llama.cpp is linked behind this DLL boundary. Readiness/status polling remains
-    file-only; dynamic loading and backend initialization happen only through an
-    explicit native lifecycle call.
-    """
+    """Explicitly load BabyAI's stable native shim and validate its ABI."""
 
     path: Path
 
