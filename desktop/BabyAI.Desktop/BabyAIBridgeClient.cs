@@ -3,9 +3,15 @@ using System.Text.Json;
 
 namespace BabyAI.Desktop;
 
-public sealed class BabyAIBridgeClient
+public sealed class BabyAIBridgeClient : IDisposable
 {
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(3);
+    private readonly SemaphoreSlim _requestGate = new(1, 1);
+    private readonly object _workerSync = new();
+    private Process? _worker;
+    private Task<string>? _workerStderr;
+    private long _nextRequestId;
+    private bool _disposed;
 
     public async Task<DesktopStatus> StatusAsync()
     {
@@ -55,78 +61,161 @@ public sealed class BabyAIBridgeClient
 
     public Task RejectLessonAsync() => ExecuteAsync("lesson.reject", "{}");
 
-    private static async Task<string> ExecuteAsync(
+    private async Task<string> ExecuteAsync(
         string command,
         string payload,
         CancellationToken cancellationToken = default)
     {
-        var python = Environment.GetEnvironmentVariable("BABYAI_PYTHON");
-        if (string.IsNullOrWhiteSpace(python))
-            python = "python";
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = python,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        startInfo.ArgumentList.Add("-m");
-        startInfo.ArgumentList.Add("babyai.desktop_commands_cli");
-        startInfo.ArgumentList.Add("exec");
-        startInfo.ArgumentList.Add(command);
-        startInfo.ArgumentList.Add("--payload");
-        startInfo.ArgumentList.Add(payload);
-
-        Process? process;
+        await _requestGate.WaitAsync(cancellationToken);
         try
         {
-            process = Process.Start(startInfo);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException(
-                $"Could not start BabyAI Python bridge using '{python}'. Run scripts/windows/bootstrap.ps1 first.", ex);
-        }
+            ThrowIfDisposed();
+            using var timeout = new CancellationTokenSource(RequestTimeout);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
+            var worker = EnsureWorker();
+            var requestId = Interlocked.Increment(ref _nextRequestId);
 
-        using (process ?? throw new InvalidOperationException("Could not start BabyAI Python bridge."))
-        using (var timeout = new CancellationTokenSource(RequestTimeout))
-        using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token))
-        {
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
+            using var payloadDocument = JsonDocument.Parse(payload);
+            if (payloadDocument.RootElement.ValueKind != JsonValueKind.Object)
+                throw new InvalidOperationException("BabyAI desktop payload must be a JSON object.");
 
+            var request = JsonSerializer.Serialize(new
+            {
+                id = requestId,
+                command,
+                payload = payloadDocument.RootElement.Clone(),
+            });
+
+            string? response;
             try
             {
-                await process.WaitForExitAsync(linked.Token);
+                await worker.StandardInput.WriteLineAsync(request);
+                await worker.StandardInput.FlushAsync();
+                response = await worker.StandardOutput.ReadLineAsync(linked.Token);
             }
             catch (OperationCanceledException) when (linked.IsCancellationRequested)
             {
-                TryKill(process);
-                try
-                {
-                    await process.WaitForExitAsync();
-                }
-                catch
-                {
-                    // The process is already being torn down; preserve the cancellation result.
-                }
-
+                ResetWorker();
                 if (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                     throw new TimeoutException("BabyAI response timed out after 3 minutes.");
-
                 throw;
             }
+            catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+            {
+                ResetWorker();
+                throw new InvalidOperationException("BabyAI desktop worker connection failed.", ex);
+            }
 
-            var stdout = await stdoutTask;
-            var stderr = await stderrTask;
+            if (response is null)
+            {
+                var stderr = ReadWorkerError();
+                ResetWorker();
+                throw new InvalidOperationException(
+                    string.IsNullOrWhiteSpace(stderr)
+                        ? "BabyAI desktop worker exited unexpectedly."
+                        : stderr);
+            }
 
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "BabyAI bridge failed." : stderr.Trim());
+            try
+            {
+                using var responseDocument = JsonDocument.Parse(response);
+                var root = responseDocument.RootElement;
+                if (!root.TryGetProperty("id", out var idElement) || idElement.GetInt64() != requestId)
+                    throw new JsonException("BabyAI desktop worker returned an unexpected request id.");
 
-            return stdout.Trim();
+                if (root.TryGetProperty("ok", out var okElement) && !okElement.GetBoolean())
+                {
+                    var error = root.TryGetProperty("error", out var errorElement)
+                        ? errorElement.GetString()
+                        : null;
+                    throw new InvalidOperationException(
+                        string.IsNullOrWhiteSpace(error) ? "BabyAI desktop command failed." : error);
+                }
+            }
+            catch (JsonException ex)
+            {
+                ResetWorker();
+                throw new InvalidOperationException("BabyAI desktop worker returned an invalid response.", ex);
+            }
+
+            return response;
         }
+        finally
+        {
+            _requestGate.Release();
+        }
+    }
+
+    private Process EnsureWorker()
+    {
+        lock (_workerSync)
+        {
+            ThrowIfDisposed();
+            if (_worker is not null && !_worker.HasExited)
+                return _worker;
+
+            DisposeWorkerLocked();
+
+            var python = Environment.GetEnvironmentVariable("BABYAI_PYTHON");
+            if (string.IsNullOrWhiteSpace(python))
+                python = "python";
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = python,
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            startInfo.ArgumentList.Add("-u");
+            startInfo.ArgumentList.Add("-m");
+            startInfo.ArgumentList.Add("babyai.desktop_worker");
+
+            try
+            {
+                _worker = Process.Start(startInfo)
+                    ?? throw new InvalidOperationException("Could not start BabyAI Python bridge.");
+                _workerStderr = _worker.StandardError.ReadToEndAsync();
+                return _worker;
+            }
+            catch (Exception ex)
+            {
+                _worker = null;
+                _workerStderr = null;
+                throw new InvalidOperationException(
+                    $"Could not start BabyAI Python bridge using '{python}'. Run scripts/windows/bootstrap.ps1 first.", ex);
+            }
+        }
+    }
+
+    private string ReadWorkerError()
+    {
+        lock (_workerSync)
+        {
+            if (_workerStderr is null || !_workerStderr.IsCompletedSuccessfully)
+                return string.Empty;
+            return _workerStderr.Result.Trim();
+        }
+    }
+
+    private void ResetWorker()
+    {
+        lock (_workerSync)
+            DisposeWorkerLocked();
+    }
+
+    private void DisposeWorkerLocked()
+    {
+        var process = _worker;
+        _worker = null;
+        _workerStderr = null;
+        if (process is null)
+            return;
+
+        TryKill(process);
+        process.Dispose();
     }
 
     private static void TryKill(Process process)
@@ -138,7 +227,24 @@ public sealed class BabyAIBridgeClient
         }
         catch
         {
-            // Best effort: cancellation still returns control to the desktop UI.
+            // Best effort. A later request starts a clean worker.
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(BabyAIBridgeClient));
+    }
+
+    public void Dispose()
+    {
+        lock (_workerSync)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            DisposeWorkerLocked();
         }
     }
 }
