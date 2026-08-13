@@ -6,7 +6,7 @@ param(
     [string]$DesktopDir,
 
     [Parameter(Mandatory = $true)]
-    [string]$WheelsDir,
+    [string]$PythonRuntimeDir,
 
     [Parameter(Mandatory = $true)]
     [string]$CpuRuntime,
@@ -21,7 +21,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $DesktopDir = (Resolve-Path $DesktopDir).Path
-$WheelsDir = (Resolve-Path $WheelsDir).Path
+$PythonRuntimeDir = (Resolve-Path $PythonRuntimeDir).Path
 $CpuRuntime = (Resolve-Path $CpuRuntime).Path
 $VulkanRuntime = (Resolve-Path $VulkanRuntime).Path
 $OutputDir = [IO.Path]::GetFullPath($OutputDir)
@@ -38,19 +38,20 @@ New-Item -ItemType Directory -Force (Join-Path $stageRoot "runtime\cpu") | Out-N
 New-Item -ItemType Directory -Force (Join-Path $stageRoot "runtime\vulkan") | Out-Null
 
 Copy-Item $DesktopDir (Join-Path $stageRoot "app") -Recurse
-Copy-Item $WheelsDir (Join-Path $stageRoot "wheels") -Recurse
+Copy-Item $PythonRuntimeDir (Join-Path $stageRoot "python") -Recurse
 Copy-Item $CpuRuntime (Join-Path $stageRoot "runtime\cpu\babyai_native.dll")
 Copy-Item $VulkanRuntime (Join-Path $stageRoot "runtime\vulkan\babyai_native.dll")
 Copy-Item "scripts\windows\install-release.ps1" (Join-Path $stageRoot "install.ps1")
 Copy-Item "scripts\windows\start-release.ps1" (Join-Path $stageRoot "start.ps1")
 
 $manifest = [ordered]@{
-    schema = 1
+    schema = 2
     product = "BabyAI"
     version = $Version
     platform = "windows-x64"
     model_included = $false
-    python_versions = @("3.11", "3.12", "3.13")
+    python_runtime = "3.12.10"
+    python_runtime_embedded = $true
     runtimes = @("cpu", "vulkan")
 } | ConvertTo-Json -Depth 4
 Set-Content (Join-Path $stageRoot "release.json") $manifest -Encoding UTF8
