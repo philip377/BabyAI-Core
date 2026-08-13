@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_native_shim_exposes_stable_abi_v2_context_contract():
+def test_native_shim_exposes_stable_abi_v3_tokenization_contract():
     root = Path(__file__).resolve().parents[1]
     header = (root / "native" / "BabyAI.NativeBridge" / "include" / "babyai_native.h").read_text(
         encoding="utf-8"
@@ -12,13 +12,14 @@ def test_native_shim_exposes_stable_abi_v2_context_contract():
         encoding="utf-8"
     )
 
-    assert "#define BABYAI_NATIVE_ABI_VERSION 2u" in header
+    assert "#define BABYAI_NATIVE_ABI_VERSION 3u" in header
     for symbol in (
         "babyai_native_abi_version",
         "babyai_native_runtime_create",
         "babyai_native_runtime_destroy",
         "babyai_native_model_open",
         "babyai_native_model_close",
+        "babyai_native_model_tokenize",
         "babyai_native_context_create",
         "babyai_native_context_destroy",
         "babyai_native_context_n_ctx",
@@ -32,12 +33,14 @@ def test_native_shim_exposes_stable_abi_v2_context_contract():
     assert "llama_backend_free();" in source
     assert "llama_model_load_from_file" in source
     assert "llama_model_free" in source
+    assert "llama_model_get_vocab" in source
+    assert "llama_tokenize" in source
     assert "llama_context_default_params" in source
     assert "llama_init_from_model" in source
     assert "llama_free" in source
-    assert "llama_n_ctx" in source
-    assert "llama_n_batch" in source
     assert "llama_decode" not in source
+    assert "llama_get_logits" not in source
+    assert "llama_sampler_sample" not in source
 
 
 def test_native_shim_ci_pins_upstream_and_runs_managed_lifecycle_smoke():
