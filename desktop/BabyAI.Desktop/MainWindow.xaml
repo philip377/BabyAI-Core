@@ -80,11 +80,12 @@
                         <TextBlock x:Name="CoreStatusText" Text="Core: not checked" FontSize="12" Opacity="0.5" />
                         <TextBlock x:Name="RuntimeText" Text="Runtime: unknown" FontSize="12" Opacity="0.5" />
                     </StackPanel>
-                    <local:BrainStatusIndicator x:Name="BrainText"
-                                                Text="Brain: checking…"
-                                                FontSize="12"
-                                                Opacity="0.72"
-                                                TextWrapping="Wrap" />
+                    <TextBlock x:Name="BrainText"
+                               Text="Brain: checking…"
+                               FontSize="12"
+                               Opacity="0.72"
+                               TextWrapping="Wrap"
+                               local:BrainStatusBehavior.Enabled="True" />
                 </StackPanel>
 
                 <Border Grid.Row="1" Background="#22FFFFFF" CornerRadius="14" Padding="10">
