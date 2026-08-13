@@ -9,10 +9,11 @@ from pathlib import Path
 from typing import Any
 
 
-BABYAI_NATIVE_ABI_VERSION = 5
+BABYAI_NATIVE_ABI_VERSION = 6
 BABYAI_NATIVE_OK = 0
 BABYAI_NATIVE_BUFFER_TOO_SMALL = 6
 MAX_NATIVE_TOKEN_COUNT = 1_000_000
+MAX_NATIVE_PIECE_BYTES = 1_048_576
 MAX_NATIVE_TEXT_BYTES = 2_147_483_647
 MAX_NATIVE_TOKEN_ID = 2_147_483_647
 
@@ -34,6 +35,7 @@ REQUIRED_BABYAI_SYMBOLS: tuple[str, ...] = (
     "babyai_native_model_open",
     "babyai_native_model_close",
     "babyai_native_model_tokenize",
+    "babyai_native_model_token_to_piece",
     "babyai_native_context_create",
     "babyai_native_context_destroy",
     "babyai_native_context_n_ctx",
@@ -41,6 +43,7 @@ REQUIRED_BABYAI_SYMBOLS: tuple[str, ...] = (
     "babyai_native_context_prefill",
     "babyai_native_context_token_count",
     "babyai_native_context_sample_greedy",
+    "babyai_native_context_decode_sampled",
     "babyai_native_last_error",
 )
 
@@ -75,6 +78,16 @@ def _configure_abi(library: Any) -> None:
         ctypes.POINTER(ctypes.c_int32),
     ]
     library.babyai_native_model_tokenize.restype = ctypes.c_int32
+    library.babyai_native_model_token_to_piece.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int32,
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_char),
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_int32),
+    ]
+    library.babyai_native_model_token_to_piece.restype = ctypes.c_int32
 
     library.babyai_native_context_create.argtypes = [
         ctypes.c_void_p,
@@ -107,6 +120,12 @@ def _configure_abi(library: Any) -> None:
         ctypes.POINTER(ctypes.c_int32),
     ]
     library.babyai_native_context_sample_greedy.restype = ctypes.c_int32
+    library.babyai_native_context_decode_sampled.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int32,
+    ]
+    library.babyai_native_context_decode_sampled.restype = ctypes.c_int32
 
     library.babyai_native_last_error.argtypes = [ctypes.c_void_p]
     library.babyai_native_last_error.restype = ctypes.c_char_p
@@ -133,6 +152,7 @@ class NativeContextHandle:
     batch_size: int
     token_count: int = 0
     _sample_taken: bool = False
+    _sampled_token: int | None = None
     _closed: bool = False
 
     @property
@@ -193,14 +213,14 @@ class NativeContextHandle:
         return actual
 
     def sample_greedy(self) -> NativeSample:
-        """Select exactly one deterministic next token from current prefill logits."""
+        """Select exactly one deterministic next token from current logits."""
 
         if self._closed or not self.pointer.value:
             raise NativeRuntimeError("Native context handle is closed.")
         if self.token_count <= 0:
             raise NativeRuntimeError("Native context must be prefilled before sampling.")
         if self._sample_taken:
-            raise NativeRuntimeError("Native context already sampled the current logits.")
+            raise NativeRuntimeError("Native context already sampled the current logits; decode that token first.")
 
         library = self.model.runtime.handle.library
         out_token = ctypes.c_int32(-1)
@@ -225,7 +245,48 @@ class NativeContextHandle:
             raise NativeRuntimeError(f"Native sampler returned invalid EOG flag {out_is_eog.value}.")
 
         self._sample_taken = True
+        self._sampled_token = token_id
         return NativeSample(token_id=token_id, is_eog=bool(out_is_eog.value))
+
+    def decode_sampled(self, token_id: int) -> int:
+        """Append the pending sampled token and refresh logits for the next sample."""
+
+        if self._closed or not self.pointer.value:
+            raise NativeRuntimeError("Native context handle is closed.")
+        if isinstance(token_id, bool) or not isinstance(token_id, int):
+            raise NativeRuntimeError("Native sampled token ID must be an integer.")
+        if token_id < 0 or token_id > MAX_NATIVE_TOKEN_ID:
+            raise NativeRuntimeError(f"Native token ID {token_id} is outside the supported int32 range.")
+        if not self._sample_taken or self._sampled_token is None:
+            raise NativeRuntimeError("Native context must sample a token before append decode.")
+        if token_id != self._sampled_token:
+            raise NativeRuntimeError("Native append decode token must match the pending sampled token.")
+        if self.token_count >= self.context_size:
+            raise NativeRuntimeError("Native context has no remaining token positions for append decode.")
+
+        library = self.model.runtime.handle.library
+        expected = self.token_count + 1
+        result = int(
+            library.babyai_native_context_decode_sampled(
+                self.model.runtime.pointer,
+                self.pointer,
+                token_id,
+            )
+        )
+        if result != BABYAI_NATIVE_OK:
+            detail = _last_error(library, self.model.runtime.pointer)
+            suffix = f": {detail}" if detail else ""
+            raise NativeRuntimeError(f"Could not append native sampled token (code {result}){suffix}")
+
+        actual = int(library.babyai_native_context_token_count(self.pointer))
+        if actual != expected:
+            raise NativeRuntimeError(
+                f"Native append decode reported {actual} committed tokens; expected {expected}."
+            )
+        self.token_count = actual
+        self._sample_taken = False
+        self._sampled_token = None
+        return actual
 
     def close(self) -> None:
         if self._closed:
@@ -335,6 +396,70 @@ class NativeModelHandle:
                 f"Native tokenization returned invalid token count {actual}; allocated {required}."
             )
         return [int(buffer[index]) for index in range(actual)]
+
+    def token_to_piece(self, token_id: int, *, render_special: bool = False) -> bytes:
+        """Return one bounded raw token piece; callers may combine pieces before UTF-8 decoding."""
+
+        if self._closed or not self.pointer.value:
+            raise NativeRuntimeError("Native model handle is closed.")
+        if isinstance(token_id, bool) or not isinstance(token_id, int):
+            raise NativeRuntimeError("Native token piece ID must be an integer.")
+        if token_id < 0 or token_id > MAX_NATIVE_TOKEN_ID:
+            raise NativeRuntimeError(f"Native token ID {token_id} is outside the supported int32 range.")
+
+        library = self.runtime.handle.library
+        required_count = ctypes.c_int32()
+        result = int(
+            library.babyai_native_model_token_to_piece(
+                self.runtime.pointer,
+                self.pointer,
+                token_id,
+                int(bool(render_special)),
+                None,
+                0,
+                ctypes.byref(required_count),
+            )
+        )
+        if result not in (BABYAI_NATIVE_OK, BABYAI_NATIVE_BUFFER_TOO_SMALL):
+            detail = _last_error(library, self.runtime.pointer)
+            suffix = f": {detail}" if detail else ""
+            raise NativeRuntimeError(f"Could not size native token piece (code {result}){suffix}")
+
+        required = int(required_count.value)
+        if required < 0:
+            raise NativeRuntimeError("Native token piece returned a negative byte count.")
+        if required > MAX_NATIVE_PIECE_BYTES:
+            raise NativeRuntimeError(
+                f"Native token piece requires {required} bytes, exceeding the safety limit of "
+                f"{MAX_NATIVE_PIECE_BYTES}."
+            )
+        if required == 0:
+            return b""
+
+        buffer = ctypes.create_string_buffer(required)
+        actual_count = ctypes.c_int32()
+        result = int(
+            library.babyai_native_model_token_to_piece(
+                self.runtime.pointer,
+                self.pointer,
+                token_id,
+                int(bool(render_special)),
+                buffer,
+                required,
+                ctypes.byref(actual_count),
+            )
+        )
+        if result != BABYAI_NATIVE_OK:
+            detail = _last_error(library, self.runtime.pointer)
+            suffix = f": {detail}" if detail else ""
+            raise NativeRuntimeError(f"Could not convert native token to piece (code {result}){suffix}")
+
+        actual = int(actual_count.value)
+        if actual < 0 or actual > required:
+            raise NativeRuntimeError(
+                f"Native token piece returned invalid byte count {actual}; allocated {required}."
+            )
+        return bytes(buffer.raw[:actual])
 
     def open_context(
         self,

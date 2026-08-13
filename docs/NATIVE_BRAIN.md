@@ -13,8 +13,8 @@ The native path is intentionally incremental:
 7. **Tokenization** — ABI v3 added bounded two-pass UTF-8 -> token ID conversion with caller-owned buffers.
 8. **Decode prefill** — ABI v4 added one bounded initial prompt decode into a fresh context.
 9. **Deterministic next token** — ABI v5 samples exactly one greedy next token from the retained final-prompt logits and reports whether it is EOG.
-10. **Append decode + token text** — next: decode the selected token at the next position, refresh logits, and convert token IDs to UTF-8 pieces.
-11. **Bounded generation** — iterate sample/decode with cancellation and context limits, then add configurable sampling.
+10. **Append decode + token pieces** — ABI v6 appends the exact sampled token at the next position, refreshes logits, and converts token IDs to bounded raw text pieces.
+11. **Bounded generation** — next: iterate sample/decode with cancellation, context and output limits, then combine token-piece bytes into UTF-8 text.
 12. **Packaging** — ship the tested shim and model next to BabyAI so Ollama becomes optional rather than required.
 
 ## Safety and compatibility boundaries
@@ -26,17 +26,21 @@ The native path is intentionally incremental:
 - llama.cpp is pinned in CI; upgrades are focused compatibility changes.
 - Native/managed ownership releases contexts before models and models before the backend.
 - Token buffers are caller-owned and Python caps tokenization at 1,000,000 tokens before allocation.
+- Token-piece buffers are caller-owned and Python caps one piece at 1 MiB before allocation.
 - Prompt prefill is one-shot and must fit both actual `n_ctx` and actual `n_batch`.
-- Any non-zero prefill decode result makes that context non-retriable; callers create a fresh context.
-- ABI v5 sampling is deliberately deterministic greedy sampling and is one-shot for the current logits. It does not append the sampled token to KV state.
+- Any non-zero prefill or append decode result makes the context non-retriable; callers create a fresh context.
+- Greedy sampling is deterministic and produces one pending token. Another sample is rejected until that exact token is appended.
+- Append decode never accepts an arbitrary replacement token and never writes beyond the actual native context size.
+- Token pieces are raw bytes, not independently decoded strings, because a UTF-8 code point may span token boundaries. The generation layer will combine bounded pieces before decoding text.
 - Ollama remains the default until native generation passes Core, Windows Desktop, Native Shim CI, and manual Windows smoke testing.
 - Core permissions, MEMORIA, identity, and learning semantics remain independent of the inference backend.
 
-## BabyAI native ABI v5
+## BabyAI native ABI v6
 
-ABI v5 keeps the runtime, model, tokenization, context and prefill contracts and adds:
+ABI v6 keeps the runtime, model, tokenization, context, prefill and deterministic sampling contracts and adds:
 
-- `babyai_native_context_sample_greedy`
+- `babyai_native_model_token_to_piece`
+- `babyai_native_context_decode_sampled`
 
 ### Prefill
 
@@ -44,14 +48,26 @@ ABI v5 keeps the runtime, model, tokenization, context and prefill contracts and
 
 ### Greedy next-token sampling
 
-`babyai_native_context_sample_greedy` requires a successful prefill and may be called only once for the current logits. It creates a temporary `llama_sampler_init_greedy()` sampler, calls `llama_sampler_sample(sampler, context, -1)` to sample from the final output of the last evaluation, frees the sampler immediately, validates against `LLAMA_TOKEN_NULL`, and reports:
+`babyai_native_context_sample_greedy` requires a successful decode state with current logits and no pending sample. It creates a temporary `llama_sampler_init_greedy()` sampler, calls `llama_sampler_sample(sampler, context, -1)`, frees the sampler immediately, validates against `LLAMA_TOKEN_NULL`, and records the selected token as pending. It reports:
 
 - the sampled `int32_t` token ID;
 - an integer EOG flag determined by `llama_vocab_is_eog`.
 
-Sampling does not call `llama_decode`, change `token_count`, append KV state, or convert the token to text. Python exposes the result as immutable `NativeSample(token_id, is_eog)` and blocks sampling before prefill or a second sampling attempt.
+Sampling itself does not mutate KV state or increment `token_count`.
 
-The pinned llama.cpp simple example uses the same decode-then-`llama_sampler_sample(..., -1)` sequence; BabyAI keeps it behind its own stable ABI and uses greedy sampling first so this inference milestone is deterministic.
+### Append decode
+
+`babyai_native_context_decode_sampled` accepts only the exact pending token returned by the preceding sample. It rejects calls without a pending sample, mismatched token IDs and a full context before entering `llama_decode`.
+
+The shim constructs one BabyAI-owned batch at position `token_count`, sequence 0, requests final output logits, and decodes exactly one token. A successful append increments `token_count`, clears the pending sample and enables another greedy sample. A decode failure marks the context unusable so callers cannot continue from potentially partial native state.
+
+### Token pieces
+
+`babyai_native_model_token_to_piece` is a two-pass caller-owned byte-buffer contract over the pinned llama.cpp vocabulary. The first call reports the required byte count; the second copies the piece bytes into a bounded caller buffer.
+
+The managed `NativeModelHandle.token_to_piece()` returns `bytes` rather than eagerly decoding each piece as UTF-8. This preserves byte sequences when one Unicode code point is split across multiple tokens. Bounded generation will concatenate pieces and decode the combined stream.
+
+The pinned llama.cpp simple example follows the same evaluate → sample → token-to-piece → next-token-decode sequence; BabyAI keeps each operation behind its own stable ABI and explicit state checks.
 
 ## Pinned llama.cpp revision
 
