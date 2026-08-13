@@ -104,11 +104,11 @@ def probe_brain_runtime(config: BabyAIConfig) -> BrainRuntimeStatus:
         return BrainRuntimeStatus(
             provider="native",
             model=config.model,
-            state="native_inference_pending",
-            ready=False,
+            state="ready",
+            ready=True,
             detail=(
-                "Native GGUF model and BabyAI runtime library are present. "
-                "In-process inference wiring is the next implementation step."
+                "Native GGUF model and BabyAI runtime library are configured. "
+                "The runtime ABI and model are validated when generation is explicitly requested."
             ),
         )
 

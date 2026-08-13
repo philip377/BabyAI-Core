@@ -1,6 +1,6 @@
 # Native Brain roadmap
 
-BabyAI currently supports `ollama`, `echo`, and the reserved `native` provider.
+BabyAI currently supports `ollama`, `echo`, and the in-process `native` GGUF provider.
 
 The native path is intentionally incremental:
 
@@ -14,18 +14,19 @@ The native path is intentionally incremental:
 8. **Decode prefill** — ABI v4 added one bounded initial prompt decode into a fresh context.
 9. **Deterministic next token** — ABI v5 samples exactly one greedy next token from the retained final-prompt logits and reports whether it is EOG.
 10. **Append decode + token pieces** — ABI v6 appends the exact sampled token at the next position, refreshes logits, and converts token IDs to bounded raw text pieces.
-11. **Bounded generation** — managed generation now iterates sample/piece/decode with token, context and output bounds, cooperative cancellation, EOG handling, and combined UTF-8 decoding.
-12. **Provider integration** — next: let `NativeBrainProvider` own a runtime/model session and expose bounded native generation through the normal `LLMProvider.generate()` path.
-13. **Packaging** — ship the tested shim and model next to BabyAI so Ollama becomes optional rather than required.
+11. **Bounded generation** — managed generation iterates sample/piece/decode with token, context and output bounds, cooperative cancellation, EOG handling, and combined UTF-8 decoding.
+12. **Provider integration** — `NativeBrainProvider.generate()` now owns an explicit runtime/model lifetime and exposes bounded GGUF generation through the normal `LLMProvider` path.
+13. **Windows GGUF smoke + packaging** — next: ship/test a compatible model and shim together, tune runtime settings, and verify real Orb chat on Windows before considering native the default.
 
 ## Safety and compatibility boundaries
 
 - Native mode never downloads a model or runtime automatically.
 - Native mode never shells out to `llama-cli` or `llama-server`.
-- Dynamic library loading happens only through an explicit native-runtime call, not ordinary status polling.
+- Dynamic library loading happens only through an explicit generation/runtime call, not ordinary status polling.
 - The shim is the only native ABI BabyAI Core binds to; llama.cpp structs stay inside C++.
 - llama.cpp is pinned in CI; upgrades are focused compatibility changes.
 - Native/managed ownership releases contexts before models and models before the backend.
+- `NativeBrainProvider` currently opens a fresh runtime/model lifetime for each `generate()` call so cleanup is explicit and command failures cannot retain uncertain native state.
 - Token buffers are caller-owned and Python caps tokenization at 1,000,000 tokens before allocation.
 - Token-piece buffers are caller-owned and Python caps one piece at 1 MiB before allocation.
 - Prompt prefill is one-shot and must fit both actual `n_ctx` and actual `n_batch`.
@@ -37,7 +38,8 @@ The native path is intentionally incremental:
 - Cancellation is cooperative at token boundaries; it does not interrupt a native `llama_decode` already in progress.
 - Token pieces remain raw bytes until the generation layer combines them. This preserves UTF-8 code points split across tokens.
 - If a caller-imposed stop lands on a partial UTF-8 code point, only the incomplete suffix is omitted. EOG-complete output must be valid UTF-8 or generation fails explicitly.
-- Ollama remains the default until native provider integration passes Core, Windows Desktop, Native Shim CI, and manual Windows smoke testing.
+- Readiness remains read-only: it checks that the configured GGUF and BabyAI runtime files exist but does not load native code. ABI/model validation happens only when generation is explicitly requested.
+- Ollama remains the default until native provider generation passes Core, Windows Desktop, Native Shim CI, and manual Windows GGUF smoke testing.
 - Core permissions, MEMORIA, identity, and learning semantics remain independent of the inference backend.
 
 ## BabyAI native ABI v6
@@ -81,6 +83,14 @@ The managed `NativeModelHandle.token_to_piece()` returns `bytes` rather than eag
 Generation stops on EOG, `max_tokens`, context capacity, output-byte capacity, or a cooperative cancellation check. The result records generated token count, raw output byte count and the stop reason alongside text.
 
 Pieces are accumulated before UTF-8 decoding. At EOG the complete byte stream must decode strictly. At caller-imposed boundaries, an incomplete trailing code point can remain buffered and is omitted instead of emitting a replacement character.
+
+## Native provider integration
+
+`NativeBrainProvider.generate()` opens the configured BabyAI runtime, loads the configured GGUF model, calls bounded greedy generation, and closes model/runtime ownership before returning. Native runtime failures are translated into the existing `LLMError` boundary so CLI/Desktop callers get the same provider-level failure semantics as Ollama.
+
+The first provider defaults are intentionally conservative and explicit: 256 generated tokens, 1 MiB output, `n_ctx=4096`, `n_batch=4096`, CPU-only model loading (`n_gpu_layers=0`), and llama.cpp default thread selection. Runtime tuning and persistent model residency are later performance milestones, not prerequisites for correctness.
+
+The read-only readiness probe reports native as ready when both configured files exist. It deliberately does not load the DLL or model during status polling; actual ABI/model compatibility is checked by the explicit generation call.
 
 The pinned llama.cpp simple example follows the same evaluate → sample → token-to-piece → next-token-decode sequence; BabyAI keeps each native operation behind its own stable ABI and the iteration policy in managed Core code.
 
