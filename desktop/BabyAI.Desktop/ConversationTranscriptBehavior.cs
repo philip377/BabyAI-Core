@@ -4,6 +4,7 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.UI;
 
 namespace BabyAI.Desktop;
@@ -118,7 +119,7 @@ public static class ConversationTranscriptBehavior
 
         var label = new TextBlock
         {
-            Text = isUser ? "YOU" : isSystem ? "SYSTEM" : "BABYAI",
+            Text = isUser ? "ВЫ" : isSystem ? "СИСТЕМА" : "BABYAI",
             FontSize = 9,
             CharacterSpacing = 90,
             FontWeight = FontWeights.SemiBold,
@@ -152,14 +153,44 @@ public static class ConversationTranscriptBehavior
             HorizontalAlignment = alignment,
         };
 
-        return new StackPanel
+        var card = new StackPanel
         {
             MaxWidth = 300,
             HorizontalAlignment = alignment,
             Spacing = 3,
             Margin = new Thickness(0, 0, 0, 7),
-            Children = { label, bubble },
         };
+        card.Children.Add(label);
+        card.Children.Add(bubble);
+
+        if (!isUser && !isSystem)
+            card.Children.Add(CreateCopyButton(text));
+
+        return card;
+    }
+
+    private static Button CreateCopyButton(string text)
+    {
+        var button = new Button
+        {
+            Content = "Копировать",
+            FontSize = 9,
+            Padding = new Thickness(6, 1, 6, 1),
+            Margin = new Thickness(4, 0, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = Brush(255, 255, 255, 0),
+            BorderThickness = new Thickness(0),
+            Foreground = Brush(255, 255, 255, 105),
+        };
+        ToolTipService.SetToolTip(button, "Копировать ответ");
+        button.Click += (_, _) =>
+        {
+            var package = new DataPackage();
+            package.SetText(text);
+            Clipboard.SetContent(package);
+            button.Content = "Скопировано";
+        };
+        return button;
     }
 
     private static SolidColorBrush Brush(byte red, byte green, byte blue, byte alpha) =>
