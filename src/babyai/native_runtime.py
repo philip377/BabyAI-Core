@@ -8,8 +8,11 @@ from pathlib import Path
 from typing import Any
 
 
-BABYAI_NATIVE_ABI_VERSION = 2
+BABYAI_NATIVE_ABI_VERSION = 3
 BABYAI_NATIVE_OK = 0
+BABYAI_NATIVE_BUFFER_TOO_SMALL = 6
+MAX_NATIVE_TOKEN_COUNT = 1_000_000
+MAX_NATIVE_TEXT_BYTES = 2_147_483_647
 
 
 class NativeRuntimeError(RuntimeError):
@@ -22,6 +25,7 @@ REQUIRED_BABYAI_SYMBOLS: tuple[str, ...] = (
     "babyai_native_runtime_destroy",
     "babyai_native_model_open",
     "babyai_native_model_close",
+    "babyai_native_model_tokenize",
     "babyai_native_context_create",
     "babyai_native_context_destroy",
     "babyai_native_context_n_ctx",
@@ -48,6 +52,18 @@ def _configure_abi(library: Any) -> None:
     library.babyai_native_model_open.restype = ctypes.c_int32
     library.babyai_native_model_close.argtypes = [ctypes.c_void_p]
     library.babyai_native_model_close.restype = None
+    library.babyai_native_model_tokenize.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        ctypes.c_int32,
+        ctypes.c_int32,
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_int32),
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_int32),
+    ]
+    library.babyai_native_model_tokenize.restype = ctypes.c_int32
 
     library.babyai_native_context_create.argtypes = [
         ctypes.c_void_p,
@@ -127,6 +143,81 @@ class NativeModelHandle:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    def tokenize(
+        self,
+        text: str,
+        *,
+        add_special: bool = True,
+        parse_special: bool = False,
+    ) -> list[int]:
+        if self._closed or not self.pointer.value:
+            raise NativeRuntimeError("Native model handle is closed.")
+        if not isinstance(text, str):
+            raise NativeRuntimeError("Native tokenization text must be a string.")
+
+        encoded = text.encode("utf-8")
+        if len(encoded) > MAX_NATIVE_TEXT_BYTES:
+            raise NativeRuntimeError("Native tokenization input exceeds the int32 byte limit.")
+
+        library = self.runtime.handle.library
+        required_count = ctypes.c_int32()
+        result = int(
+            library.babyai_native_model_tokenize(
+                self.runtime.pointer,
+                self.pointer,
+                encoded,
+                len(encoded),
+                int(bool(add_special)),
+                int(bool(parse_special)),
+                None,
+                0,
+                ctypes.byref(required_count),
+            )
+        )
+        if result not in (BABYAI_NATIVE_OK, BABYAI_NATIVE_BUFFER_TOO_SMALL):
+            detail = _last_error(library, self.runtime.pointer)
+            suffix = f": {detail}" if detail else ""
+            raise NativeRuntimeError(f"Could not size native tokenization (code {result}){suffix}")
+
+        required = int(required_count.value)
+        if required < 0:
+            raise NativeRuntimeError("Native tokenization returned a negative token count.")
+        if required > MAX_NATIVE_TOKEN_COUNT:
+            raise NativeRuntimeError(
+                f"Native tokenization requires {required} tokens, exceeding the safety limit of "
+                f"{MAX_NATIVE_TOKEN_COUNT}."
+            )
+        if required == 0:
+            return []
+
+        buffer_type = ctypes.c_int32 * required
+        buffer = buffer_type()
+        actual_count = ctypes.c_int32()
+        result = int(
+            library.babyai_native_model_tokenize(
+                self.runtime.pointer,
+                self.pointer,
+                encoded,
+                len(encoded),
+                int(bool(add_special)),
+                int(bool(parse_special)),
+                buffer,
+                required,
+                ctypes.byref(actual_count),
+            )
+        )
+        if result != BABYAI_NATIVE_OK:
+            detail = _last_error(library, self.runtime.pointer)
+            suffix = f": {detail}" if detail else ""
+            raise NativeRuntimeError(f"Could not tokenize native text (code {result}){suffix}")
+
+        actual = int(actual_count.value)
+        if actual < 0 or actual > required:
+            raise NativeRuntimeError(
+                f"Native tokenization returned invalid token count {actual}; allocated {required}."
+            )
+        return [int(buffer[index]) for index in range(actual)]
 
     def open_context(
         self,
