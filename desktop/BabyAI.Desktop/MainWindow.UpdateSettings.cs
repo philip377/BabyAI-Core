@@ -25,12 +25,11 @@ public sealed partial class MainWindow
         automaticCheck.Toggled += (_, _) =>
         {
             var current = _uiSettings.Load();
-            _uiSettings.Save(new DesktopUiSettings(
-                current.AlwaysOnTop,
-                automaticCheck.IsOn));
+            _uiSettings.Save(new DesktopUiSettings(current.AlwaysOnTop, automaticCheck.IsOn));
         };
         panel.Children.Add(CreateSettingsCard(automaticCheck));
 
+        BabyAIUpdateInfo? availableUpdate = null;
         var status = new TextBlock
         {
             Text = "Нажмите «Проверить сейчас», чтобы проверить GitHub Releases.",
@@ -44,16 +43,30 @@ public sealed partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 7, 0, 0),
         };
+        var packageButton = new Button
+        {
+            Content = "Получить пакет",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 5, 0, 0),
+            IsEnabled = false,
+        };
+
         checkButton.Click += async (_, _) =>
         {
             checkButton.IsEnabled = false;
+            packageButton.IsEnabled = false;
+            availableUpdate = null;
             status.Text = "Проверяем обновления…";
             try
             {
                 var update = await BabyAIUpdateService.CheckAsync();
                 if (update.UpdateAvailable)
                 {
-                    status.Text = $"Доступна версия {update.LatestVersion}. Страница релиза: {update.ReleaseUrl}";
+                    availableUpdate = update;
+                    status.Text = update.DownloadAvailable
+                        ? $"Доступна версия {update.LatestVersion}."
+                        : $"Доступна версия {update.LatestVersion}; пакет Windows пока не опубликован.";
+                    packageButton.IsEnabled = update.DownloadAvailable;
                 }
                 else if (string.IsNullOrWhiteSpace(update.LatestVersion))
                 {
@@ -66,7 +79,31 @@ public sealed partial class MainWindow
             }
             catch
             {
-                status.Text = "Не удалось проверить обновления. Проверьте подключение к интернету и попробуйте ещё раз.";
+                status.Text = "Не удалось проверить обновления. Попробуйте ещё раз позже.";
+            }
+            finally
+            {
+                checkButton.IsEnabled = true;
+            }
+        };
+
+        packageButton.Click += async (_, _) =>
+        {
+            if (availableUpdate is null || !availableUpdate.DownloadAvailable)
+                return;
+
+            checkButton.IsEnabled = false;
+            packageButton.IsEnabled = false;
+            status.Text = "Получаем пакет и проверяем SHA-256…";
+            try
+            {
+                var ready = await BabyAIUpdateService.DownloadVerifiedAsync(availableUpdate);
+                status.Text = $"Пакет BabyAI {ready.Version} готов. Установка будет доступна отдельной кнопкой.";
+            }
+            catch
+            {
+                status.Text = "Не удалось подготовить пакет обновления.";
+                packageButton.IsEnabled = true;
             }
             finally
             {
@@ -77,9 +114,10 @@ public sealed partial class MainWindow
         var card = new StackPanel { Spacing = 2 };
         card.Children.Add(status);
         card.Children.Add(checkButton);
+        card.Children.Add(packageButton);
         panel.Children.Add(CreateSettingsCard(card));
         panel.Children.Add(CreateSettingsNote(
-            "Автопроверка только читает информацию о последнем GitHub Release. BabyAI ничего не скачивает и не устанавливает без вашего действия."));
+            "Пакет получается только по вашему действию и проверяется SHA-256. На этом этапе BabyAI его не устанавливает."));
         return panel;
     }
 }
