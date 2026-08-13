@@ -11,9 +11,15 @@ namespace BabyAI.Desktop;
 
 public static class ConversationTranscriptBehavior
 {
+    private const string CodeFence = "```";
+
     private static readonly Regex MessagePattern = new(
         @"(?:\A|\r?\n\r?\n)(You|BabyAI|System): (.*?)(?=(?:\r?\n\r?\n)(?:You|BabyAI|System): |\z)",
         RegexOptions.Compiled | RegexOptions.Singleline);
+
+    private static readonly Regex LanguagePattern = new(
+        @"^[A-Za-z0-9+#_.-]{1,24}$",
+        RegexOptions.Compiled);
 
     private static readonly ConditionalWeakTable<StackPanel, Subscription> Subscriptions = new();
 
@@ -141,16 +147,6 @@ public static class ConversationTranscriptBehavior
             Margin = new Thickness(7, 0, 7, 0),
         };
 
-        var body = new TextBlock
-        {
-            Text = text,
-            FontSize = isSystem ? 11 : 13,
-            TextWrapping = TextWrapping.Wrap,
-            IsTextSelectionEnabled = true,
-            Foreground = Brush(248, 250, 255, isSystem ? (byte)170 : (byte)242),
-            LineHeight = isSystem ? 17 : 20,
-        };
-
         var bubble = new Border
         {
             MaxWidth = isSystem ? 320 : 352,
@@ -165,7 +161,7 @@ public static class ConversationTranscriptBehavior
                 ? Brush(255, 255, 255, 18)
                 : isUser ? Brush(151, 164, 255, 82) : Brush(171, 187, 255, 30),
             BorderThickness = new Thickness(1),
-            Child = body,
+            Child = CreateMessageBody(text, isSystem),
             HorizontalAlignment = alignment,
         };
 
@@ -183,6 +179,99 @@ public static class ConversationTranscriptBehavior
             card.Children.Add(CreateCopyButton(text));
 
         return card;
+    }
+
+    private static UIElement CreateMessageBody(string text, bool isSystem)
+    {
+        if (!text.Contains(CodeFence, StringComparison.Ordinal))
+            return CreateBodyText(text, isSystem);
+
+        var stack = new StackPanel { Spacing = 8 };
+        var parts = text.Split(CodeFence, StringSplitOptions.None);
+        for (var index = 0; index < parts.Length; index++)
+        {
+            var part = parts[index];
+            if (index % 2 == 0)
+            {
+                var normal = part.Trim();
+                if (normal.Length > 0)
+                    stack.Children.Add(CreateBodyText(normal, isSystem));
+                continue;
+            }
+
+            var (language, code) = ParseCodeBlock(part);
+            if (code.Length > 0)
+                stack.Children.Add(CreateCodeBlock(language, code));
+        }
+
+        return stack.Children.Count == 0 ? CreateBodyText(text, isSystem) : stack;
+    }
+
+    private static TextBlock CreateBodyText(string text, bool isSystem)
+    {
+        return new TextBlock
+        {
+            Text = text,
+            FontSize = isSystem ? 11 : 13,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            Foreground = Brush(248, 250, 255, isSystem ? (byte)170 : (byte)242),
+            LineHeight = isSystem ? 17 : 20,
+        };
+    }
+
+    private static (string Language, string Code) ParseCodeBlock(string raw)
+    {
+        var block = raw.Trim('\r', '\n');
+        var lineBreak = block.IndexOf('\n');
+        if (lineBreak <= 0)
+            return (string.Empty, block);
+
+        var candidate = block[..lineBreak].Trim().TrimEnd('\r');
+        if (!LanguagePattern.IsMatch(candidate))
+            return (string.Empty, block);
+
+        return (candidate, block[(lineBreak + 1)..].TrimEnd('\r', '\n'));
+    }
+
+    private static UIElement CreateCodeBlock(string language, string code)
+    {
+        var content = new StackPanel { Spacing = 5 };
+        if (!string.IsNullOrWhiteSpace(language))
+        {
+            content.Children.Add(new TextBlock
+            {
+                Text = language.ToUpperInvariant(),
+                FontSize = 8,
+                CharacterSpacing = 85,
+                Foreground = Brush(170, 188, 255, 120),
+            });
+        }
+
+        content.Children.Add(new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = new TextBlock
+            {
+                Text = code,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 11,
+                TextWrapping = TextWrapping.NoWrap,
+                IsTextSelectionEnabled = true,
+                Foreground = Brush(238, 242, 255, 230),
+            },
+        });
+
+        return new Border
+        {
+            Background = Brush(7, 10, 18, 150),
+            BorderBrush = Brush(156, 174, 255, 28),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(9, 7, 9, 8),
+            Child = content,
+        };
     }
 
     private static Button CreateCopyButton(string text)
