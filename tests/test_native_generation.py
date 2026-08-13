@@ -64,7 +64,6 @@ class _FakeModel:
 
 
 def test_generation_loops_sample_piece_decode_until_eog_and_combines_utf8():
-    # U+041F CYRILLIC CAPITAL LETTER PE is D0 9F and deliberately crosses pieces.
     model = _FakeModel(
         [
             NativeSample(10, False),
@@ -86,6 +85,40 @@ def test_generation_loops_sample_piece_decode_until_eog_and_combines_utf8():
     assert model.context_args == (64, 16, 3)
     assert model.context.closed is True
     assert model.tokenize_calls == [("hello", True, True)]
+
+
+def test_generation_stops_on_managed_delimiter_and_removes_it():
+    model = _FakeModel(
+        [
+            NativeSample(10, False),
+            NativeSample(11, False),
+            NativeSample(12, False),
+            NativeSample(13, False),
+        ],
+        {10: b"hello", 11: b"\n", 12: b"USER:", 13: b"should-not-run"},
+    )
+
+    result = generate_greedy(model, "prompt", stop_sequences=("\nUSER:",))
+
+    assert result.text == "hello"
+    assert result.stop_reason == "stop_sequence"
+    assert result.generated_tokens == 3
+    assert result.output_bytes == 5
+    assert model.context.decoded == [10, 11, 12]
+    assert model.samples == [NativeSample(13, False)]
+
+
+def test_generation_stop_sequence_can_span_token_pieces():
+    model = _FakeModel(
+        [NativeSample(10, False), NativeSample(11, False), NativeSample(12, False)],
+        {10: b"answer\nUS", 11: b"ER:", 12: b"unused"},
+    )
+
+    result = generate_greedy(model, "prompt", stop_sequences=("\nUSER:",))
+
+    assert result.text == "answer"
+    assert result.stop_reason == "stop_sequence"
+    assert model.context.decoded == [10, 11]
 
 
 def test_generation_max_tokens_is_hard_bound_and_omits_incomplete_utf8_suffix():
@@ -170,6 +203,8 @@ def test_generation_rejects_unbounded_or_invalid_limits_before_native_work():
         generate_greedy(model, "prompt", max_output_bytes=0)
     with pytest.raises(NativeRuntimeError, match="n_ctx"):
         generate_greedy(model, "prompt", n_ctx=-1)
+    with pytest.raises(NativeRuntimeError, match="stop sequences"):
+        generate_greedy(model, "prompt", stop_sequences=("",))
 
     assert model.tokenize_calls == []
 

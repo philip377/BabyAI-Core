@@ -47,7 +47,8 @@ if (-not $status.ok -or -not $status.snapshot.runtime.ready -or $status.snapshot
 
 Write-Host "[BabyAI native smoke] Running normal desktop chat path..."
 $payload = @{ message = $Prompt } | ConvertTo-Json -Compress
-$chatRaw = & $env:BABYAI_PYTHON -m babyai.desktop_commands_cli exec chat --payload $payload
+$payloadArg = $payload.Replace('"', '\"')
+$chatRaw = & $env:BABYAI_PYTHON -m babyai.desktop_commands_cli exec chat --payload $payloadArg
 if ($LASTEXITCODE -ne 0) {
     throw "Native chat command failed."
 }

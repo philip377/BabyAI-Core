@@ -7,6 +7,7 @@ from babyai.config import BabyAIConfig
 from babyai.desktop_commands import DesktopCommandError, DesktopCommands
 from babyai.llm import EchoProvider, OllamaProvider
 from babyai.native_brain import NativeBrainProvider
+from babyai.planner import Planner
 
 
 def test_factory_builds_echo_provider(tmp_path):
@@ -47,9 +48,17 @@ def test_factory_builds_native_generation_provider(tmp_path):
     assert isinstance(provider, NativeBrainProvider)
     assert provider.model_path == model_path
     assert provider.runtime_path == runtime_path
-    assert provider.max_tokens == 256
+    assert provider.max_tokens == 128
     assert provider.n_ctx == 4096
     assert provider.n_batch == 4096
+
+
+def test_desktop_native_core_skips_redundant_llm_planner_call(tmp_path):
+    native = DesktopCommands(BabyAIConfig(data_dir=tmp_path / "native", provider="native"))
+    echo = DesktopCommands(BabyAIConfig(data_dir=tmp_path / "echo", provider="echo"))
+
+    assert native._core().planner is None
+    assert isinstance(echo._core().planner, Planner)
 
 
 def test_factory_exposes_supported_provider_names():

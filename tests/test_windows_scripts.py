@@ -58,6 +58,14 @@ def test_windows_launchers_accept_native_without_downloading_a_model() -> None:
     assert "ollama pull" not in native_block
 
 
+def test_windows_native_paths_are_resolved_before_desktop_process_launch() -> None:
+    root = Path(__file__).resolve().parents[1]
+    run = (root / "scripts" / "windows" / "run.ps1").read_text(encoding="utf-8")
+
+    assert '$env:BABYAI_NATIVE_MODEL = (Resolve-Path -LiteralPath $NativeModel).Path' in run
+    assert '$env:BABYAI_NATIVE_RUNTIME = (Resolve-Path -LiteralPath $NativeRuntime).Path' in run
+
+
 def test_windows_native_smoke_uses_normal_desktop_chat_path() -> None:
     root = Path(__file__).resolve().parents[1]
     smoke = (root / "scripts" / "windows" / "native-smoke.ps1").read_text(encoding="utf-8")
@@ -66,8 +74,9 @@ def test_windows_native_smoke_uses_normal_desktop_chat_path() -> None:
     assert "BABYAI_NATIVE_MODEL" in smoke
     assert "BABYAI_NATIVE_RUNTIME" in smoke
     assert "-m babyai.desktop_commands_cli exec status" in smoke
-    assert "-m babyai.desktop_commands_cli exec chat --payload $payload" in smoke
+    assert "-m babyai.desktop_commands_cli exec chat --payload $payloadArg" in smoke
     assert "ConvertTo-Json -Compress" in smoke
+    assert ".Replace(" in smoke
     assert "[BabyAI native smoke] PASS" in smoke
     assert "Invoke-WebRequest" not in smoke
     assert "Invoke-RestMethod" not in smoke

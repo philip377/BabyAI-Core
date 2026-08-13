@@ -5,7 +5,7 @@ import pytest
 from babyai.brain import probe_brain_runtime
 from babyai.config import BabyAIConfig
 from babyai.llm import LLMError
-from babyai.native_brain import NativeBrainProvider
+from babyai.native_brain import NativeBrainProvider, _normalise_native_reply
 from babyai.native_generation import NativeGenerationResult
 from babyai.native_runtime import NativeRuntimeError
 
@@ -84,15 +84,43 @@ def test_native_provider_runs_bounded_generation_and_closes_native_lifetime(tmp_
     assert calls[0] == ("loader", runtime_path)
     assert ("open_model", model_path, 3) in calls
     generate_call = next(call for call in calls if isinstance(call, tuple) and call[0] == "generate")
-    assert generate_call[2] == "hello"
+    assert generate_call[2].startswith("hello")
+    assert "/no_think" in generate_call[2]
+    assert generate_call[2].endswith("BABYAI:")
     assert generate_call[3] == {
         "max_tokens": 77,
         "max_output_bytes": 12345,
         "n_ctx": 2048,
         "n_batch": 1024,
         "n_threads": 6,
+        "stop_sequences": ("\n\nUSER:", "\nUSER:", "\n\nBABYAI:", "\nBABYAI:"),
     }
     assert calls[-2:] == ["model_exit", "runtime_exit"]
+
+
+def test_native_provider_defaults_to_shorter_first_chat_turn(tmp_path):
+    provider = NativeBrainProvider(
+        model_path=tmp_path / "brain.gguf",
+        runtime_path=tmp_path / "babyai_native.dll",
+    )
+
+    assert provider.max_tokens == 128
+
+
+def test_native_reply_extracts_final_response_wrapper_after_reasoning():
+    raw = (
+        "BABYAI: No tools needed.\n"
+        "Long internal-looking explanation.\n"
+        "```json\n{\"response\": \"Привет! Чем помочь?\"}\n```"
+    )
+
+    assert _normalise_native_reply(raw) == "Привет! Чем помочь?"
+
+
+def test_native_reply_strips_think_block_and_preserves_tool_json():
+    raw = '<think>private scratch</think>\n```json\n{"tool":"system.info","arguments":{}}\n```'
+
+    assert _normalise_native_reply(raw) == '{"tool":"system.info","arguments":{}}'
 
 
 def test_native_provider_translates_native_runtime_error_to_llm_error(tmp_path, monkeypatch):
