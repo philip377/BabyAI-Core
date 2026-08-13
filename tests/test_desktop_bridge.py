@@ -144,4 +144,4 @@ def test_desktop_bridge_reports_native_inference_pending_when_files_exist(tmp_pa
     assert runtime["provider"] == "native"
     assert runtime["state"] == "native_inference_pending"
     assert runtime["ready"] is False
-    assert "in-process inference wiring" in runtime["detail"]
+    assert "in-process inference wiring" in runtime["detail"].lower()
