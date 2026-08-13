@@ -20,6 +20,11 @@ def serve(
 
     input_stream = stdin or sys.stdin
     output_stream = stdout or sys.stdout
+    original_stdout: TextIO | None = None
+    if stdout is None:
+        original_stdout = sys.stdout
+        sys.stdout = sys.stderr
+
     owned_commands = commands is None
     command_surface = commands or DesktopCommands(persistent=True)
 
@@ -71,6 +76,8 @@ def serve(
     finally:
         if owned_commands:
             command_surface.close()
+        if original_stdout is not None:
+            sys.stdout = original_stdout
 
     return 0
 
