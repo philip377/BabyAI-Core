@@ -22,6 +22,7 @@ public sealed partial class MainWindow
         if (!_expanded || _applyingAdaptiveLayout)
             return;
 
+        ApplyStoredUiSettings();
         CompactBrainTextBehavior.SetEnabled(BrainText, true);
         FriendlyDesktopTextBehavior.SetEnabled(TaskText, true);
         FriendlyDesktopTextBehavior.SetEnabled(ReplyText, true);
@@ -191,7 +192,8 @@ public sealed partial class MainWindow
         AutomationProperties.SetHelpText(SendButton, "Enter");
         AutomationProperties.SetName(StopButton, "Остановить генерацию");
         AutomationProperties.SetName(RetryButton, "Повторить проверку BabyAI");
-        AutomationProperties.SetName(DetailsButton, "Открыть диагностику BabyAI");
+        AutomationProperties.SetName(DetailsButton, "Открыть настройки BabyAI");
+        ToolTipService.SetToolTip(DetailsButton, "Настройки");
     }
 
     private void UpdateBrainPill()
@@ -271,71 +273,8 @@ public sealed partial class MainWindow
 
     private async void DetailsButton_Click(object sender, RoutedEventArgs e)
     {
-        var provider = ReadEnvironment("BABYAI_PROVIDER", "ollama").ToLowerInvariant();
-        var details = new StackPanel
-        {
-            Spacing = 10,
-            MinWidth = 300,
-            MaxWidth = 370,
-        };
-
-        details.Children.Add(new TextBlock
-        {
-            Text = "Локальный мозг и состояние приложения",
-            FontSize = 12,
-            Opacity = 0.68,
-            Margin = new Thickness(0, 0, 0, 2),
-        });
-        details.Children.Add(CreateDiagnosticRow("Состояние", BrainText.Text));
-        details.Children.Add(CreateDiagnosticRow("Провайдер", provider));
-        details.Children.Add(CreateDiagnosticRow("Core", CoreStatusText.Text));
-        details.Children.Add(CreateDiagnosticRow("Runtime", RuntimeText.Text));
-        details.Children.Add(CreateDiagnosticRow("Запуск", StartupText.Text));
-
-        if (provider.Equals("native", StringComparison.OrdinalIgnoreCase))
-        {
-            details.Children.Add(CreateDiagnosticRow(
-                "GGUF модель",
-                ReadEnvironment("BABYAI_NATIVE_MODEL", "Путь не задан")));
-            details.Children.Add(CreateDiagnosticRow(
-                "Native runtime",
-                ReadEnvironment("BABYAI_NATIVE_RUNTIME", "Путь не задан")));
-        }
-        else
-        {
-            details.Children.Add(CreateDiagnosticRow(
-                "Модель",
-                ReadEnvironment("BABYAI_MODEL", "qwen3:8b")));
-        }
-
-        details.Children.Add(new Border
-        {
-            Height = 1,
-            Background = new SolidColorBrush(Color.FromArgb(24, 255, 255, 255)),
-            Margin = new Thickness(0, 2, 0, 2),
-        });
-        details.Children.Add(CreateDiagnosticRow(
-            "Управление",
-            "Enter — отправить · Shift+Enter — новая строка · Stop — остановить генерацию"));
-        details.Children.Add(CreateDiagnosticRow(
-            "Окно",
-            "Всегда поверх окон · закрытие сворачивает BabyAI в трей"));
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = Root.XamlRoot,
-            Title = "BabyAI · Диагностика",
-            Content = new ScrollViewer
-            {
-                Content = details,
-                MaxHeight = 470,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            },
-            CloseButtonText = "Закрыть",
-            DefaultButton = ContentDialogButton.Close,
-        };
-
-        await dialog.ShowAsync();
+        SettingsButton_Click(sender, e);
+        await Task.CompletedTask;
     }
 
     private static string ReadEnvironment(string name, string fallback)
