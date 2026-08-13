@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define BABYAI_NATIVE_ABI_VERSION 5u
+#define BABYAI_NATIVE_ABI_VERSION 6u
 
 typedef struct babyai_native_runtime babyai_native_runtime;
 typedef struct babyai_native_model babyai_native_model;
@@ -37,6 +37,11 @@ typedef enum babyai_native_result {
     BABYAI_NATIVE_SAMPLE_NOT_READY = 11,
     BABYAI_NATIVE_SAMPLE_ALREADY_TAKEN = 12,
     BABYAI_NATIVE_SAMPLER_FAILED = 13,
+    BABYAI_NATIVE_DECODE_NOT_READY = 14,
+    BABYAI_NATIVE_DECODE_TOKEN_MISMATCH = 15,
+    BABYAI_NATIVE_CONTEXT_FULL = 16,
+    BABYAI_NATIVE_TOKEN_TO_PIECE_FAILED = 17,
+    BABYAI_NATIVE_CONTEXT_UNUSABLE = 18,
 } babyai_native_result;
 
 BABYAI_NATIVE_API uint32_t babyai_native_abi_version(void);
@@ -67,6 +72,17 @@ BABYAI_NATIVE_API int32_t babyai_native_model_tokenize(
     int32_t token_capacity,
     int32_t * out_token_count);
 
+// Two-pass token ID -> UTF-8 piece conversion. Pass piece_out=NULL and
+// piece_capacity=0 to query the required byte count through out_piece_len.
+BABYAI_NATIVE_API int32_t babyai_native_model_token_to_piece(
+    babyai_native_runtime * runtime,
+    babyai_native_model * model,
+    int32_t token,
+    int32_t render_special,
+    char * piece_out,
+    int32_t piece_capacity,
+    int32_t * out_piece_len);
+
 BABYAI_NATIVE_API int32_t babyai_native_context_create(
     babyai_native_runtime * runtime,
     babyai_native_model * model,
@@ -93,13 +109,20 @@ BABYAI_NATIVE_API int32_t babyai_native_context_prefill(
 BABYAI_NATIVE_API uint32_t babyai_native_context_token_count(
     const babyai_native_context * context);
 
-// Deterministically sample exactly one token from the final output of the
-// successful prefill. This does not decode/append the sampled token.
+// Deterministically sample exactly one token from the current final logits.
+// The sampled token must be decoded before another sample can be taken.
 BABYAI_NATIVE_API int32_t babyai_native_context_sample_greedy(
     babyai_native_runtime * runtime,
     babyai_native_context * context,
     int32_t * out_token,
     int32_t * out_is_eog);
+
+// Append exactly the token returned by the preceding sample call at the next
+// context position, refreshing final logits for the next sample.
+BABYAI_NATIVE_API int32_t babyai_native_context_decode_sampled(
+    babyai_native_runtime * runtime,
+    babyai_native_context * context,
+    int32_t token);
 
 // Pointer remains valid until the next operation on this runtime or runtime destroy.
 BABYAI_NATIVE_API const char * babyai_native_last_error(
