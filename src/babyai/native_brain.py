@@ -10,16 +10,16 @@ from .llm import LLMError, LLMProvider
 class NativeBrainProvider(LLMProvider):
     """Reserved provider boundary for the future embedded GGUF runtime.
 
-    This class deliberately does not shell out to llama-cli/llama-server and does
-    not pretend native inference is available before BabyAI links an embedded
-    runtime. Keeping the provider selectable now lets configuration, readiness,
-    diagnostics, and desktop UX evolve before the native inference implementation.
+    This provider intentionally does not shell out to llama-cli/llama-server. The
+    runtime and model paths are explicit so the next inference implementation can
+    load the shared library in-process through NativeRuntimeLoader.
     """
 
     model_path: Path
+    runtime_path: Path
 
     def generate(self, prompt: str) -> str:
         raise LLMError(
-            "Native brain runtime is not linked in this build yet. "
-            f"Configured GGUF model: {self.model_path}"
+            "Native brain inference is not implemented in this build yet. "
+            f"Configured GGUF model: {self.model_path}; runtime: {self.runtime_path}"
         )
