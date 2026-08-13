@@ -17,10 +17,18 @@ public sealed partial class MainWindow
 
     private void ApplyStoredUiSettings()
     {
-        if (AppWindow.Presenter is not OverlappedPresenter presenter)
-            return;
+        var settings = _uiSettings.Load();
+        if (AppWindow.Presenter is OverlappedPresenter presenter)
+            presenter.IsAlwaysOnTop = settings.AlwaysOnTop;
 
-        presenter.IsAlwaysOnTop = _uiSettings.Load().AlwaysOnTop;
+        var launchAcceleration = Environment.GetEnvironmentVariable("BABYAI_NATIVE_ACCELERATION");
+        if (string.IsNullOrWhiteSpace(launchAcceleration))
+        {
+            Environment.SetEnvironmentVariable(
+                "BABYAI_NATIVE_ACCELERATION",
+                NormaliseNativeAcceleration(settings.NativeAcceleration),
+                EnvironmentVariableTarget.Process);
+        }
     }
 
     private async void SettingsButton_Click(object sender, RoutedEventArgs e)
@@ -139,8 +147,11 @@ public sealed partial class MainWindow
                 "GGUF модель",
                 ReadEnvironment("BABYAI_NATIVE_MODEL", "Путь не задан")));
             panel.Children.Add(CreateSettingsInfo(
-                "Native runtime",
+                "CPU runtime",
                 ReadEnvironment("BABYAI_NATIVE_RUNTIME", "Путь не задан")));
+            panel.Children.Add(CreateSettingsInfo(
+                "Vulkan runtime",
+                ResolveVulkanRuntimeDisplayPath()));
         }
         else
         {
@@ -150,7 +161,7 @@ public sealed partial class MainWindow
         }
 
         panel.Children.Add(CreateSettingsNote(
-            "Смена провайдера и модели пока остаётся параметром запуска — Settings v1 ничего не перезапускает сам."));
+            "Смена провайдера и модели пока остаётся параметром запуска."));
         return panel;
     }
 
@@ -159,20 +170,54 @@ public sealed partial class MainWindow
         var provider = ReadEnvironment("BABYAI_PROVIDER", "ollama").ToLowerInvariant();
         var panel = CreateSettingsPage(
             "Производительность",
-            "Режим вычислений локальной модели.");
+            "Выбор вычислительного профиля локальной модели.");
 
+        if (!provider.Equals("native", StringComparison.OrdinalIgnoreCase))
+        {
+            panel.Children.Add(CreateSettingsInfo(
+                "Текущий режим",
+                "Управляется выбранным провайдером"));
+            return panel;
+        }
+
+        var currentMode = NormaliseNativeAcceleration(
+            ReadEnvironment("BABYAI_NATIVE_ACCELERATION", _uiSettings.Load().NativeAcceleration));
+        var modePicker = new ComboBox
+        {
+            Header = "Режим вычислений",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ItemsSource = new[] { "Авто", "GPU · Vulkan", "CPU" },
+            SelectedIndex = currentMode switch
+            {
+                "auto" => 0,
+                "vulkan" => 1,
+                _ => 2,
+            },
+        };
+        modePicker.SelectionChanged += (_, _) =>
+        {
+            var mode = modePicker.SelectedIndex switch
+            {
+                0 => "auto",
+                1 => "vulkan",
+                _ => "cpu",
+            };
+            var settings = _uiSettings.Load();
+            _uiSettings.Save(settings with { NativeAcceleration = mode });
+            Environment.SetEnvironmentVariable(
+                "BABYAI_NATIVE_ACCELERATION",
+                mode,
+                EnvironmentVariableTarget.Process);
+        };
+        panel.Children.Add(CreateSettingsCard(modePicker));
         panel.Children.Add(CreateSettingsInfo(
-            "Текущий режим",
-            provider.Equals("native", StringComparison.OrdinalIgnoreCase)
-                ? "CPU · correctness-first"
-                : "Управляется выбранным провайдером"));
+            "CPU runtime",
+            ReadEnvironment("BABYAI_NATIVE_RUNTIME", "Путь не задан")));
         panel.Children.Add(CreateSettingsInfo(
-            "Native GPU offload",
-            provider.Equals("native", StringComparison.OrdinalIgnoreCase)
-                ? "Выключен в текущем безопасном профиле"
-                : "Не применяется"));
+            "Vulkan runtime",
+            ResolveVulkanRuntimeDisplayPath()));
         panel.Children.Add(CreateSettingsNote(
-            "Здесь следующим этапом появится выбор Auto / GPU / CPU после отдельного native benchmark и fallback-проверок."));
+            "Авто использует Vulkan только когда BabyAI runtime обнаруживает подходящее устройство; иначе остаётся CPU. GPU · Vulkan требует отдельный Vulkan runtime."));
         return panel;
     }
 
@@ -194,14 +239,15 @@ public sealed partial class MainWindow
         {
             if (AppWindow.Presenter is OverlappedPresenter currentPresenter)
                 currentPresenter.IsAlwaysOnTop = alwaysOnTop.IsOn;
-            _uiSettings.Save(new DesktopUiSettings(alwaysOnTop.IsOn));
+            var settings = _uiSettings.Load();
+            _uiSettings.Save(settings with { AlwaysOnTop = alwaysOnTop.IsOn });
         };
         panel.Children.Add(CreateSettingsCard(alwaysOnTop));
         panel.Children.Add(CreateSettingsInfo(
             "Размер окна",
             "Адаптивный · BabyAI автоматически помещает панель в рабочую область текущего монитора."));
         panel.Children.Add(CreateSettingsNote(
-            "Настройка «Всегда поверх окон» сохраняется локально в %LOCALAPPDATA%\\BabyAI\\ui.json."));
+            "Настройки интерфейса сохраняются локально в %LOCALAPPDATA%\\BabyAI\\ui.json."));
         return panel;
     }
 
@@ -220,17 +266,51 @@ public sealed partial class MainWindow
         if (provider.Equals("native", StringComparison.OrdinalIgnoreCase))
         {
             panel.Children.Add(CreateSettingsInfo(
+                "Режим",
+                NormaliseNativeAcceleration(ReadEnvironment("BABYAI_NATIVE_ACCELERATION", "cpu"))));
+            panel.Children.Add(CreateSettingsInfo(
                 "GGUF модель",
                 ReadEnvironment("BABYAI_NATIVE_MODEL", "Путь не задан")));
             panel.Children.Add(CreateSettingsInfo(
-                "Native runtime",
+                "CPU runtime",
                 ReadEnvironment("BABYAI_NATIVE_RUNTIME", "Путь не задан")));
+            panel.Children.Add(CreateSettingsInfo(
+                "Vulkan runtime",
+                ResolveVulkanRuntimeDisplayPath()));
         }
 
         panel.Children.Add(CreateSettingsInfo(
             "Управление",
             "Enter — отправить · Shift+Enter — новая строка · Stop — остановить генерацию"));
         return panel;
+    }
+
+    private static string NormaliseNativeAcceleration(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "auto" => "auto",
+            "vulkan" => "vulkan",
+            _ => "cpu",
+        };
+    }
+
+    private static string ResolveVulkanRuntimeDisplayPath()
+    {
+        var explicitPath = Environment.GetEnvironmentVariable("BABYAI_NATIVE_VULKAN_RUNTIME");
+        if (!string.IsNullOrWhiteSpace(explicitPath))
+            return explicitPath.Trim();
+
+        var cpuPath = Environment.GetEnvironmentVariable("BABYAI_NATIVE_RUNTIME");
+        if (string.IsNullOrWhiteSpace(cpuPath))
+            return "runtime\\vulkan\\babyai_native.dll";
+
+        var fullCpuPath = Path.GetFullPath(cpuPath.Trim());
+        var directory = Path.GetDirectoryName(fullCpuPath);
+        var filename = Path.GetFileName(fullCpuPath);
+        return directory is null
+            ? Path.Combine("runtime", "vulkan", filename)
+            : Path.Combine(directory, "vulkan", filename);
     }
 
     private static StackPanel CreateSettingsPage(string title, string subtitle)
