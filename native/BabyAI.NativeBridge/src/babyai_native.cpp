@@ -24,6 +24,8 @@ struct babyai_native_model {
 struct babyai_native_context {
     llama_context * handle = nullptr;
     babyai_native_model * model = nullptr;
+    uint32_t token_count = 0;
+    bool prefill_attempted = false;
 };
 
 namespace {
@@ -341,6 +343,83 @@ uint32_t babyai_native_context_n_batch(const babyai_native_context * context) {
         return 0;
     }
     return llama_n_batch(context->handle);
+}
+
+int32_t babyai_native_context_prefill(
+    babyai_native_runtime * runtime,
+    babyai_native_context * context,
+    const int32_t * tokens,
+    int32_t token_count) {
+    if (runtime == nullptr || context == nullptr || tokens == nullptr || token_count <= 0) {
+        return static_cast<int32_t>(BABYAI_NATIVE_INVALID_ARGUMENT);
+    }
+    runtime->last_error.clear();
+
+    if (context->handle == nullptr || context->model == nullptr || context->model->runtime != runtime) {
+        return fail(runtime, BABYAI_NATIVE_INVALID_ARGUMENT, "Native context does not belong to this runtime.");
+    }
+    if (context->prefill_attempted || context->token_count != 0) {
+        return fail(runtime, BABYAI_NATIVE_CONTEXT_NOT_EMPTY, "Native context already has a prefill attempt; create a fresh context.");
+    }
+
+    const uint32_t count = static_cast<uint32_t>(token_count);
+    const uint32_t context_limit = llama_n_ctx(context->handle);
+    const uint32_t batch_limit = llama_n_batch(context->handle);
+    if (count > context_limit || count > batch_limit) {
+        return fail(runtime, BABYAI_NATIVE_PREFILL_TOO_LARGE, "Prompt token count exceeds the current native context or batch limit.");
+    }
+
+    try {
+        std::vector<llama_token> native_tokens(count);
+        std::vector<llama_pos> positions(count);
+        std::vector<int32_t> sequence_counts(count, 1);
+        std::vector<llama_seq_id> sequence_storage(count, 0);
+        std::vector<llama_seq_id *> sequence_ids(count);
+        std::vector<int8_t> outputs(count, 0);
+
+        for (uint32_t index = 0; index < count; ++index) {
+            native_tokens[index] = static_cast<llama_token>(tokens[index]);
+            positions[index] = static_cast<llama_pos>(index);
+            sequence_ids[index] = &sequence_storage[index];
+        }
+        // Keep the final prompt logits inside llama.cpp for the future sampling step,
+        // but do not expose them through BabyAI ABI v4.
+        outputs[count - 1] = 1;
+
+        llama_batch batch = {
+            static_cast<int32_t>(count),
+            native_tokens.data(),
+            nullptr,
+            positions.data(),
+            sequence_counts.data(),
+            sequence_ids.data(),
+            outputs.data(),
+        };
+
+        context->prefill_attempted = true;
+        const int32_t decode_result = llama_decode(context->handle, batch);
+        if (decode_result != 0) {
+            runtime->last_error =
+                "llama.cpp prompt prefill failed with decode code " + std::to_string(decode_result) +
+                "; create a fresh context before retrying.";
+            return static_cast<int32_t>(BABYAI_NATIVE_DECODE_FAILED);
+        }
+
+        context->token_count = count;
+        return static_cast<int32_t>(BABYAI_NATIVE_OK);
+    } catch (const std::bad_alloc &) {
+        return fail(runtime, BABYAI_NATIVE_OUT_OF_MEMORY, "Could not allocate the native prompt batch.");
+    } catch (...) {
+        context->prefill_attempted = true;
+        return fail(runtime, BABYAI_NATIVE_INTERNAL_ERROR, "Unexpected native prompt prefill error; create a fresh context.");
+    }
+}
+
+uint32_t babyai_native_context_token_count(const babyai_native_context * context) {
+    if (context == nullptr || context->handle == nullptr) {
+        return 0;
+    }
+    return context->token_count;
 }
 
 const char * babyai_native_last_error(const babyai_native_runtime * runtime) {
