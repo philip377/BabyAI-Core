@@ -1,1 +1,0 @@
-startup compatibility work in progress

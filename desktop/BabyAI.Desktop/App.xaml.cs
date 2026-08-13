@@ -17,6 +17,7 @@ public partial class App : Application
     {
         var mainWindow = new MainWindow();
         mainWindow.ApplyStartupUiSettings();
+        mainWindow.ApplyGlassUi();
         _window = mainWindow;
         _window.Activate();
     }

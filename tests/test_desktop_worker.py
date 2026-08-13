@@ -115,3 +115,40 @@ def test_worker_closes_commands_it_owns(monkeypatch):
 
     assert serve(stdin=source, stdout=io.StringIO()) == 0
     assert commands.closed is True
+
+
+class ExplodingCommands:
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, command, payload):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("legacy state broke")
+        return {"ok": True, "command": command}
+
+    def close(self):
+        pass
+
+
+def test_worker_survives_unexpected_command_error():
+    commands = ExplodingCommands()
+    source = io.StringIO(
+        json.dumps({"id": 1, "command": "status", "payload": {}})
+        + "\n"
+        + json.dumps({"id": 2, "command": "status", "payload": {}})
+        + "\n"
+    )
+    output = io.StringIO()
+
+    assert serve(commands, stdin=source, stdout=output) == 0
+
+    responses = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert responses[0] == {
+        "id": 1,
+        "ok": False,
+        "error": "RuntimeError: legacy state broke",
+    }
+    assert responses[1]["id"] == 2
+    assert responses[1]["ok"] is True
+    assert responses[1]["command"] == "status"

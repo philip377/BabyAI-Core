@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 
@@ -32,7 +32,14 @@ class IdentityStore:
             return default
 
         data = json.loads(self.path.read_text(encoding="utf-8"))
-        return Identity(**data)
+        if not isinstance(data, dict):
+            raise ValueError("Identity state must be a JSON object")
+
+        # Keep identity files forward/backward compatible across desktop releases.
+        # Unknown keys from older/newer schemas must not crash the whole worker.
+        allowed = {field.name for field in fields(Identity)}
+        compatible = {key: value for key, value in data.items() if key in allowed}
+        return Identity(**compatible)
 
     def save(self, identity: Identity) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
