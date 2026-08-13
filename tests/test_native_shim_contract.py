@@ -32,7 +32,7 @@ def test_native_shim_exposes_stable_abi_v1_contract():
     assert "llama_decode" not in source
 
 
-def test_native_shim_ci_pins_upstream_and_runs_real_smoke():
+def test_native_shim_ci_pins_upstream_and_runs_managed_lifecycle_smoke():
     root = Path(__file__).resolve().parents[1]
     workflow = (root / ".github" / "workflows" / "native-shim.yml").read_text(encoding="utf-8")
     cmake = (root / "native" / "BabyAI.NativeBridge" / "CMakeLists.txt").read_text(encoding="utf-8")
@@ -41,7 +41,7 @@ def test_native_shim_ci_pins_upstream_and_runs_real_smoke():
     assert "e79e4bf660e19f2ad851e06c6913f7a8c5852621" in workflow
     assert "BUILD_SHARED_LIBS OFF" in cmake
     assert "target_link_libraries(babyai_native PRIVATE llama)" in cmake
-    assert "babyai_native_runtime_create" in smoke
-    assert "babyai_native_runtime_destroy" in smoke
-    assert "babyai_native_model_open" in smoke
+    assert "NativeRuntimeLoader" in smoke
+    assert ".open_runtime()" in smoke
+    assert "runtime.open_model(" in smoke
     assert "definitely-missing-babyai-model.gguf" in smoke
