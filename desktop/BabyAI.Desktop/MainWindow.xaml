@@ -99,9 +99,10 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Grid Grid.Row="0" ColumnSpacing="10">
+                <Grid Grid.Row="0" ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
@@ -126,17 +127,25 @@
                             Background="#18FFFFFF"
                             BorderBrush="#22FFFFFF"
                             BorderThickness="1">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Ellipse Width="6" Height="6" Fill="#7EE7A2" VerticalAlignment="Center" />
-                            <TextBlock x:Name="BrainText"
-                                       Text="Brain: checking…"
-                                       FontSize="10"
-                                       Foreground="#DFFFFFFF"
-                                       MaxWidth="150"
-                                       TextTrimming="CharacterEllipsis"
-                                       local:BrainStatusBehavior.Enabled="True" />
-                        </StackPanel>
+                        <TextBlock x:Name="BrainText"
+                                   Text="Brain: checking…"
+                                   FontSize="10"
+                                   Foreground="#DFFFFFFF"
+                                   MaxWidth="142"
+                                   TextTrimming="CharacterEllipsis"
+                                   local:BrainStatusBehavior.Enabled="True" />
                     </Border>
+
+                    <Button Grid.Column="2"
+                            Width="28"
+                            Height="28"
+                            Padding="0"
+                            CornerRadius="14"
+                            Content="‹"
+                            FontSize="18"
+                            VerticalAlignment="Top"
+                            Click="OrbButton_Click"
+                            ToolTipService.ToolTip="Свернуть" />
                 </Grid>
 
                 <Border Grid.Row="1"
@@ -147,19 +156,27 @@
                         Padding="10,7">
                     <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
+                        <ProgressRing Grid.Column="0"
+                                      Width="14"
+                                      Height="14"
+                                      IsActive="False"
+                                      Visibility="Collapsed"
+                                      VerticalAlignment="Center"
+                                      local:ReplyActivityBehavior.Source="{Binding ElementName=ReplyText}" />
                         <TextBlock x:Name="ReplyText"
-                                   Grid.Column="0"
+                                   Grid.Column="1"
                                    Text="Готов к разговору."
                                    TextWrapping="Wrap"
                                    FontSize="11"
                                    Foreground="#AFFFFFFF"
                                    VerticalAlignment="Center" />
                         <Button x:Name="RetryButton"
-                                Grid.Column="1"
-                                Content="Retry"
+                                Grid.Column="2"
+                                Content="Повторить"
                                 FontSize="11"
                                 Padding="10,4"
                                 CornerRadius="10"
@@ -240,13 +257,13 @@
                     </Grid.ColumnDefinitions>
                     <Button x:Name="ApproveButton"
                             Grid.Column="0"
-                            Content="Approve"
+                            Content="Сохранить"
                             CornerRadius="12"
                             Click="ApproveButton_Click"
                             Visibility="Collapsed" />
                     <Button x:Name="RejectButton"
                             Grid.Column="1"
-                            Content="Reject"
+                            Content="Отклонить"
                             CornerRadius="12"
                             Click="RejectButton_Click"
                             Visibility="Collapsed" />
