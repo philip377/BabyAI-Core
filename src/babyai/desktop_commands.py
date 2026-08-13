@@ -4,11 +4,12 @@ from dataclasses import asdict
 
 from .agent import AgentExecutor
 from .autodidact import LessonCandidateStore
+from .brain import BrainProviderError, build_brain_provider
 from .config import BabyAIConfig
 from .desktop_bridge import build_desktop_snapshot
 from .hypothesis import HypothesisStore
 from .identity import Identity, IdentityStore
-from .llm import EchoProvider, LLMError, OllamaProvider
+from .llm import LLMError
 from .memory import MemoryKind, SQLiteMemoryStore
 from .permissions import PermissionStore
 from .planner import Planner
@@ -27,11 +28,10 @@ class DesktopCommands:
         self.config = config or BabyAIConfig.default()
 
     def _provider(self):
-        if self.config.provider == "echo":
-            return EchoProvider()
-        if self.config.provider == "ollama":
-            return OllamaProvider(model=self.config.model, base_url=self.config.ollama_url)
-        raise DesktopCommandError(f"Unknown provider: {self.config.provider}")
+        try:
+            return build_brain_provider(self.config)
+        except BrainProviderError as exc:
+            raise DesktopCommandError(str(exc)) from exc
 
     def _core(self) -> Primus:
         identity = IdentityStore(self.config.identity_file).load_or_create(

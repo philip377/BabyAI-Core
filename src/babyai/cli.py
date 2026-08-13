@@ -1,11 +1,12 @@
 import typer
 
 from .agent import AgentExecutor
+from .brain import BrainProviderError, build_brain_provider
 from .cognition import Cognition, CognitionProtocolError, TaskProposalStore
 from .config import BabyAIConfig
 from .hypothesis import Hypothesis, HypothesisProtocolError, HypothesisStore
 from .identity import Identity, IdentityStore
-from .llm import EchoProvider, LLMError, LLMProvider, OllamaProvider
+from .llm import LLMError, LLMProvider
 from .memory import MemoryKind, SQLiteMemoryStore
 from .observer import Observer
 from .permissions import Capability, PermissionStore
@@ -24,13 +25,12 @@ app.add_typer(hypothesis_app, name="hypothesis")
 
 
 def build_provider(config: BabyAIConfig) -> LLMProvider:
-    if config.provider == "echo":
-        return EchoProvider()
-    if config.provider == "ollama":
-        return OllamaProvider(model=config.model, base_url=config.ollama_url)
-    raise typer.BadParameter(
-        f"Unknown BABYAI_PROVIDER={config.provider!r}. Use 'ollama' or 'echo'."
-    )
+    """Compatibility wrapper around the central brain provider factory."""
+
+    try:
+        return build_brain_provider(config)
+    except BrainProviderError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def permission_store() -> PermissionStore:
