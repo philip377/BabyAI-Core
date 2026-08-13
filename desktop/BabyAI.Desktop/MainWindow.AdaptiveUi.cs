@@ -11,6 +11,7 @@ namespace BabyAI.Desktop;
 public sealed partial class MainWindow
 {
     private bool _applyingAdaptiveLayout;
+    private bool _composerDraftingReady;
     private bool _orbPresenceReady;
     private TextBlock? _elapsedText;
     private StackPanel? _quickPromptLayer;
@@ -26,6 +27,7 @@ public sealed partial class MainWindow
         EnsureElapsedIndicator();
         EnsureQuickPrompts();
         EnsureOrbPresence();
+        EnsureComposerDrafting();
         ApplyAdaptiveExpandedLayout();
     }
 
@@ -148,6 +150,28 @@ public sealed partial class MainWindow
 
         ToolTipService.SetToolTip(OrbButton, label);
         AutomationProperties.SetName(OrbButton, label);
+    }
+
+    private void EnsureComposerDrafting()
+    {
+        if (_composerDraftingReady)
+            return;
+
+        _composerDraftingReady = true;
+        MessageBox.RegisterPropertyChangedCallback(
+            Control.IsEnabledProperty,
+            (_, _) => KeepComposerWritable());
+        KeepComposerWritable();
+        AutomationProperties.SetName(MessageBox, "Сообщение BabyAI");
+        AutomationProperties.SetHelpText(
+            MessageBox,
+            "Можно готовить следующее сообщение, пока BabyAI думает. Enter отправляет, когда текущий ответ завершён.");
+    }
+
+    private void KeepComposerWritable()
+    {
+        if (!MessageBox.IsEnabled)
+            MessageBox.IsEnabled = true;
     }
 
     private void ApplyAdaptiveExpandedLayout()
