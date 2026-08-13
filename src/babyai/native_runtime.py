@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-BABYAI_NATIVE_ABI_VERSION = 1
+BABYAI_NATIVE_ABI_VERSION = 2
 BABYAI_NATIVE_OK = 0
 
 
@@ -22,6 +22,10 @@ REQUIRED_BABYAI_SYMBOLS: tuple[str, ...] = (
     "babyai_native_runtime_destroy",
     "babyai_native_model_open",
     "babyai_native_model_close",
+    "babyai_native_context_create",
+    "babyai_native_context_destroy",
+    "babyai_native_context_n_ctx",
+    "babyai_native_context_n_batch",
     "babyai_native_last_error",
 )
 
@@ -45,6 +49,22 @@ def _configure_abi(library: Any) -> None:
     library.babyai_native_model_close.argtypes = [ctypes.c_void_p]
     library.babyai_native_model_close.restype = None
 
+    library.babyai_native_context_create.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    library.babyai_native_context_create.restype = ctypes.c_int32
+    library.babyai_native_context_destroy.argtypes = [ctypes.c_void_p]
+    library.babyai_native_context_destroy.restype = None
+    library.babyai_native_context_n_ctx.argtypes = [ctypes.c_void_p]
+    library.babyai_native_context_n_ctx.restype = ctypes.c_uint32
+    library.babyai_native_context_n_batch.argtypes = [ctypes.c_void_p]
+    library.babyai_native_context_n_batch.restype = ctypes.c_uint32
+
     library.babyai_native_last_error.argtypes = [ctypes.c_void_p]
     library.babyai_native_last_error.restype = ctypes.c_char_p
 
@@ -61,12 +81,13 @@ def _last_error(library: Any, runtime_pointer: ctypes.c_void_p) -> str:
 
 
 @dataclass(slots=True)
-class NativeModelHandle:
-    """Managed opaque GGUF model handle owned by one native runtime session."""
+class NativeContextHandle:
+    """Managed opaque llama context owned by one native model handle."""
 
-    runtime: NativeRuntimeSession
-    path: Path
+    model: NativeModelHandle
     pointer: ctypes.c_void_p
+    context_size: int
+    batch_size: int
     _closed: bool = False
 
     @property
@@ -76,6 +97,88 @@ class NativeModelHandle:
     def close(self) -> None:
         if self._closed:
             return
+        self._closed = True
+        try:
+            if self.pointer.value:
+                self.model.runtime.handle.library.babyai_native_context_destroy(self.pointer)
+        finally:
+            self.pointer = ctypes.c_void_p()
+            self.model._forget_context(self)
+
+    def __enter__(self) -> NativeContextHandle:
+        if self._closed:
+            raise NativeRuntimeError("Native context handle is already closed.")
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+
+@dataclass(slots=True)
+class NativeModelHandle:
+    """Managed opaque GGUF model handle owned by one native runtime session."""
+
+    runtime: NativeRuntimeSession
+    path: Path
+    pointer: ctypes.c_void_p
+    _contexts: list[NativeContextHandle] = field(default_factory=list)
+    _closed: bool = False
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def open_context(
+        self,
+        *,
+        n_ctx: int = 0,
+        n_batch: int = 0,
+        n_threads: int = 0,
+    ) -> NativeContextHandle:
+        if self._closed or not self.pointer.value:
+            raise NativeRuntimeError("Native model handle is closed.")
+        if n_ctx < 0 or n_batch < 0 or n_threads < 0:
+            raise NativeRuntimeError("Native context parameters must be non-negative.")
+
+        library = self.runtime.handle.library
+        out_context = ctypes.c_void_p()
+        result = int(
+            library.babyai_native_context_create(
+                self.runtime.pointer,
+                self.pointer,
+                int(n_ctx),
+                int(n_batch),
+                int(n_threads),
+                ctypes.byref(out_context),
+            )
+        )
+        if result != BABYAI_NATIVE_OK or not out_context.value:
+            detail = _last_error(library, self.runtime.pointer)
+            suffix = f": {detail}" if detail else ""
+            raise NativeRuntimeError(f"Could not create native model context (code {result}){suffix}")
+
+        context = NativeContextHandle(
+            model=self,
+            pointer=out_context,
+            context_size=int(library.babyai_native_context_n_ctx(out_context)),
+            batch_size=int(library.babyai_native_context_n_batch(out_context)),
+        )
+        self._contexts.append(context)
+        return context
+
+    def _forget_context(self, context: NativeContextHandle) -> None:
+        try:
+            self._contexts.remove(context)
+        except ValueError:
+            pass
+
+    def close(self) -> None:
+        if self._closed:
+            return
+
+        for context in list(reversed(self._contexts)):
+            context.close()
+
         self._closed = True
         try:
             if self.pointer.value:
@@ -95,7 +198,7 @@ class NativeModelHandle:
 
 @dataclass(slots=True)
 class NativeRuntimeSession:
-    """Managed backend session that always closes child models before shutdown."""
+    """Managed backend session that closes contexts, models, then the backend."""
 
     handle: NativeRuntimeHandle
     pointer: ctypes.c_void_p
@@ -141,7 +244,6 @@ class NativeRuntimeSession:
         if self._closed:
             return
 
-        # A llama model must be released before the backend session that owns it.
         for model in list(reversed(self._models)):
             model.close()
 
@@ -175,7 +277,7 @@ class NativeRuntimeHandle:
 
 @dataclass(slots=True)
 class NativeRuntimeLoader:
-    """Explicitly load BabyAI's stable native shim and validate ABI v1.
+    """Explicitly load BabyAI's stable native shim and validate its ABI.
 
     llama.cpp is linked behind this DLL boundary. Readiness/status polling remains
     file-only; dynamic loading and backend initialization happen only through an
@@ -204,7 +306,7 @@ class NativeRuntimeLoader:
         if missing:
             names = ", ".join(missing)
             raise NativeRuntimeError(
-                f"Native runtime library '{path}' does not satisfy BabyAI native ABI v1; "
+                f"Native runtime library '{path}' does not satisfy BabyAI native ABI v{BABYAI_NATIVE_ABI_VERSION}; "
                 f"missing symbols: {names}"
             )
 
