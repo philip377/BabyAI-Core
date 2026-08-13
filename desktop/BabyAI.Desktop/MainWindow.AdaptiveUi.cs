@@ -1,7 +1,9 @@
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
+using Windows.UI;
 
 namespace BabyAI.Desktop;
 
@@ -9,6 +11,7 @@ public sealed partial class MainWindow
 {
     private bool _applyingAdaptiveLayout;
     private TextBlock? _elapsedText;
+    private StackPanel? _quickPromptLayer;
 
     private void Panel_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -19,6 +22,7 @@ public sealed partial class MainWindow
         FriendlyDesktopTextBehavior.SetEnabled(TaskText, true);
         FriendlyDesktopTextBehavior.SetEnabled(ReplyText, true);
         EnsureElapsedIndicator();
+        EnsureQuickPrompts();
         ApplyAdaptiveExpandedLayout();
     }
 
@@ -40,6 +44,80 @@ public sealed partial class MainWindow
         Grid.SetColumn(_elapsedText, 2);
         ReplyElapsedBehavior.SetSource(_elapsedText, ReplyText);
         statusGrid.Children.Add(_elapsedText);
+    }
+
+    private void EnsureQuickPrompts()
+    {
+        if (_quickPromptLayer is not null || ConversationScroller.Parent is not Border chatBorder)
+            return;
+
+        chatBorder.Child = null;
+        var host = new Grid();
+        host.Children.Add(ConversationScroller);
+
+        _quickPromptLayer = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Bottom,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Spacing = 5,
+            MaxWidth = 310,
+            Margin = new Thickness(18, 0, 18, 12),
+        };
+        _quickPromptLayer.Children.Add(new TextBlock
+        {
+            Text = "МОЖНО НАЧАТЬ С ЭТОГО",
+            FontSize = 9,
+            CharacterSpacing = 80,
+            Opacity = 0.42,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 2),
+        });
+        _quickPromptLayer.Children.Add(CreateQuickPromptButton("Кто ты и чем можешь помочь?"));
+        _quickPromptLayer.Children.Add(CreateQuickPromptButton("Помоги мне разобрать задачу"));
+        _quickPromptLayer.Children.Add(CreateQuickPromptButton("Что ты умеешь делать локально?"));
+
+        host.Children.Add(_quickPromptLayer);
+        chatBorder.Child = host;
+
+        ConversationText.RegisterPropertyChangedCallback(
+            TextBlock.TextProperty,
+            (_, _) => UpdateQuickPromptVisibility());
+        UpdateQuickPromptVisibility();
+    }
+
+    private Button CreateQuickPromptButton(string prompt)
+    {
+        var button = new Button
+        {
+            Content = prompt,
+            FontSize = 11,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Padding = new Thickness(11, 6, 11, 6),
+            CornerRadius = new CornerRadius(12),
+            Background = new SolidColorBrush(Color.FromArgb(20, 255, 255, 255)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(28, 255, 255, 255)),
+            BorderThickness = new Thickness(1),
+        };
+        button.Click += (_, _) =>
+        {
+            MessageBox.Text = prompt;
+            MessageBox.Focus(FocusState.Programmatic);
+            MessageBox.Select(prompt.Length, 0);
+        };
+        return button;
+    }
+
+    private void UpdateQuickPromptVisibility()
+    {
+        if (_quickPromptLayer is null)
+            return;
+
+        var transcript = ConversationText.Text ?? string.Empty;
+        var hasMessages = transcript.Contains("You: ", StringComparison.Ordinal)
+            || transcript.Contains("BabyAI: ", StringComparison.Ordinal)
+            || transcript.Contains("System: ", StringComparison.Ordinal);
+        _quickPromptLayer.Visibility = hasMessages ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void ApplyAdaptiveExpandedLayout()
