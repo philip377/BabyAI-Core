@@ -13,6 +13,7 @@ public sealed partial class MainWindow
     private void Root_Loaded(object sender, RoutedEventArgs e)
     {
         ApplyStoredUiSettings();
+        _ = CheckForUpdatesOnStartupAsync();
     }
 
     private void ApplyStoredUiSettings()
@@ -69,6 +70,7 @@ public sealed partial class MainWindow
         }
 
         var generalButton = AddSection("Общие", BuildGeneralSettings);
+        AddSection("Обновления", BuildUpdateSettings);
         AddSection("Мозг", BuildBrainSettings);
         AddSection("Производительность", BuildPerformanceSettings);
         AddSection("Интерфейс", BuildInterfaceSettings);
@@ -164,15 +166,15 @@ public sealed partial class MainWindow
         panel.Children.Add(CreateSettingsInfo(
             "Текущий режим",
             provider.Equals("native", StringComparison.OrdinalIgnoreCase)
-                ? "CPU · correctness-first"
+                ? "CPU · стабильный профиль"
                 : "Управляется выбранным провайдером"));
         panel.Children.Add(CreateSettingsInfo(
-            "Native GPU offload",
+            "Аппаратное ускорение",
             provider.Equals("native", StringComparison.OrdinalIgnoreCase)
-                ? "Выключен в текущем безопасном профиле"
+                ? "Настраивается отдельным профилем"
                 : "Не применяется"));
         panel.Children.Add(CreateSettingsNote(
-            "Здесь следующим этапом появится выбор Auto / GPU / CPU после отдельного native benchmark и fallback-проверок."));
+            "Выбор режима ускорения будет подключён к Settings отдельным проверенным проходом."));
         return panel;
     }
 
@@ -194,7 +196,8 @@ public sealed partial class MainWindow
         {
             if (AppWindow.Presenter is OverlappedPresenter currentPresenter)
                 currentPresenter.IsAlwaysOnTop = alwaysOnTop.IsOn;
-            _uiSettings.Save(new DesktopUiSettings(alwaysOnTop.IsOn));
+            var current = _uiSettings.Load();
+            _uiSettings.Save(new DesktopUiSettings(alwaysOnTop.IsOn, current.CheckForUpdatesOnStartup));
         };
         panel.Children.Add(CreateSettingsCard(alwaysOnTop));
         panel.Children.Add(CreateSettingsInfo(
