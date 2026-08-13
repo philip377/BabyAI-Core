@@ -52,6 +52,15 @@ if ([string]::IsNullOrWhiteSpace($version)) {
     throw "Release manifest does not contain a version."
 }
 
+$supportedPython = @($manifest.python_versions | ForEach-Object { [string]$_ })
+$pythonVersion = (& $Python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" | Select-Object -Last 1).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($pythonVersion)) {
+    throw "Could not determine the Python version."
+}
+if ($pythonVersion -notin $supportedPython) {
+    throw "BabyAI $version supports Python $($supportedPython -join ', '); found Python $pythonVersion."
+}
+
 $desktopSource = Join-Path $BundleRoot "app"
 $wheelSource = Join-Path $BundleRoot "wheels"
 $runtimeSource = Join-Path $BundleRoot "runtime"
