@@ -72,6 +72,7 @@ public sealed class BabyAIBridgeClient
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
+        ApplySavedNativeAcceleration(startInfo);
         startInfo.ArgumentList.Add("-m");
         startInfo.ArgumentList.Add("babyai.desktop_commands_cli");
         startInfo.ArgumentList.Add("exec");
@@ -127,6 +128,25 @@ public sealed class BabyAIBridgeClient
 
             return stdout.Trim();
         }
+    }
+
+    private static void ApplySavedNativeAcceleration(ProcessStartInfo startInfo)
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("BABYAI_NATIVE_ACCELERATION")))
+            return;
+
+        var stored = new DesktopUiSettingsStore().Load().NativeAcceleration;
+        startInfo.Environment["BABYAI_NATIVE_ACCELERATION"] = NormaliseNativeAcceleration(stored);
+    }
+
+    private static string NormaliseNativeAcceleration(string? value)
+    {
+        return value?.Trim().ToLowerInvariant() switch
+        {
+            "auto" => "auto",
+            "vulkan" => "vulkan",
+            _ => "cpu",
+        };
     }
 
     private static void TryKill(Process process)
