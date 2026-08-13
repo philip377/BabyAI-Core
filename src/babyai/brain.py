@@ -36,7 +36,10 @@ def _build_ollama(config: BabyAIConfig) -> LLMProvider:
 
 
 def _build_native(config: BabyAIConfig) -> LLMProvider:
-    return NativeBrainProvider(model_path=config.native_model_file)
+    return NativeBrainProvider(
+        model_path=config.native_model_file,
+        runtime_path=config.native_runtime_file,
+    )
 
 
 _PROVIDER_BUILDERS: dict[str, Callable[[BabyAIConfig], LLMProvider]] = {
@@ -87,14 +90,25 @@ def probe_brain_runtime(config: BabyAIConfig) -> BrainRuntimeStatus:
                 ready=False,
                 detail=f"Native GGUF model not found at: {model_path}",
             )
+
+        runtime_path = config.native_runtime_file
+        if not runtime_path.is_file():
+            return BrainRuntimeStatus(
+                provider="native",
+                model=config.model,
+                state="native_runtime_missing",
+                ready=False,
+                detail=f"Native llama.cpp runtime library not found at: {runtime_path}",
+            )
+
         return BrainRuntimeStatus(
             provider="native",
             model=config.model,
-            state="native_runtime_missing",
+            state="native_inference_pending",
             ready=False,
             detail=(
-                "Native GGUF model is present, but the embedded llama.cpp runtime "
-                "is not linked in this build yet."
+                "Native GGUF model and runtime library are present. "
+                "In-process inference wiring is the next implementation step."
             ),
         )
 

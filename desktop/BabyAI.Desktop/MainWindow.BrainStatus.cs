@@ -31,6 +31,7 @@ public sealed partial class MainWindow
                 "ready" => $"Startup: Core ✓ · Native ✓ · Model {brain.Model} ✓",
                 "native_model_missing" => $"Startup: Core ✓ · Native ? · Model {brain.Model} ✕",
                 "native_runtime_missing" => $"Startup: Core ✓ · Native runtime ✕ · Model {brain.Model} ✓",
+                "native_inference_pending" => $"Startup: Core ✓ · Native runtime ✓ · Model {brain.Model} ✓ · Inference …",
                 _ when brain.Ready => $"Startup: Core ✓ · Native ✓ · Model {brain.Model} ✓",
                 _ => $"Startup: Core ✓ · Native ? · Model {brain.Model} ?",
             };

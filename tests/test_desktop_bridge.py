@@ -114,7 +114,7 @@ def test_desktop_bridge_reports_missing_native_model(tmp_path):
     assert str(config.native_model_file) in runtime["detail"]
 
 
-def test_desktop_bridge_reports_native_runtime_not_linked(tmp_path):
+def test_desktop_bridge_reports_missing_native_runtime(tmp_path):
     model = tmp_path / "babyai.gguf"
     model.write_bytes(b"GGUF-placeholder-for-contract-test")
     config = BabyAIConfig(data_dir=tmp_path, provider="native", native_model_path=model)
@@ -124,4 +124,24 @@ def test_desktop_bridge_reports_native_runtime_not_linked(tmp_path):
     assert runtime["provider"] == "native"
     assert runtime["state"] == "native_runtime_missing"
     assert runtime["ready"] is False
-    assert "embedded llama.cpp runtime" in runtime["detail"]
+    assert str(config.native_runtime_file) in runtime["detail"]
+
+
+def test_desktop_bridge_reports_native_inference_pending_when_files_exist(tmp_path):
+    model = tmp_path / "babyai.gguf"
+    runtime_file = tmp_path / "llama.dll"
+    model.write_bytes(b"GGUF-placeholder-for-contract-test")
+    runtime_file.write_bytes(b"DLL-placeholder-for-readiness-test")
+    config = BabyAIConfig(
+        data_dir=tmp_path,
+        provider="native",
+        native_model_path=model,
+        native_runtime_path=runtime_file,
+    )
+
+    runtime = build_desktop_snapshot(config).as_dict()["runtime"]
+
+    assert runtime["provider"] == "native"
+    assert runtime["state"] == "native_inference_pending"
+    assert runtime["ready"] is False
+    assert "in-process inference wiring" in runtime["detail"].lower()
