@@ -15,6 +15,7 @@ public sealed class BabyAIBridgeClient
         var snapshot = root.GetProperty("snapshot");
         var identity = snapshot.GetProperty("identity");
         var learning = snapshot.GetProperty("learning");
+        var runtime = snapshot.GetProperty("runtime");
         var task = snapshot.TryGetProperty("task", out var taskElement) && taskElement.ValueKind != JsonValueKind.Null
             ? taskElement.GetProperty("goal").GetString()
             : null;
@@ -24,7 +25,13 @@ public sealed class BabyAIBridgeClient
         return new DesktopStatus(
             identity.GetProperty("name").GetString() ?? "BabyAI",
             task,
-            requiresApproval);
+            requiresApproval,
+            new BrainStatus(
+                runtime.GetProperty("provider").GetString() ?? "unknown",
+                runtime.GetProperty("model").GetString() ?? "unknown",
+                runtime.GetProperty("state").GetString() ?? "unknown",
+                runtime.GetProperty("ready").GetBoolean(),
+                runtime.TryGetProperty("detail", out var detail) ? detail.GetString() ?? string.Empty : string.Empty));
     }
 
     public async Task<string> ChatAsync(string message, CancellationToken cancellationToken = default)
@@ -127,4 +134,15 @@ public sealed class BabyAIBridgeClient
     }
 }
 
-public sealed record DesktopStatus(string Name, string? TaskGoal, bool RequiresApproval);
+public sealed record DesktopStatus(
+    string Name,
+    string? TaskGoal,
+    bool RequiresApproval,
+    BrainStatus Brain);
+
+public sealed record BrainStatus(
+    string Provider,
+    string Model,
+    string State,
+    bool Ready,
+    string Detail);
