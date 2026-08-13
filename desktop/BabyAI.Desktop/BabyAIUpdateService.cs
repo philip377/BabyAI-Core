@@ -1,5 +1,6 @@
 using System.Net;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace BabyAI.Desktop;
@@ -8,10 +9,25 @@ public sealed record BabyAIUpdateInfo(
     string CurrentVersion,
     string? LatestVersion,
     string? ReleaseUrl,
-    bool UpdateAvailable);
+    bool UpdateAvailable,
+    string? BundleUrl = null,
+    string? BundleChecksumUrl = null)
+{
+    public bool DownloadAvailable =>
+        UpdateAvailable
+        && !string.IsNullOrWhiteSpace(LatestVersion)
+        && !string.IsNullOrWhiteSpace(BundleUrl)
+        && !string.IsNullOrWhiteSpace(BundleChecksumUrl);
+}
+
+public sealed record BabyAIDownloadedUpdate(
+    string Version,
+    string BundlePath,
+    string Sha256);
 
 public static class BabyAIUpdateService
 {
+    private const long MaxReleaseBytes = 1_073_741_824;
     private static readonly Uri LatestReleaseUri = new(
         "https://api.github.com/repos/philip377/BabyAI-Core/releases/latest");
     private static readonly HttpClient Client = CreateClient();
@@ -23,13 +39,15 @@ public static class BabyAIUpdateService
 
     public static async Task<BabyAIUpdateInfo> CheckAsync(CancellationToken cancellationToken = default)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(8));
         using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleaseUri);
         request.Headers.Accept.ParseAdd("application/vnd.github+json");
 
         using var response = await Client.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+            timeout.Token);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
@@ -41,8 +59,8 @@ public static class BabyAIUpdateService
         }
 
         response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: timeout.Token);
         var root = document.RootElement;
 
         var tag = root.TryGetProperty("tag_name", out var tagElement)
@@ -61,11 +79,102 @@ public static class BabyAIUpdateService
                 UpdateAvailable: false);
         }
 
+        var latestText = FormatVersion(latest);
+        var bundleName = $"BabyAI-{latestText}-windows-x64.zip";
+        var checksumName = bundleName + ".sha256";
+        var bundleUrl = FindReleaseAssetUrl(root, bundleName);
+        var checksumUrl = FindReleaseAssetUrl(root, checksumName);
+
         return new BabyAIUpdateInfo(
             CurrentVersionText,
-            FormatVersion(latest),
+            latestText,
             releaseUrl,
-            latest.CompareTo(CurrentVersion) > 0);
+            latest.CompareTo(CurrentVersion) > 0,
+            bundleUrl,
+            checksumUrl);
+    }
+
+    public static async Task<BabyAIDownloadedUpdate> DownloadVerifiedAsync(
+        BabyAIUpdateInfo update,
+        CancellationToken cancellationToken = default)
+    {
+        if (!update.DownloadAvailable || string.IsNullOrWhiteSpace(update.LatestVersion))
+            throw new InvalidOperationException("This release does not contain a downloadable BabyAI Windows package.");
+
+        var bundleUri = RequireGitHubHttpsUri(update.BundleUrl);
+        var checksumUri = RequireGitHubHttpsUri(update.BundleChecksumUrl);
+        var version = update.LatestVersion;
+        var bundleName = $"BabyAI-{version}-windows-x64.zip";
+        var cacheDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "BabyAI",
+            "updates",
+            version);
+        Directory.CreateDirectory(cacheDir);
+
+        var bundlePath = Path.Combine(cacheDir, bundleName);
+        var partialPath = bundlePath + ".partial";
+        var checksumPath = bundlePath + ".sha256";
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(10));
+
+        var checksumText = await Client.GetStringAsync(checksumUri, timeout.Token);
+        var expectedHash = ParseChecksum(checksumText, bundleName);
+        await File.WriteAllTextAsync(checksumPath, checksumText, timeout.Token);
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, bundleUri);
+            using var response = await Client.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                timeout.Token);
+            response.EnsureSuccessStatusCode();
+
+            if (response.Content.Headers.ContentLength is long length && length > MaxReleaseBytes)
+                throw new InvalidOperationException("The BabyAI release package is unexpectedly large.");
+
+            await using var source = await response.Content.ReadAsStreamAsync(timeout.Token);
+            await using var target = new FileStream(
+                partialPath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 131_072,
+                useAsync: true);
+
+            var buffer = new byte[131_072];
+            long total = 0;
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer, timeout.Token);
+                if (read == 0)
+                    break;
+                total += read;
+                if (total > MaxReleaseBytes)
+                    throw new InvalidOperationException("The BabyAI release package exceeded the download limit.");
+                await target.WriteAsync(buffer.AsMemory(0, read), timeout.Token);
+            }
+
+            await target.FlushAsync(timeout.Token);
+            await using var package = File.OpenRead(partialPath);
+            var actualHashBytes = await SHA256.HashDataAsync(package, timeout.Token);
+            var expectedHashBytes = Convert.FromHexString(expectedHash);
+            if (!CryptographicOperations.FixedTimeEquals(actualHashBytes, expectedHashBytes))
+                throw new InvalidOperationException("The downloaded BabyAI package failed SHA-256 verification.");
+
+            File.Move(partialPath, bundlePath, overwrite: true);
+            return new BabyAIDownloadedUpdate(
+                version,
+                bundlePath,
+                Convert.ToHexString(actualHashBytes).ToLowerInvariant());
+        }
+        finally
+        {
+            if (File.Exists(partialPath))
+                File.Delete(partialPath);
+        }
     }
 
     internal static bool TryParseReleaseVersion(string? tag, out Version version)
@@ -92,11 +201,66 @@ public static class BabyAIUpdateService
         return Version.TryParse(text, out version!);
     }
 
+    internal static string ParseChecksum(string text, string expectedFileName)
+    {
+        var line = text
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(item => item.Trim())
+            .FirstOrDefault(item => item.Length > 0)
+            ?? throw new InvalidOperationException("The release checksum file is empty.");
+        var separator = line.IndexOf("  ", StringComparison.Ordinal);
+        if (separator <= 0)
+            throw new InvalidOperationException("The release checksum file has an invalid format.");
+
+        var hash = line[..separator].Trim().ToLowerInvariant();
+        var fileName = Path.GetFileName(line[(separator + 2)..].Trim());
+        if (hash.Length != 64 || hash.Any(ch => !Uri.IsHexDigit(ch)))
+            throw new InvalidOperationException("The release checksum is invalid.");
+        if (!fileName.Equals(expectedFileName, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The release checksum refers to a different package.");
+        return hash;
+    }
+
+    private static string? FindReleaseAssetUrl(JsonElement root, string expectedName)
+    {
+        if (!root.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array)
+            return null;
+
+        foreach (var asset in assets.EnumerateArray())
+        {
+            var name = asset.TryGetProperty("name", out var nameElement)
+                ? nameElement.GetString()
+                : null;
+            if (!string.Equals(name, expectedName, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var url = asset.TryGetProperty("browser_download_url", out var urlElement)
+                ? urlElement.GetString()
+                : null;
+            return IsGitHubHttpsUrl(url) ? url : null;
+        }
+
+        return null;
+    }
+
+    private static Uri RequireGitHubHttpsUri(string? value)
+    {
+        if (!IsGitHubHttpsUrl(value) || !Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            throw new InvalidOperationException("The release package URL is not a trusted GitHub HTTPS URL.");
+        return uri;
+    }
+
+    private static bool IsGitHubHttpsUrl(string? value)
+    {
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            && uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static HttpClient CreateClient()
     {
         var client = new HttpClient
         {
-            Timeout = TimeSpan.FromSeconds(8),
+            Timeout = Timeout.InfiniteTimeSpan,
         };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("BabyAI-Desktop/0.1");
         return client;
