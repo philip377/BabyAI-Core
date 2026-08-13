@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 
 from .config import BabyAIConfig
 from .llm import EchoProvider, LLMProvider, OllamaProvider
+from .native_acceleration import select_native_runtime
 from .native_brain import NativeBrainProvider
 
 
@@ -36,9 +37,15 @@ def _build_ollama(config: BabyAIConfig) -> LLMProvider:
 
 
 def _build_native(config: BabyAIConfig) -> LLMProvider:
+    selection = select_native_runtime(
+        config.native_acceleration,
+        config.native_runtime_file,
+        config.native_vulkan_runtime_file,
+    )
     return NativeBrainProvider(
         model_path=config.native_model_file,
-        runtime_path=config.native_runtime_file,
+        runtime_path=selection.runtime_path,
+        n_gpu_layers=selection.n_gpu_layers,
     )
 
 
@@ -91,7 +98,11 @@ def probe_brain_runtime(config: BabyAIConfig) -> BrainRuntimeStatus:
                 detail=f"Native GGUF model not found at: {model_path}",
             )
 
-        runtime_path = config.native_runtime_file
+        runtime_path = (
+            config.native_vulkan_runtime_file
+            if config.native_acceleration == "vulkan"
+            else config.native_runtime_file
+        )
         if not runtime_path.is_file():
             return BrainRuntimeStatus(
                 provider="native",
