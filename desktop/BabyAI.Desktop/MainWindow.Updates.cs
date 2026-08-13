@@ -1,5 +1,3 @@
-using Microsoft.UI.Xaml.Controls;
-
 namespace BabyAI.Desktop;
 
 public sealed partial class MainWindow
@@ -21,19 +19,7 @@ public sealed partial class MainWindow
                 return;
 
             StartupText.Text = $"Доступно обновление {update.LatestVersion}";
-            if (Root.XamlRoot is null)
-                return;
-
-            var dialog = new ContentDialog
-            {
-                XamlRoot = Root.XamlRoot,
-                Title = "Доступно обновление BabyAI",
-                Content = $"Установлена версия {update.CurrentVersion}. Доступна версия {update.LatestVersion}. Откройте Настройки → Общие, чтобы перейти к релизу.",
-                CloseButtonText = "Понятно",
-                DefaultButton = ContentDialogButton.Close,
-            };
-
-            await dialog.ShowAsync();
+            _tray.SetUpdateAvailable(update.LatestVersion);
         }
         catch
         {
