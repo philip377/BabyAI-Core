@@ -20,15 +20,6 @@ public sealed partial class MainWindow
         var settings = _uiSettings.Load();
         if (AppWindow.Presenter is OverlappedPresenter presenter)
             presenter.IsAlwaysOnTop = settings.AlwaysOnTop;
-
-        var launchAcceleration = Environment.GetEnvironmentVariable("BABYAI_NATIVE_ACCELERATION");
-        if (string.IsNullOrWhiteSpace(launchAcceleration))
-        {
-            Environment.SetEnvironmentVariable(
-                "BABYAI_NATIVE_ACCELERATION",
-                NormaliseNativeAcceleration(settings.NativeAcceleration),
-                EnvironmentVariableTarget.Process);
-        }
     }
 
     private async void SettingsButton_Click(object sender, RoutedEventArgs e)
@@ -180,8 +171,7 @@ public sealed partial class MainWindow
             return panel;
         }
 
-        var currentMode = NormaliseNativeAcceleration(
-            ReadEnvironment("BABYAI_NATIVE_ACCELERATION", _uiSettings.Load().NativeAcceleration));
+        var currentMode = EffectiveNativeAcceleration();
         var modePicker = new ComboBox
         {
             Header = "Режим вычислений",
@@ -204,10 +194,6 @@ public sealed partial class MainWindow
             };
             var settings = _uiSettings.Load();
             _uiSettings.Save(settings with { NativeAcceleration = mode });
-            Environment.SetEnvironmentVariable(
-                "BABYAI_NATIVE_ACCELERATION",
-                mode,
-                EnvironmentVariableTarget.Process);
         };
         panel.Children.Add(CreateSettingsCard(modePicker));
         panel.Children.Add(CreateSettingsInfo(
@@ -265,9 +251,7 @@ public sealed partial class MainWindow
 
         if (provider.Equals("native", StringComparison.OrdinalIgnoreCase))
         {
-            panel.Children.Add(CreateSettingsInfo(
-                "Режим",
-                NormaliseNativeAcceleration(ReadEnvironment("BABYAI_NATIVE_ACCELERATION", "cpu"))));
+            panel.Children.Add(CreateSettingsInfo("Режим", EffectiveNativeAcceleration()));
             panel.Children.Add(CreateSettingsInfo(
                 "GGUF модель",
                 ReadEnvironment("BABYAI_NATIVE_MODEL", "Путь не задан")));
@@ -283,6 +267,14 @@ public sealed partial class MainWindow
             "Управление",
             "Enter — отправить · Shift+Enter — новая строка · Stop — остановить генерацию"));
         return panel;
+    }
+
+    private string EffectiveNativeAcceleration()
+    {
+        var launchOverride = Environment.GetEnvironmentVariable("BABYAI_NATIVE_ACCELERATION");
+        return string.IsNullOrWhiteSpace(launchOverride)
+            ? NormaliseNativeAcceleration(_uiSettings.Load().NativeAcceleration)
+            : NormaliseNativeAcceleration(launchOverride);
     }
 
     private static string NormaliseNativeAcceleration(string? value)
