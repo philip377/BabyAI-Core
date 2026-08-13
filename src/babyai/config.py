@@ -13,17 +13,25 @@ class BabyAIConfig:
     provider: str = "ollama"
     model: str = "qwen3:8b"
     ollama_url: str = "http://127.0.0.1:11434"
+    native_model_path: Path | None = None
 
     @classmethod
     def default(cls) -> "BabyAIConfig":
+        data_dir = Path(os.getenv("BABYAI_DATA_DIR", Path.home() / ".babyai"))
+        native_model = os.getenv("BABYAI_NATIVE_MODEL")
         return cls(
-            data_dir=Path(os.getenv("BABYAI_DATA_DIR", Path.home() / ".babyai")),
+            data_dir=data_dir,
             owner=os.getenv("BABYAI_OWNER", "owner"),
             name=os.getenv("BABYAI_NAME", "BabyAI"),
             provider=os.getenv("BABYAI_PROVIDER", "ollama").lower(),
             model=os.getenv("BABYAI_MODEL", "qwen3:8b"),
             ollama_url=os.getenv("BABYAI_OLLAMA_URL", "http://127.0.0.1:11434"),
+            native_model_path=Path(native_model) if native_model else None,
         )
+
+    @property
+    def native_model_file(self) -> Path:
+        return self.native_model_path or (self.data_dir / "models" / "babyai.gguf")
 
     @property
     def memory_db(self) -> Path:

@@ -5,7 +5,8 @@ import pytest
 from babyai.brain import BrainProviderError, build_brain_provider, supported_brain_providers
 from babyai.config import BabyAIConfig
 from babyai.desktop_commands import DesktopCommandError, DesktopCommands
-from babyai.llm import EchoProvider, OllamaProvider
+from babyai.llm import EchoProvider, LLMError, OllamaProvider
+from babyai.native_brain import NativeBrainProvider
 
 
 def test_factory_builds_echo_provider(tmp_path):
@@ -31,19 +32,31 @@ def test_factory_builds_ollama_provider_from_config(tmp_path):
     assert provider.base_url == "http://127.0.0.1:9999"
 
 
+def test_factory_builds_reserved_native_provider(tmp_path):
+    model_path = tmp_path / "models" / "babyai.gguf"
+    config = BabyAIConfig(data_dir=tmp_path, provider="native", native_model_path=model_path)
+
+    provider = build_brain_provider(config)
+
+    assert isinstance(provider, NativeBrainProvider)
+    assert provider.model_path == model_path
+    with pytest.raises(LLMError, match="Native brain runtime is not linked"):
+        provider.generate("hello")
+
+
 def test_factory_exposes_supported_provider_names():
-    assert supported_brain_providers() == ("echo", "ollama")
+    assert supported_brain_providers() == ("echo", "ollama", "native")
 
 
 def test_factory_rejects_unknown_provider_with_stable_error(tmp_path):
-    config = BabyAIConfig(data_dir=tmp_path, provider="native")
+    config = BabyAIConfig(data_dir=tmp_path, provider="bogus")
 
-    with pytest.raises(BrainProviderError, match="Unknown BABYAI_PROVIDER='native'"):
+    with pytest.raises(BrainProviderError, match="Unknown BABYAI_PROVIDER='bogus'"):
         build_brain_provider(config)
 
 
 def test_desktop_commands_translate_factory_error(tmp_path):
-    commands = DesktopCommands(BabyAIConfig(data_dir=tmp_path, provider="native"))
+    commands = DesktopCommands(BabyAIConfig(data_dir=tmp_path, provider="bogus"))
 
-    with pytest.raises(DesktopCommandError, match="Unknown BABYAI_PROVIDER='native'"):
+    with pytest.raises(DesktopCommandError, match="Unknown BABYAI_PROVIDER='bogus'"):
         commands._provider()
