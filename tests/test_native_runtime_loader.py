@@ -6,6 +6,7 @@ import pytest
 
 from babyai.native_runtime import (
     BABYAI_NATIVE_ABI_VERSION,
+    MAX_NATIVE_PIECE_BYTES,
     MAX_NATIVE_TOKEN_COUNT,
     REQUIRED_BABYAI_SYMBOLS,
     NativeRuntimeError,
@@ -43,19 +44,23 @@ def _lifecycle_library(
     model_result: int = 0,
     context_result: int = 0,
     tokenize_result: int | None = None,
+    piece_result: int | None = None,
     prefill_result: int = 0,
     sample_result: int = 0,
+    decode_result: int = 0,
     sampled_token: int = 404,
     sampled_eog: bool = False,
     token_ids: tuple[int, ...] = (101, 202, 303),
     token_required: int | None = None,
+    piece_bytes: bytes = b" token",
+    piece_required: int | None = None,
     last_error: bytes = b"",
     context_size: int = 4096,
     batch_size: int = 512,
 ):
     calls: list[object] = []
     library = _compatible_library()
-    context_state = {"tokens": 0, "sampled": False}
+    context_state = {"tokens": 0, "sampled": False, "sampled_token": None}
 
     def runtime_create(out_runtime):
         calls.append("runtime_create")
@@ -100,12 +105,26 @@ def _lifecycle_library(
         out_count._obj.value = len(token_ids)
         return 0
 
+    def model_token_to_piece(runtime, model, token, render_special, piece_out, capacity, out_count):
+        calls.append(("token_to_piece", int(token), bool(render_special), int(capacity)))
+        required = piece_required if piece_required is not None else len(piece_bytes)
+        out_count._obj.value = required
+        if piece_result is not None:
+            return piece_result
+        if piece_out is None or int(capacity) < required:
+            return 6
+        for index, value in enumerate(piece_bytes):
+            piece_out[index] = bytes((value,))
+        out_count._obj.value = len(piece_bytes)
+        return 0
+
     def context_create(runtime, model, n_ctx, n_batch, n_threads, out_context):
         calls.append(("context_create", int(n_ctx), int(n_batch), int(n_threads)))
         if context_result == 0:
             out_context._obj.value = 0x301 + len(calls)
             context_state["tokens"] = 0
             context_state["sampled"] = False
+            context_state["sampled_token"] = None
         return context_result
 
     def context_destroy(context):
@@ -132,6 +151,23 @@ def _lifecycle_library(
         out_token._obj.value = sampled_token
         out_is_eog._obj.value = 1 if sampled_eog else 0
         context_state["sampled"] = True
+        context_state["sampled_token"] = sampled_token
+        return 0
+
+    def context_decode(runtime, context, token):
+        token = int(token)
+        calls.append(("decode_sampled", token))
+        if not context_state["sampled"]:
+            return 14
+        if token != context_state["sampled_token"]:
+            return 15
+        if context_state["tokens"] >= context_size:
+            return 16
+        if decode_result != 0:
+            return decode_result
+        context_state["tokens"] += 1
+        context_state["sampled"] = False
+        context_state["sampled_token"] = None
         return 0
 
     library.babyai_native_runtime_create = _FakeFunction(callback=runtime_create)
@@ -139,6 +175,7 @@ def _lifecycle_library(
     library.babyai_native_model_open = _FakeFunction(callback=model_open)
     library.babyai_native_model_close = _FakeFunction(callback=model_close)
     library.babyai_native_model_tokenize = _FakeFunction(callback=model_tokenize)
+    library.babyai_native_model_token_to_piece = _FakeFunction(callback=model_token_to_piece)
     library.babyai_native_context_create = _FakeFunction(callback=context_create)
     library.babyai_native_context_destroy = _FakeFunction(callback=context_destroy)
     library.babyai_native_context_n_ctx = _FakeFunction(value=context_size)
@@ -146,6 +183,7 @@ def _lifecycle_library(
     library.babyai_native_context_prefill = _FakeFunction(callback=context_prefill)
     library.babyai_native_context_token_count = _FakeFunction(callback=lambda context: context_state["tokens"])
     library.babyai_native_context_sample_greedy = _FakeFunction(callback=context_sample)
+    library.babyai_native_context_decode_sampled = _FakeFunction(callback=context_decode)
     library.babyai_native_last_error = _FakeFunction(callback=lambda runtime: last_error)
     return library, calls
 
@@ -174,9 +212,10 @@ def test_loader_rejects_library_missing_required_symbols(tmp_path, monkeypatch):
     runtime = tmp_path / "babyai_native.dll"
     runtime.write_bytes(b"placeholder")
     monkeypatch.setattr("babyai.native_runtime.ctypes.CDLL", lambda path: _FakeLibrary())
-    with pytest.raises(NativeRuntimeError, match="does not satisfy BabyAI native ABI v5") as exc:
+    with pytest.raises(NativeRuntimeError, match="does not satisfy BabyAI native ABI v6") as exc:
         NativeRuntimeLoader(runtime).load()
-    assert "babyai_native_context_sample_greedy" in str(exc.value)
+    assert "babyai_native_model_token_to_piece" in str(exc.value)
+    assert "babyai_native_context_decode_sampled" in str(exc.value)
 
 
 def test_loader_rejects_wrong_abi_version(tmp_path, monkeypatch):
@@ -187,16 +226,30 @@ def test_loader_rejects_wrong_abi_version(tmp_path, monkeypatch):
         NativeRuntimeLoader(runtime).load()
 
 
-def test_loader_configures_sample_abi(tmp_path, monkeypatch):
+def test_loader_configures_append_decode_abi(tmp_path, monkeypatch):
     library = _compatible_library()
     runtime = _install_fake_runtime(tmp_path, monkeypatch, library)
     handle = NativeRuntimeLoader(runtime).load()
     assert handle.abi_version == BABYAI_NATIVE_ABI_VERSION
+    assert library.babyai_native_model_token_to_piece.argtypes == [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int32,
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_char),
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_int32),
+    ]
     assert library.babyai_native_context_sample_greedy.argtypes == [
         ctypes.c_void_p,
         ctypes.c_void_p,
         ctypes.POINTER(ctypes.c_int32),
         ctypes.POINTER(ctypes.c_int32),
+    ]
+    assert library.babyai_native_context_decode_sampled.argtypes == [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int32,
     ]
 
 
@@ -222,6 +275,30 @@ def test_model_tokenize_rejects_unbounded_native_size_before_allocation(tmp_path
             with pytest.raises(NativeRuntimeError, match="safety limit"):
                 model.tokenize("oversized")
     assert len([call for call in calls if isinstance(call, tuple) and call[0] == "tokenize"]) == 1
+
+
+def test_model_token_to_piece_is_two_pass_and_returns_raw_bytes(tmp_path, monkeypatch):
+    raw_piece = b"\xd0\xbf"
+    library, calls = _lifecycle_library(piece_bytes=raw_piece)
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            assert model.token_to_piece(777, render_special=True) == raw_piece
+    piece_calls = [call for call in calls if isinstance(call, tuple) and call[0] == "token_to_piece"]
+    assert piece_calls == [
+        ("token_to_piece", 777, True, 0),
+        ("token_to_piece", 777, True, len(raw_piece)),
+    ]
+
+
+def test_model_token_to_piece_rejects_unbounded_native_size_before_allocation(tmp_path, monkeypatch):
+    library, calls = _lifecycle_library(piece_required=MAX_NATIVE_PIECE_BYTES + 1)
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            with pytest.raises(NativeRuntimeError, match="safety limit"):
+                model.token_to_piece(777)
+    assert len([call for call in calls if isinstance(call, tuple) and call[0] == "token_to_piece"]) == 1
 
 
 def test_context_prefill_commits_bounded_token_ids(tmp_path, monkeypatch):
@@ -271,7 +348,7 @@ def test_context_sample_greedy_returns_token_and_eog(tmp_path, monkeypatch):
     assert calls.count("sample_greedy") == 1
 
 
-def test_context_sample_greedy_is_one_shot_until_decode_contract_exists(tmp_path, monkeypatch):
+def test_context_sample_greedy_requires_decode_before_next_sample(tmp_path, monkeypatch):
     library, calls = _lifecycle_library(sampled_token=88)
     runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
     with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
@@ -279,9 +356,67 @@ def test_context_sample_greedy_is_one_shot_until_decode_contract_exists(tmp_path
             with model.open_context() as context:
                 context.prefill([1, 2])
                 assert context.sample_greedy().token_id == 88
-                with pytest.raises(NativeRuntimeError, match="already sampled"):
+                with pytest.raises(NativeRuntimeError, match="decode that token first"):
                     context.sample_greedy()
     assert calls.count("sample_greedy") == 1
+
+
+def test_context_decode_sampled_commits_one_token_and_allows_next_sample(tmp_path, monkeypatch):
+    library, calls = _lifecycle_library(sampled_token=88)
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            with model.open_context() as context:
+                context.prefill([1, 2])
+                first = context.sample_greedy()
+                assert context.decode_sampled(first.token_id) == 3
+                assert context.token_count == 3
+                assert context.sample_greedy().token_id == 88
+    assert calls.count("sample_greedy") == 2
+    assert ("decode_sampled", 88) in calls
+
+
+def test_context_decode_sampled_rejects_mismatched_token_before_native_call(tmp_path, monkeypatch):
+    library, calls = _lifecycle_library(sampled_token=88)
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            with model.open_context() as context:
+                context.prefill([1, 2])
+                context.sample_greedy()
+                with pytest.raises(NativeRuntimeError, match="must match"):
+                    context.decode_sampled(89)
+    assert not any(isinstance(call, tuple) and call[0] == "decode_sampled" for call in calls)
+
+
+def test_context_decode_sampled_rejects_full_context_before_native_call(tmp_path, monkeypatch):
+    library, calls = _lifecycle_library(sampled_token=88, context_size=2, batch_size=2)
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            with model.open_context() as context:
+                context.prefill([1, 2])
+                context.sample_greedy()
+                with pytest.raises(NativeRuntimeError, match="no remaining token positions"):
+                    context.decode_sampled(88)
+    assert not any(isinstance(call, tuple) and call[0] == "decode_sampled" for call in calls)
+
+
+def test_context_decode_failure_includes_native_error(tmp_path, monkeypatch):
+    library, calls = _lifecycle_library(
+        sampled_token=88,
+        decode_result=10,
+        last_error=b"llama.cpp sampled-token decode failed; create a fresh context before retrying.",
+    )
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            with model.open_context() as context:
+                context.prefill([1, 2])
+                context.sample_greedy()
+                with pytest.raises(NativeRuntimeError, match="fresh context"):
+                    context.decode_sampled(88)
+    assert calls[-1] == "runtime_destroy"
 
 
 def test_context_sample_error_includes_native_error(tmp_path, monkeypatch):
