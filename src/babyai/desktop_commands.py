@@ -9,11 +9,14 @@ from .config import BabyAIConfig
 from .desktop_bridge import build_desktop_snapshot
 from .hypothesis import HypothesisStore
 from .identity import Identity, IdentityStore
-from .llm import LLMError
+from .llm import LLMError, LLMProvider
 from .memory import MemoryKind, SQLiteMemoryStore
+from .native_acceleration import select_native_runtime
+from .native_runtime import NativeRuntimeError
 from .permissions import PermissionStore
 from .planner import Planner
 from .primus import Primus
+from .resident_native_brain import ResidentNativeBrainProvider
 from .working_memory import TaskState, WorkingMemoryStore
 
 
@@ -24,25 +27,46 @@ class DesktopCommandError(ValueError):
 class DesktopCommands:
     """Narrow command surface intended for trusted local desktop clients."""
 
-    def __init__(self, config: BabyAIConfig | None = None) -> None:
+    def __init__(self, config: BabyAIConfig | None = None, *, persistent: bool = False) -> None:
         self.config = config or BabyAIConfig.default()
+        self.persistent = persistent
+        self._provider_instance: LLMProvider | None = None
 
-    def _provider(self):
+    def _provider(self) -> LLMProvider:
+        if self.persistent and self._provider_instance is not None:
+            return self._provider_instance
+
         try:
-            return build_brain_provider(self.config)
+            if self.persistent and self.config.provider == "native":
+                route = select_native_runtime(
+                    self.config.native_acceleration,
+                    self.config.native_runtime_file,
+                    self.config.native_vulkan_runtime_file,
+                )
+                provider: LLMProvider = ResidentNativeBrainProvider(
+                    model_path=self.config.native_model_file,
+                    runtime_path=route.runtime_path,
+                    n_gpu_layers=route.n_gpu_layers,
+                )
+            else:
+                provider = build_brain_provider(self.config)
         except BrainProviderError as exc:
             raise DesktopCommandError(str(exc)) from exc
+        except NativeRuntimeError as exc:
+            raise LLMError(f"Native brain inference failed: {exc}") from exc
+
+        if self.persistent:
+            self._provider_instance = provider
+        return provider
 
     def _core(self) -> Primus:
         identity = IdentityStore(self.config.identity_file).load_or_create(
             Identity(name=self.config.name, owner=self.config.owner)
         )
         permissions = PermissionStore(self.config.permissions_file)
-        # Native generation currently loads the local GGUF for every LLM call. A
-        # separate planner call therefore doubles model-load/inference work even for
-        # a simple greeting. Primus already supports planner=None and still parses a
-        # tool call from the first model answer, so native desktop chat uses that
-        # single-call path until a resident native session makes planning cheap.
+        # Native generation keeps the single-call path. A persistent desktop worker
+        # can keep the provider/model resident without freezing the surrounding
+        # mutable stores, which are rebuilt for each command.
         planner = None if self.config.provider == "native" else Planner()
         return Primus(
             llm=self._provider(),
@@ -52,6 +76,21 @@ class DesktopCommands:
             planner=planner,
             working_memory=WorkingMemoryStore(self.config.working_memory_file),
         )
+
+    def close(self) -> None:
+        provider = self._provider_instance
+        self._provider_instance = None
+        if provider is None:
+            return
+        close = getattr(provider, "close", None)
+        if callable(close):
+            close()
+
+    def __enter__(self) -> DesktopCommands:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
     def execute(self, command: str, payload: dict[str, object] | None = None) -> dict[str, object]:
         payload = payload or {}
