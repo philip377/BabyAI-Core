@@ -34,13 +34,20 @@ def test_factory_builds_ollama_provider_from_config(tmp_path):
 
 def test_factory_builds_reserved_native_provider(tmp_path):
     model_path = tmp_path / "models" / "babyai.gguf"
-    config = BabyAIConfig(data_dir=tmp_path, provider="native", native_model_path=model_path)
+    runtime_path = tmp_path / "runtime" / "llama.dll"
+    config = BabyAIConfig(
+        data_dir=tmp_path,
+        provider="native",
+        native_model_path=model_path,
+        native_runtime_path=runtime_path,
+    )
 
     provider = build_brain_provider(config)
 
     assert isinstance(provider, NativeBrainProvider)
     assert provider.model_path == model_path
-    with pytest.raises(LLMError, match="Native brain runtime is not linked"):
+    assert provider.runtime_path == runtime_path
+    with pytest.raises(LLMError, match="Native brain inference is not implemented"):
         provider.generate("hello")
 
 
