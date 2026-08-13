@@ -19,15 +19,14 @@ class NativeBackendInfo:
     metadata_available: bool
 
 
-def inspect_native_backend(path: Path) -> NativeBackendInfo:
-    """Read optional build metadata without changing the stable ABI v6 contract.
+@dataclass(frozen=True, slots=True)
+class NativeAccelerationInfo:
+    backend: NativeBackendInfo
+    gpu_probe_available: bool
+    gpu_available: bool
 
-    Older ABI v6 DLLs do not expose ``babyai_native_build_backend`` and remain
-    compatible; they are reported as ``unknown``. New DLLs must report one of
-    BabyAI's known build profiles so future automatic backend selection can fail
-    closed instead of guessing from filenames or hardware.
-    """
 
+def _load_validated_library(path: Path) -> tuple[Path, ctypes.CDLL, int]:
     resolved = path.expanduser().resolve()
     if not resolved.is_file():
         raise NativeRuntimeError(f"Native runtime library not found: {resolved}")
@@ -56,6 +55,20 @@ def inspect_native_backend(path: Path) -> NativeBackendInfo:
             f"Native runtime ABI mismatch: expected {BABYAI_NATIVE_ABI_VERSION}, got {abi_version}."
         )
 
+    return resolved, library, abi_version
+
+
+def inspect_native_backend(path: Path) -> NativeBackendInfo:
+    """Read optional build metadata without changing the stable ABI v6 contract.
+
+    Older ABI v6 DLLs do not expose ``babyai_native_build_backend`` and remain
+    compatible; they are reported as ``unknown``. New DLLs must report one of
+    BabyAI's known build profiles so automatic backend selection can fail closed
+    instead of guessing from filenames or hardware.
+    """
+
+    _, library, abi_version = _load_validated_library(path)
+
     if not hasattr(library, "babyai_native_build_backend"):
         return NativeBackendInfo(
             abi_version=abi_version,
@@ -81,4 +94,52 @@ def inspect_native_backend(path: Path) -> NativeBackendInfo:
         abi_version=abi_version,
         build_backend=backend,
         metadata_available=True,
+    )
+
+
+def inspect_native_acceleration(path: Path) -> NativeAccelerationInfo:
+    """Probe actual GPU offload availability without loading a GGUF model.
+
+    The GPU probe is an additive ABI v6 extension. Older v6 runtimes remain valid
+    but conservatively report no probe and no GPU availability. New runtimes create
+    a lightweight BabyAI runtime so llama.cpp can register its compiled backends,
+    then ask whether a real GPU/iGPU offload device is present.
+    """
+
+    backend = inspect_native_backend(path)
+    _, library, _ = _load_validated_library(path)
+    if not hasattr(library, "babyai_native_runtime_gpu_available"):
+        return NativeAccelerationInfo(
+            backend=backend,
+            gpu_probe_available=False,
+            gpu_available=False,
+        )
+
+    for symbol in ("babyai_native_runtime_create", "babyai_native_runtime_destroy"):
+        if not hasattr(library, symbol):
+            raise NativeRuntimeError(f"Native runtime does not expose required symbol: {symbol}.")
+
+    library.babyai_native_runtime_create.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+    library.babyai_native_runtime_create.restype = ctypes.c_int32
+    library.babyai_native_runtime_destroy.argtypes = [ctypes.c_void_p]
+    library.babyai_native_runtime_destroy.restype = None
+    library.babyai_native_runtime_gpu_available.argtypes = [ctypes.c_void_p]
+    library.babyai_native_runtime_gpu_available.restype = ctypes.c_int32
+
+    runtime = ctypes.c_void_p()
+    result = int(library.babyai_native_runtime_create(ctypes.byref(runtime)))
+    if result != 0 or not runtime.value:
+        raise NativeRuntimeError(
+            f"Native runtime could not initialize for GPU capability probe (result={result})."
+        )
+
+    try:
+        available = bool(library.babyai_native_runtime_gpu_available(runtime))
+    finally:
+        library.babyai_native_runtime_destroy(runtime)
+
+    return NativeAccelerationInfo(
+        backend=backend,
+        gpu_probe_available=True,
+        gpu_available=available,
     )
