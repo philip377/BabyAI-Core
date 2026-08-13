@@ -83,7 +83,8 @@
                 BorderBrush="#30FFFFFF"
                 BorderThickness="1"
                 Opacity="0"
-                Visibility="Collapsed">
+                Visibility="Collapsed"
+                SizeChanged="Panel_SizeChanged">
             <Border.Transitions>
                 <TransitionCollection>
                     <RepositionThemeTransition />
@@ -99,9 +100,10 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <Grid Grid.Row="0" ColumnSpacing="8">
+                <Grid Grid.Row="0" ColumnSpacing="7">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
@@ -113,7 +115,7 @@
                                    FontWeight="SemiBold"
                                    Foreground="#FFF8FAFF" />
                         <TextBlock x:Name="TaskText"
-                                   Text="No active task"
+                                   Text="Нет активной задачи"
                                    FontSize="11"
                                    Foreground="#9FFFFFFF"
                                    TextWrapping="Wrap"
@@ -131,12 +133,24 @@
                                    Text="Brain: checking…"
                                    FontSize="10"
                                    Foreground="#DFFFFFFF"
-                                   MaxWidth="142"
+                                   MaxWidth="128"
                                    TextTrimming="CharacterEllipsis"
                                    local:BrainStatusBehavior.Enabled="True" />
                     </Border>
 
-                    <Button Grid.Column="2"
+                    <Button x:Name="DetailsButton"
+                            Grid.Column="2"
+                            Width="28"
+                            Height="28"
+                            Padding="0"
+                            CornerRadius="14"
+                            Content="⋯"
+                            FontSize="17"
+                            VerticalAlignment="Top"
+                            Click="DetailsButton_Click"
+                            ToolTipService.ToolTip="Диагностика" />
+
+                    <Button Grid.Column="3"
                             Width="28"
                             Height="28"
                             Padding="0"
@@ -219,7 +233,7 @@
                                  PlaceholderText="Напиши BabyAI..."
                                  AcceptsReturn="True"
                                  MinHeight="44"
-                                 MaxHeight="78"
+                                 MaxHeight="88"
                                  Padding="2,7"
                                  TextWrapping="Wrap"
                                  Background="Transparent"
@@ -236,7 +250,8 @@
                                 Content="↑"
                                 FontSize="20"
                                 FontWeight="SemiBold"
-                                Click="SendButton_Click" />
+                                Click="SendButton_Click"
+                                ToolTipService.ToolTip="Отправить · Enter" />
                         <Button x:Name="StopButton"
                                 Grid.Column="2"
                                 Width="42"
@@ -246,6 +261,7 @@
                                 Content="■"
                                 FontSize="13"
                                 Click="StopButton_Click"
+                                ToolTipService.ToolTip="Остановить"
                                 Visibility="Collapsed" />
                     </Grid>
                 </Border>
