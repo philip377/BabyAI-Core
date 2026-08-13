@@ -11,6 +11,9 @@ def test_native_shim_exposes_stable_abi_v6_append_decode_contract():
     source = (root / "native" / "BabyAI.NativeBridge" / "src" / "babyai_native.cpp").read_text(
         encoding="utf-8"
     )
+    backend_source = (root / "native" / "BabyAI.NativeBridge" / "src" / "babyai_native_backend.cpp").read_text(
+        encoding="utf-8"
+    )
 
     assert "#define BABYAI_NATIVE_ABI_VERSION 6u" in header
     for symbol in (
@@ -32,6 +35,11 @@ def test_native_shim_exposes_stable_abi_v6_append_decode_contract():
         assert symbol in header
         assert symbol in source
 
+    assert "babyai_native_build_backend" in header
+    assert "babyai_native_build_backend" in backend_source
+    assert 'return "cpu"' in backend_source
+    assert 'return "vulkan"' in backend_source
+
     assert "llama_tokenize" in source
     assert "llama_token_to_piece" in source
     assert "llama_decode" in source
@@ -41,8 +49,6 @@ def test_native_shim_exposes_stable_abi_v6_append_decode_contract():
     assert "llama_vocab_is_eog" in source
     assert "LLAMA_TOKEN_NULL" in source
 
-    # ABI v6 keeps prompt prefill and adds one-token append decode, while
-    # preserving BabyAI-owned batches instead of exposing llama.cpp structs.
     assert source.count("llama_decode(") == 2
     assert "sampled_token" in source
     assert "decode_failed" in source
@@ -59,6 +65,9 @@ def test_native_shim_ci_pins_upstream_and_runs_managed_lifecycle_smoke():
     assert "e79e4bf660e19f2ad851e06c6913f7a8c5852621" in workflow
     assert "BUILD_SHARED_LIBS OFF" in cmake
     assert "target_link_libraries(babyai_native PRIVATE llama)" in cmake
+    assert 'BABYAI_NATIVE_BACKEND "cpu"' in cmake
+    assert "GGML_VULKAN ON" in cmake
+    assert "GGML_VULKAN OFF" in cmake
     assert "NativeRuntimeLoader" in smoke
     assert ".open_runtime()" in smoke
     assert "runtime.open_model(" in smoke
