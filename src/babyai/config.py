@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,11 +15,13 @@ class BabyAIConfig:
     model: str = "qwen3:8b"
     ollama_url: str = "http://127.0.0.1:11434"
     native_model_path: Path | None = None
+    native_runtime_path: Path | None = None
 
     @classmethod
     def default(cls) -> "BabyAIConfig":
         data_dir = Path(os.getenv("BABYAI_DATA_DIR", Path.home() / ".babyai"))
         native_model = os.getenv("BABYAI_NATIVE_MODEL")
+        native_runtime = os.getenv("BABYAI_NATIVE_RUNTIME")
         return cls(
             data_dir=data_dir,
             owner=os.getenv("BABYAI_OWNER", "owner"),
@@ -27,11 +30,24 @@ class BabyAIConfig:
             model=os.getenv("BABYAI_MODEL", "qwen3:8b"),
             ollama_url=os.getenv("BABYAI_OLLAMA_URL", "http://127.0.0.1:11434"),
             native_model_path=Path(native_model) if native_model else None,
+            native_runtime_path=Path(native_runtime) if native_runtime else None,
         )
 
     @property
     def native_model_file(self) -> Path:
         return self.native_model_path or (self.data_dir / "models" / "babyai.gguf")
+
+    @property
+    def native_runtime_file(self) -> Path:
+        if self.native_runtime_path is not None:
+            return self.native_runtime_path
+        if os.name == "nt":
+            filename = "llama.dll"
+        elif sys.platform == "darwin":
+            filename = "libllama.dylib"
+        else:
+            filename = "libllama.so"
+        return self.data_dir / "runtime" / filename
 
     @property
     def memory_db(self) -> Path:
