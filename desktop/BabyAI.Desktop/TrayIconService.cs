@@ -9,6 +9,8 @@ public sealed class TrayIconService : IDisposable
 {
     private readonly MainWindow _window;
     private readonly TaskbarIcon _icon;
+    private bool _created;
+    private bool _createAttempted;
 
     public TrayIconService(MainWindow window)
     {
@@ -72,17 +74,35 @@ public sealed class TrayIconService : IDisposable
             },
         };
 
-        _icon.ForceCreate();
+        _window.Activated += Window_Activated;
+    }
+
+    private void Window_Activated(object sender, WindowActivatedEventArgs args)
+    {
+        if (_createAttempted)
+            return;
+
+        _createAttempted = true;
+        try
+        {
+            _icon.ForceCreate(enablesEfficiencyMode: false);
+            _created = true;
+        }
+        catch
+        {
+            // Tray support is optional; keep the Orb alive if shell integration fails.
+        }
     }
 
     public void SetUpdateAvailable(string? version)
     {
-        if (!string.IsNullOrWhiteSpace(version))
+        if (_created && !string.IsNullOrWhiteSpace(version))
             _icon.ToolTipText = $"BabyAI · доступно обновление {version}";
     }
 
     public void Dispose()
     {
+        _window.Activated -= Window_Activated;
         _icon.Dispose();
     }
 }
