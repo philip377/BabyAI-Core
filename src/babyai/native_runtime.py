@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import ctypes
 import os
+from collections.abc import Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 
-BABYAI_NATIVE_ABI_VERSION = 3
+BABYAI_NATIVE_ABI_VERSION = 4
 BABYAI_NATIVE_OK = 0
 BABYAI_NATIVE_BUFFER_TOO_SMALL = 6
 MAX_NATIVE_TOKEN_COUNT = 1_000_000
 MAX_NATIVE_TEXT_BYTES = 2_147_483_647
+MAX_NATIVE_TOKEN_ID = 2_147_483_647
 
 
 class NativeRuntimeError(RuntimeError):
@@ -30,6 +32,8 @@ REQUIRED_BABYAI_SYMBOLS: tuple[str, ...] = (
     "babyai_native_context_destroy",
     "babyai_native_context_n_ctx",
     "babyai_native_context_n_batch",
+    "babyai_native_context_prefill",
+    "babyai_native_context_token_count",
     "babyai_native_last_error",
 )
 
@@ -80,6 +84,15 @@ def _configure_abi(library: Any) -> None:
     library.babyai_native_context_n_ctx.restype = ctypes.c_uint32
     library.babyai_native_context_n_batch.argtypes = [ctypes.c_void_p]
     library.babyai_native_context_n_batch.restype = ctypes.c_uint32
+    library.babyai_native_context_prefill.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_int32),
+        ctypes.c_int32,
+    ]
+    library.babyai_native_context_prefill.restype = ctypes.c_int32
+    library.babyai_native_context_token_count.argtypes = [ctypes.c_void_p]
+    library.babyai_native_context_token_count.restype = ctypes.c_uint32
 
     library.babyai_native_last_error.argtypes = [ctypes.c_void_p]
     library.babyai_native_last_error.restype = ctypes.c_char_p
@@ -104,11 +117,65 @@ class NativeContextHandle:
     pointer: ctypes.c_void_p
     context_size: int
     batch_size: int
+    token_count: int = 0
     _closed: bool = False
 
     @property
     def closed(self) -> bool:
         return self._closed
+
+    def prefill(self, tokens: Sequence[int]) -> int:
+        """Decode one initial bounded prompt into a fresh native context."""
+
+        if self._closed or not self.pointer.value:
+            raise NativeRuntimeError("Native context handle is closed.")
+        if isinstance(tokens, (str, bytes, bytearray)) or not isinstance(tokens, Sequence):
+            raise NativeRuntimeError("Native prefill tokens must be a sequence of integer token IDs.")
+
+        count = len(tokens)
+        if count <= 0:
+            raise NativeRuntimeError("Native prefill requires at least one token.")
+        if count > MAX_NATIVE_TOKEN_COUNT:
+            raise NativeRuntimeError(
+                f"Native prefill has {count} tokens, exceeding the safety limit of {MAX_NATIVE_TOKEN_COUNT}."
+            )
+        if count > self.context_size or count > self.batch_size:
+            raise NativeRuntimeError(
+                f"Native prefill has {count} tokens but this context allows at most "
+                f"{min(self.context_size, self.batch_size)} in the initial batch."
+            )
+
+        normalized: list[int] = []
+        for token in tokens:
+            if isinstance(token, bool) or not isinstance(token, int):
+                raise NativeRuntimeError("Native prefill token IDs must be integers.")
+            if token < 0 or token > MAX_NATIVE_TOKEN_ID:
+                raise NativeRuntimeError(f"Native token ID {token} is outside the supported int32 range.")
+            normalized.append(token)
+
+        buffer_type = ctypes.c_int32 * count
+        buffer = buffer_type(*normalized)
+        library = self.model.runtime.handle.library
+        result = int(
+            library.babyai_native_context_prefill(
+                self.model.runtime.pointer,
+                self.pointer,
+                buffer,
+                count,
+            )
+        )
+        if result != BABYAI_NATIVE_OK:
+            detail = _last_error(library, self.model.runtime.pointer)
+            suffix = f": {detail}" if detail else ""
+            raise NativeRuntimeError(f"Could not prefill native context (code {result}){suffix}")
+
+        actual = int(library.babyai_native_context_token_count(self.pointer))
+        if actual != count:
+            raise NativeRuntimeError(
+                f"Native prefill reported {actual} committed tokens after decoding {count}."
+            )
+        self.token_count = actual
+        return actual
 
     def close(self) -> None:
         if self._closed:
@@ -253,6 +320,7 @@ class NativeModelHandle:
             pointer=out_context,
             context_size=int(library.babyai_native_context_n_ctx(out_context)),
             batch_size=int(library.babyai_native_context_n_batch(out_context)),
+            token_count=int(library.babyai_native_context_token_count(out_context)),
         )
         self._contexts.append(context)
         return context
