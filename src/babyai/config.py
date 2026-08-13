@@ -42,11 +42,11 @@ class BabyAIConfig:
         if self.native_runtime_path is not None:
             return self.native_runtime_path
         if os.name == "nt":
-            filename = "llama.dll"
+            filename = "babyai_native.dll"
         elif sys.platform == "darwin":
-            filename = "libllama.dylib"
+            filename = "libbabyai_native.dylib"
         else:
-            filename = "libllama.so"
+            filename = "libbabyai_native.so"
         return self.data_dir / "runtime" / filename
 
     @property
