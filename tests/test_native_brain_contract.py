@@ -15,12 +15,16 @@ def test_native_runtime_defaults_inside_babyai_data_dir(tmp_path):
     config = BabyAIConfig(data_dir=tmp_path, provider="native")
 
     assert config.native_runtime_file.parent == tmp_path / "runtime"
-    assert config.native_runtime_file.name in {"llama.dll", "libllama.so", "libllama.dylib"}
+    assert config.native_runtime_file.name in {
+        "babyai_native.dll",
+        "libbabyai_native.so",
+        "libbabyai_native.dylib",
+    }
 
 
 def test_native_paths_can_come_from_environment(tmp_path, monkeypatch):
     model = tmp_path / "custom.gguf"
-    runtime = tmp_path / "custom-llama.dll"
+    runtime = tmp_path / "custom-babyai-native.dll"
     monkeypatch.setenv("BABYAI_DATA_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("BABYAI_PROVIDER", "native")
     monkeypatch.setenv("BABYAI_NATIVE_MODEL", str(model))
