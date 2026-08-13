@@ -64,8 +64,17 @@ public sealed class DesktopUiSettingsStore
 
         try
         {
-            return JsonSerializer.Deserialize<DesktopUiSettings>(File.ReadAllText(_path))
+            var json = File.ReadAllText(_path);
+            var settings = JsonSerializer.Deserialize<DesktopUiSettings>(json)
                 ?? new DesktopUiSettings();
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty(
+                    nameof(DesktopUiSettings.CheckForUpdatesOnStartup),
+                    out _))
+            {
+                settings = settings with { CheckForUpdatesOnStartup = true };
+            }
+            return settings;
         }
         catch
         {
