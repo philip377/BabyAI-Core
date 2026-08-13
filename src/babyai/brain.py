@@ -98,7 +98,7 @@ def probe_brain_runtime(config: BabyAIConfig) -> BrainRuntimeStatus:
                 model=config.model,
                 state="native_runtime_missing",
                 ready=False,
-                detail=f"Native llama.cpp runtime library not found at: {runtime_path}",
+                detail=f"BabyAI native runtime library not found at: {runtime_path}",
             )
 
         return BrainRuntimeStatus(
@@ -107,7 +107,7 @@ def probe_brain_runtime(config: BabyAIConfig) -> BrainRuntimeStatus:
             state="native_inference_pending",
             ready=False,
             detail=(
-                "Native GGUF model and runtime library are present. "
+                "Native GGUF model and BabyAI runtime library are present. "
                 "In-process inference wiring is the next implementation step."
             ),
         )
