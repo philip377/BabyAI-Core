@@ -65,7 +65,7 @@ def test_desktop_bridge_empty_state_is_valid(tmp_path):
 
 def test_desktop_bridge_reports_ready_ollama_model(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "babyai.desktop_bridge.urllib.request.urlopen",
+        "babyai.brain.urllib.request.urlopen",
         lambda request, timeout: _Response({"models": [{"name": "qwen3:8b"}]}),
     )
     config = BabyAIConfig(data_dir=tmp_path, provider="ollama", model="qwen3:8b")
@@ -78,7 +78,7 @@ def test_desktop_bridge_reports_ready_ollama_model(tmp_path, monkeypatch):
 
 def test_desktop_bridge_reports_missing_ollama_model(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "babyai.desktop_bridge.urllib.request.urlopen",
+        "babyai.brain.urllib.request.urlopen",
         lambda request, timeout: _Response({"models": [{"name": "llama3.2:3b"}]}),
     )
     config = BabyAIConfig(data_dir=tmp_path, provider="ollama", model="qwen3:8b")
@@ -94,10 +94,34 @@ def test_desktop_bridge_reports_unreachable_ollama(tmp_path, monkeypatch):
     def _offline(request, timeout):
         raise urllib.error.URLError("connection refused")
 
-    monkeypatch.setattr("babyai.desktop_bridge.urllib.request.urlopen", _offline)
+    monkeypatch.setattr("babyai.brain.urllib.request.urlopen", _offline)
     config = BabyAIConfig(data_dir=tmp_path, provider="ollama", model="qwen3:8b")
 
     runtime = build_desktop_snapshot(config).as_dict()["runtime"]
 
     assert runtime["state"] == "unavailable"
     assert runtime["ready"] is False
+
+
+def test_desktop_bridge_reports_missing_native_model(tmp_path):
+    config = BabyAIConfig(data_dir=tmp_path, provider="native")
+
+    runtime = build_desktop_snapshot(config).as_dict()["runtime"]
+
+    assert runtime["provider"] == "native"
+    assert runtime["state"] == "native_model_missing"
+    assert runtime["ready"] is False
+    assert str(config.native_model_file) in runtime["detail"]
+
+
+def test_desktop_bridge_reports_native_runtime_not_linked(tmp_path):
+    model = tmp_path / "babyai.gguf"
+    model.write_bytes(b"GGUF-placeholder-for-contract-test")
+    config = BabyAIConfig(data_dir=tmp_path, provider="native", native_model_path=model)
+
+    runtime = build_desktop_snapshot(config).as_dict()["runtime"]
+
+    assert runtime["provider"] == "native"
+    assert runtime["state"] == "native_runtime_missing"
+    assert runtime["ready"] is False
+    assert "embedded llama.cpp runtime" in runtime["detail"]
