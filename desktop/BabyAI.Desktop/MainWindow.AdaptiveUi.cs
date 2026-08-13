@@ -8,6 +8,7 @@ namespace BabyAI.Desktop;
 public sealed partial class MainWindow
 {
     private bool _applyingAdaptiveLayout;
+    private TextBlock? _elapsedText;
 
     private void Panel_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -15,7 +16,28 @@ public sealed partial class MainWindow
             return;
 
         CompactBrainTextBehavior.SetEnabled(BrainText, true);
+        EnsureElapsedIndicator();
         ApplyAdaptiveExpandedLayout();
+    }
+
+    private void EnsureElapsedIndicator()
+    {
+        if (_elapsedText is not null || ReplyText.Parent is not Grid statusGrid)
+            return;
+
+        statusGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(RetryButton, 3);
+
+        _elapsedText = new TextBlock
+        {
+            FontSize = 10,
+            Opacity = 0.52,
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+        };
+        Grid.SetColumn(_elapsedText, 2);
+        ReplyElapsedBehavior.SetSource(_elapsedText, ReplyText);
+        statusGrid.Children.Add(_elapsedText);
     }
 
     private void ApplyAdaptiveExpandedLayout()
