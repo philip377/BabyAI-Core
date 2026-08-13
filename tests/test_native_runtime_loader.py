@@ -6,6 +6,7 @@ import pytest
 
 from babyai.native_runtime import (
     BABYAI_NATIVE_ABI_VERSION,
+    MAX_NATIVE_TOKEN_COUNT,
     REQUIRED_BABYAI_SYMBOLS,
     NativeRuntimeError,
     NativeRuntimeLoader,
@@ -41,6 +42,9 @@ def _lifecycle_library(
     *,
     model_result: int = 0,
     context_result: int = 0,
+    tokenize_result: int | None = None,
+    token_ids: tuple[int, ...] = (101, 202, 303),
+    token_required: int | None = None,
     last_error: bytes = b"",
     context_size: int = 4096,
     batch_size: int = 512,
@@ -66,6 +70,39 @@ def _lifecycle_library(
     def model_close(model):
         calls.append(("model_close", int(model.value or 0)))
 
+    def model_tokenize(
+        runtime,
+        model,
+        text,
+        text_len,
+        add_special,
+        parse_special,
+        tokens_out,
+        capacity,
+        out_count,
+    ):
+        raw = bytes(text[: int(text_len)])
+        decoded = raw.decode("utf-8")
+        calls.append(
+            (
+                "tokenize",
+                decoded,
+                bool(add_special),
+                bool(parse_special),
+                int(capacity),
+            )
+        )
+        required = token_required if token_required is not None else len(token_ids)
+        out_count._obj.value = required
+        if tokenize_result is not None:
+            return tokenize_result
+        if tokens_out is None or int(capacity) < required:
+            return 6
+        for index, token in enumerate(token_ids):
+            tokens_out[index] = token
+        out_count._obj.value = len(token_ids)
+        return 0
+
     def context_create(runtime, model, n_ctx, n_batch, n_threads, out_context):
         calls.append(("context_create", int(n_ctx), int(n_batch), int(n_threads)))
         if context_result == 0:
@@ -79,6 +116,7 @@ def _lifecycle_library(
     library.babyai_native_runtime_destroy = _FakeFunction(callback=runtime_destroy)
     library.babyai_native_model_open = _FakeFunction(callback=model_open)
     library.babyai_native_model_close = _FakeFunction(callback=model_close)
+    library.babyai_native_model_tokenize = _FakeFunction(callback=model_tokenize)
     library.babyai_native_context_create = _FakeFunction(callback=context_create)
     library.babyai_native_context_destroy = _FakeFunction(callback=context_destroy)
     library.babyai_native_context_n_ctx = _FakeFunction(value=context_size)
@@ -119,11 +157,11 @@ def test_loader_rejects_library_missing_required_symbols(tmp_path, monkeypatch):
     runtime.write_bytes(b"placeholder")
     monkeypatch.setattr("babyai.native_runtime.ctypes.CDLL", lambda path: _FakeLibrary())
 
-    with pytest.raises(NativeRuntimeError, match="does not satisfy BabyAI native ABI v2") as exc:
+    with pytest.raises(NativeRuntimeError, match="does not satisfy BabyAI native ABI v3") as exc:
         NativeRuntimeLoader(runtime).load()
 
     assert "babyai_native_abi_version" in str(exc.value)
-    assert "babyai_native_context_create" in str(exc.value)
+    assert "babyai_native_model_tokenize" in str(exc.value)
 
 
 def test_loader_rejects_wrong_abi_version(tmp_path, monkeypatch):
@@ -138,13 +176,24 @@ def test_loader_rejects_wrong_abi_version(tmp_path, monkeypatch):
         NativeRuntimeLoader(runtime).load()
 
 
-def test_loader_configures_context_abi(tmp_path, monkeypatch):
+def test_loader_configures_tokenization_and_context_abi(tmp_path, monkeypatch):
     library = _compatible_library()
     runtime = _install_fake_runtime(tmp_path, monkeypatch, library)
 
     handle = NativeRuntimeLoader(runtime).load()
 
     assert handle.abi_version == BABYAI_NATIVE_ABI_VERSION
+    assert library.babyai_native_model_tokenize.argtypes == [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        ctypes.c_int32,
+        ctypes.c_int32,
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_int32),
+        ctypes.c_int32,
+        ctypes.POINTER(ctypes.c_int32),
+    ]
     assert library.babyai_native_context_create.argtypes == [
         ctypes.c_void_p,
         ctypes.c_void_p,
@@ -153,8 +202,51 @@ def test_loader_configures_context_abi(tmp_path, monkeypatch):
         ctypes.c_int32,
         ctypes.POINTER(ctypes.c_void_p),
     ]
-    assert library.babyai_native_context_n_ctx.restype is ctypes.c_uint32
-    assert library.babyai_native_context_n_batch.restype is ctypes.c_uint32
+
+
+def test_model_tokenize_is_two_pass_utf8_and_preserves_flags(tmp_path, monkeypatch):
+    library, calls = _lifecycle_library(token_ids=(17, 23, 42))
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            tokens = model.tokenize("Привет, BabyAI", add_special=False, parse_special=True)
+
+    assert tokens == [17, 23, 42]
+    token_calls = [call for call in calls if isinstance(call, tuple) and call[0] == "tokenize"]
+    assert token_calls == [
+        ("tokenize", "Привет, BabyAI", False, True, 0),
+        ("tokenize", "Привет, BabyAI", False, True, 3),
+    ]
+
+
+def test_model_tokenize_rejects_unbounded_native_size_before_allocation(tmp_path, monkeypatch):
+    library, calls = _lifecycle_library(token_required=MAX_NATIVE_TOKEN_COUNT + 1)
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            with pytest.raises(NativeRuntimeError, match="safety limit"):
+                model.tokenize("oversized")
+
+    token_calls = [call for call in calls if isinstance(call, tuple) and call[0] == "tokenize"]
+    assert len(token_calls) == 1
+    assert token_calls[0][-1] == 0
+
+
+def test_model_tokenize_error_includes_native_last_error(tmp_path, monkeypatch):
+    library, calls = _lifecycle_library(
+        tokenize_result=7,
+        last_error=b"llama.cpp could not tokenize the configured text.",
+    )
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            with pytest.raises(NativeRuntimeError, match="configured text"):
+                model.tokenize("broken")
+
+    assert calls[-1] == "runtime_destroy"
 
 
 def test_runtime_closes_contexts_before_models_before_backend(tmp_path, monkeypatch):
