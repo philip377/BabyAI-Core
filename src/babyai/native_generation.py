@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import codecs
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -16,6 +16,7 @@ NativeGenerationStop = Literal[
     "context_limit",
     "output_limit",
     "cancelled",
+    "stop_sequence",
 ]
 
 
@@ -35,6 +36,18 @@ def _decode_complete_utf8(raw: bytes, *, final: bool) -> str:
         raise NativeRuntimeError("Native generation produced invalid UTF-8 output bytes.") from exc
 
 
+def _encode_stop_sequences(stop_sequences: Sequence[str]) -> tuple[bytes, ...]:
+    encoded: list[bytes] = []
+    for stop in stop_sequences:
+        if not isinstance(stop, str) or not stop:
+            raise NativeRuntimeError("Native generation stop sequences must be non-empty strings.")
+        raw = stop.encode("utf-8")
+        if raw not in encoded:
+            encoded.append(raw)
+    encoded.sort(key=len, reverse=True)
+    return tuple(encoded)
+
+
 def generate_greedy(
     model: NativeModelHandle,
     prompt: str,
@@ -45,6 +58,7 @@ def generate_greedy(
     n_batch: int = 0,
     n_threads: int = 0,
     cancel_check: Callable[[], bool] | None = None,
+    stop_sequences: Sequence[str] = (),
 ) -> NativeGenerationResult:
     """Generate bounded text through the native ABI v6 sample/decode state machine.
 
@@ -52,6 +66,11 @@ def generate_greedy(
     raw bytes and decoded together so UTF-8 code points may safely span token pieces.
     If generation stops at a caller-imposed boundary while a final code point is only
     partially available, that incomplete suffix is omitted rather than replaced.
+
+    Optional stop sequences are matched against the accumulated raw UTF-8 bytes after
+    the sampled token is committed. A matching delimiter is removed from returned text.
+    This lets managed chat policy stop a model before it starts inventing the next turn
+    without extending BabyAI's native ABI.
     """
 
     if not isinstance(prompt, str):
@@ -76,6 +95,9 @@ def generate_greedy(
             raise NativeRuntimeError(f"Native generation {name} must be a non-negative integer.")
     if cancel_check is not None and not callable(cancel_check):
         raise NativeRuntimeError("Native generation cancel_check must be callable.")
+    if isinstance(stop_sequences, (str, bytes)) or not isinstance(stop_sequences, Sequence):
+        raise NativeRuntimeError("Native generation stop_sequences must be a sequence of strings.")
+    encoded_stops = _encode_stop_sequences(stop_sequences)
 
     prompt_tokens = model.tokenize(prompt, add_special=True, parse_special=True)
     if not prompt_tokens:
@@ -127,6 +149,16 @@ def generate_greedy(
             output.extend(piece)
             context.decode_sampled(sample.token_id)
             generated += 1
+
+            for stop in encoded_stops:
+                if output.endswith(stop):
+                    del output[-len(stop) :]
+                    return NativeGenerationResult(
+                        text=_decode_complete_utf8(bytes(output), final=False),
+                        generated_tokens=generated,
+                        output_bytes=len(output),
+                        stop_reason="stop_sequence",
+                    )
 
     return NativeGenerationResult(
         text=_decode_complete_utf8(bytes(output), final=False),
