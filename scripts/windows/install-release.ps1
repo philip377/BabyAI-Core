@@ -28,10 +28,14 @@ if ([string]::IsNullOrWhiteSpace($version)) {
 $desktopSource = Join-Path $BundleRoot "app"
 $wheelSource = Join-Path $BundleRoot "wheels"
 $runtimeSource = Join-Path $BundleRoot "runtime"
+$launcherSource = Join-Path $BundleRoot "start.ps1"
 foreach ($required in @($desktopSource, $wheelSource, $runtimeSource)) {
     if (-not (Test-Path $required -PathType Container)) {
         throw "Release bundle is incomplete: $required"
     }
+}
+if (-not (Test-Path $launcherSource -PathType Leaf)) {
+    throw "Release launcher is missing: $launcherSource"
 }
 
 $versionsRoot = Join-Path $InstallRoot "versions"
@@ -88,9 +92,11 @@ try {
         }
     }
     Set-Content $preferencesPath ($preferences | ConvertTo-Json) -Encoding UTF8
+    Copy-Item $launcherSource (Join-Path $InstallRoot "Start-BabyAI.ps1") -Force
 
     Write-Host "BabyAI $version installed to $versionDir"
     Write-Host "User data and GGUF models were not modified."
+    Write-Host "Launcher: $(Join-Path $InstallRoot 'Start-BabyAI.ps1')"
 }
 finally {
     if (Test-Path $tempDir) {
