@@ -4,7 +4,9 @@ namespace BabyAI.Desktop;
 
 public sealed record DesktopSettings(int X, int Y);
 
-public sealed record DesktopUiSettings(bool AlwaysOnTop = true);
+public sealed record DesktopUiSettings(
+    bool AlwaysOnTop = true,
+    string NativeAcceleration = "cpu");
 
 public sealed class DesktopSettingsStore
 {
