@@ -118,7 +118,7 @@ public static class BrainStatusBehavior
     {
         if (brain.Ready
             || brain.State.Equals("unsupported_provider", StringComparison.OrdinalIgnoreCase)
-            || brain.State.Equals("native_runtime_missing", StringComparison.OrdinalIgnoreCase))
+            || brain.State.Equals("native_inference_pending", StringComparison.OrdinalIgnoreCase))
         {
             StopRecoveryFor(text);
             return;
@@ -155,7 +155,8 @@ public static class BrainStatusBehavior
             "unavailable" => $"Brain: {brain.Provider} offline · start Ollama · auto-retry on",
             "model_missing" => $"Brain: model missing · run: ollama pull {brain.Model}",
             "native_model_missing" => "Brain: native GGUF model missing · configure BABYAI_NATIVE_MODEL",
-            "native_runtime_missing" => "Brain: native runtime not linked yet",
+            "native_runtime_missing" => "Brain: llama.cpp runtime missing · configure BABYAI_NATIVE_RUNTIME",
+            "native_inference_pending" => "Brain: native files ready · inference wiring pending",
             "unsupported_provider" => $"Brain: unsupported provider · {brain.Provider}",
             _ => $"Brain: {brain.State} · auto-retry on · click to recheck",
         };
@@ -169,7 +170,8 @@ public static class BrainStatusBehavior
             "unavailable" => "Start Ollama, then BabyAI will recheck automatically every 15 seconds. Click to recheck now.",
             "model_missing" => $"Install the configured model manually with: ollama pull {brain.Model}. BabyAI will recheck automatically every 15 seconds.",
             "native_model_missing" => "Point BABYAI_NATIVE_MODEL at a local GGUF file (or place babyai.gguf in ~/.babyai/models). BabyAI will recheck automatically.",
-            "native_runtime_missing" => "The native provider contract is configured correctly; embedded llama.cpp inference will be connected in a later build.",
+            "native_runtime_missing" => "Point BABYAI_NATIVE_RUNTIME at the local llama.cpp shared library. BabyAI will recheck automatically.",
+            "native_inference_pending" => "The GGUF model and runtime library are present. BabyAI still keeps native generation disabled until the in-process inference path is implemented and tested.",
             "unsupported_provider" => "Choose a supported provider in the BabyAI launcher/configuration.",
             _ when brain.Ready => "Click to recheck.",
             _ => "BabyAI rechecks automatically every 15 seconds while unavailable. Click to recheck now.",
