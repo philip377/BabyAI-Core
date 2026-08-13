@@ -16,6 +16,8 @@ public sealed partial class MainWindow
             return;
 
         CompactBrainTextBehavior.SetEnabled(BrainText, true);
+        FriendlyDesktopTextBehavior.SetEnabled(TaskText, true);
+        FriendlyDesktopTextBehavior.SetEnabled(ReplyText, true);
         EnsureElapsedIndicator();
         ApplyAdaptiveExpandedLayout();
     }
