@@ -36,6 +36,15 @@ public sealed class BabyAIBridgeClient
 
     public async Task<string> ChatAsync(string message, CancellationToken cancellationToken = default)
     {
+        var status = await StatusAsync();
+        if (!status.Brain.Ready)
+        {
+            var detail = string.IsNullOrWhiteSpace(status.Brain.Detail)
+                ? "The configured local brain is not ready."
+                : status.Brain.Detail;
+            throw new InvalidOperationException($"Brain not ready ({status.Brain.State}): {detail}");
+        }
+
         var payload = JsonSerializer.Serialize(new { message });
         var json = await ExecuteAsync("chat", payload, cancellationToken);
         using var document = JsonDocument.Parse(json);
