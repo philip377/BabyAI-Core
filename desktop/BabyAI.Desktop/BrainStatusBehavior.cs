@@ -149,8 +149,8 @@ public static class BrainStatusBehavior
 
         return brain.State switch
         {
-            "unavailable" => $"Brain: {brain.Provider} offline · auto-retry on · click to recheck",
-            "model_missing" => $"Brain: model missing · {brain.Model} · auto-retry on · click to recheck",
+            "unavailable" => $"Brain: {brain.Provider} offline · start Ollama · auto-retry on",
+            "model_missing" => $"Brain: model missing · run: ollama pull {brain.Model}",
             "unsupported_provider" => $"Brain: unsupported provider · {brain.Provider}",
             _ => $"Brain: {brain.State} · auto-retry on · click to recheck",
         };
@@ -159,12 +159,17 @@ public static class BrainStatusBehavior
     private static string BuildTooltip(BrainStatus brain)
     {
         var detail = Limit(brain.Detail);
-        var retry = brain.Ready || brain.State.Equals("unsupported_provider", StringComparison.OrdinalIgnoreCase)
-            ? "Click to recheck."
-            : "BabyAI rechecks automatically every 15 seconds while unavailable. Click to recheck now.";
+        var guidance = brain.State switch
+        {
+            "unavailable" => "Start Ollama, then BabyAI will recheck automatically every 15 seconds. Click to recheck now.",
+            "model_missing" => $"Install the configured model manually with: ollama pull {brain.Model}. BabyAI will recheck automatically every 15 seconds.",
+            "unsupported_provider" => "Choose a supported provider in the BabyAI launcher/configuration.",
+            _ when brain.Ready => "Click to recheck.",
+            _ => "BabyAI rechecks automatically every 15 seconds while unavailable. Click to recheck now.",
+        };
         return string.IsNullOrWhiteSpace(detail)
-            ? $"Provider: {brain.Provider}; model: {brain.Model}; state: {brain.State}. {retry}"
-            : $"{detail} {retry}";
+            ? $"Provider: {brain.Provider}; model: {brain.Model}; state: {brain.State}. {guidance}"
+            : $"{detail} {guidance}";
     }
 
     private static string Limit(string value)
