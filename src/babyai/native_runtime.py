@@ -8,21 +8,20 @@ from pathlib import Path
 from typing import Any
 
 
+BABYAI_NATIVE_ABI_VERSION = 1
+
+
 class NativeRuntimeError(RuntimeError):
-    """Raised when the configured embedded llama.cpp runtime cannot be loaded."""
+    """Raised when the configured BabyAI native runtime cannot be loaded."""
 
 
-# Minimum lifecycle ABI BabyAI will need before model inference is implemented.
-# These names are part of llama.cpp's public C API in include/llama.h.
-REQUIRED_LLAMA_SYMBOLS: tuple[str, ...] = (
-    "llama_backend_init",
-    "llama_backend_free",
-    "llama_model_default_params",
-    "llama_context_default_params",
-    "llama_model_load_from_file",
-    "llama_model_free",
-    "llama_init_from_model",
-    "llama_free",
+REQUIRED_BABYAI_SYMBOLS: tuple[str, ...] = (
+    "babyai_native_abi_version",
+    "babyai_native_runtime_create",
+    "babyai_native_runtime_destroy",
+    "babyai_native_model_open",
+    "babyai_native_model_close",
+    "babyai_native_last_error",
 )
 
 
@@ -30,15 +29,15 @@ REQUIRED_LLAMA_SYMBOLS: tuple[str, ...] = (
 class NativeRuntimeHandle:
     path: Path
     library: Any
+    abi_version: int
 
 
 @dataclass(slots=True)
 class NativeRuntimeLoader:
-    """Explicitly load a local llama.cpp shared library and validate ABI v1.
+    """Explicitly load BabyAI's stable native shim and validate ABI v1.
 
-    Merely constructing this object is side-effect free. `load()` performs the
-    dynamic-library load, so readiness/status probes can remain file-only until
-    BabyAI intentionally enters the native inference path.
+    llama.cpp is linked behind this DLL boundary. Readiness/status polling remains
+    file-only; dynamic loading happens only when `load()` is explicitly called.
     """
 
     path: Path
@@ -59,12 +58,20 @@ class NativeRuntimeLoader:
         except OSError as exc:
             raise NativeRuntimeError(f"Could not load native runtime library '{path}': {exc}") from exc
 
-        missing = [name for name in REQUIRED_LLAMA_SYMBOLS if not hasattr(library, name)]
+        missing = [name for name in REQUIRED_BABYAI_SYMBOLS if not hasattr(library, name)]
         if missing:
             names = ", ".join(missing)
             raise NativeRuntimeError(
-                f"Native runtime library '{path}' does not satisfy BabyAI llama.cpp ABI v1; "
+                f"Native runtime library '{path}' does not satisfy BabyAI native ABI v1; "
                 f"missing symbols: {names}"
             )
 
-        return NativeRuntimeHandle(path=path, library=library)
+        abi_fn = library.babyai_native_abi_version
+        abi_fn.restype = ctypes.c_uint32
+        abi_version = int(abi_fn())
+        if abi_version != BABYAI_NATIVE_ABI_VERSION:
+            raise NativeRuntimeError(
+                f"Native runtime ABI mismatch: expected {BABYAI_NATIVE_ABI_VERSION}, got {abi_version}."
+            )
+
+        return NativeRuntimeHandle(path=path, library=library, abi_version=abi_version)
