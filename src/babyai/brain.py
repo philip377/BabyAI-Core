@@ -1,13 +1,30 @@
 from __future__ import annotations
 
+import json
+import urllib.error
+import urllib.request
 from collections.abc import Callable
+from dataclasses import asdict, dataclass
 
 from .config import BabyAIConfig
 from .llm import EchoProvider, LLMProvider, OllamaProvider
+from .native_brain import NativeBrainProvider
 
 
 class BrainProviderError(ValueError):
     """Raised when BabyAI cannot construct the configured brain provider."""
+
+
+@dataclass(frozen=True, slots=True)
+class BrainRuntimeStatus:
+    provider: str
+    model: str
+    state: str
+    ready: bool
+    detail: str
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
 
 
 def _build_echo(config: BabyAIConfig) -> LLMProvider:
@@ -18,9 +35,14 @@ def _build_ollama(config: BabyAIConfig) -> LLMProvider:
     return OllamaProvider(model=config.model, base_url=config.ollama_url)
 
 
+def _build_native(config: BabyAIConfig) -> LLMProvider:
+    return NativeBrainProvider(model_path=config.native_model_file)
+
+
 _PROVIDER_BUILDERS: dict[str, Callable[[BabyAIConfig], LLMProvider]] = {
     "echo": _build_echo,
     "ollama": _build_ollama,
+    "native": _build_native,
 }
 
 
@@ -31,12 +53,7 @@ def supported_brain_providers() -> tuple[str, ...]:
 
 
 def build_brain_provider(config: BabyAIConfig) -> LLMProvider:
-    """Construct the configured brain behind one stable Core boundary.
-
-    Keep provider-specific construction here so future embedded/native runtimes can
-    be added without teaching CLI, desktop commands, or cognition components how
-    each backend is created.
-    """
+    """Construct the configured brain behind one stable Core boundary."""
 
     try:
         builder = _PROVIDER_BUILDERS[config.provider]
@@ -46,3 +63,99 @@ def build_brain_provider(config: BabyAIConfig) -> LLMProvider:
             f"Unknown BABYAI_PROVIDER={config.provider!r}. Supported providers: {supported}."
         ) from exc
     return builder(config)
+
+
+def probe_brain_runtime(config: BabyAIConfig) -> BrainRuntimeStatus:
+    """Read-only readiness probe shared by desktop and future launch surfaces."""
+
+    if config.provider == "echo":
+        return BrainRuntimeStatus(
+            provider="echo",
+            model=config.model,
+            state="ready",
+            ready=True,
+            detail="Echo diagnostics provider is ready.",
+        )
+
+    if config.provider == "native":
+        model_path = config.native_model_file
+        if not model_path.is_file():
+            return BrainRuntimeStatus(
+                provider="native",
+                model=config.model,
+                state="native_model_missing",
+                ready=False,
+                detail=f"Native GGUF model not found at: {model_path}",
+            )
+        return BrainRuntimeStatus(
+            provider="native",
+            model=config.model,
+            state="native_runtime_missing",
+            ready=False,
+            detail=(
+                "Native GGUF model is present, but the embedded llama.cpp runtime "
+                "is not linked in this build yet."
+            ),
+        )
+
+    if config.provider != "ollama":
+        return BrainRuntimeStatus(
+            provider=config.provider,
+            model=config.model,
+            state="unsupported_provider",
+            ready=False,
+            detail=f"Unsupported provider: {config.provider}",
+        )
+
+    request = urllib.request.Request(
+        f"{config.ollama_url.rstrip('/')}/api/tags",
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=1.5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return BrainRuntimeStatus(
+            provider="ollama",
+            model=config.model,
+            state="unavailable",
+            ready=False,
+            detail="Ollama is not reachable.",
+        )
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError):
+        return BrainRuntimeStatus(
+            provider="ollama",
+            model=config.model,
+            state="unavailable",
+            ready=False,
+            detail="Ollama returned an invalid readiness response.",
+        )
+
+    models = payload.get("models") if isinstance(payload, dict) else None
+    installed: set[str] = set()
+    if isinstance(models, list):
+        for model in models:
+            if not isinstance(model, dict):
+                continue
+            for key in ("name", "model"):
+                value = model.get(key)
+                if isinstance(value, str) and value.strip():
+                    installed.add(value.strip())
+
+    if config.model not in installed:
+        return BrainRuntimeStatus(
+            provider="ollama",
+            model=config.model,
+            state="model_missing",
+            ready=False,
+            detail=f"Ollama is online, but model '{config.model}' is not installed.",
+        )
+
+    return BrainRuntimeStatus(
+        provider="ollama",
+        model=config.model,
+        state="ready",
+        ready=True,
+        detail="Ollama and the configured model are ready.",
+    )
