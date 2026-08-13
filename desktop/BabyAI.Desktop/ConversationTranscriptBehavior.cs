@@ -1,10 +1,10 @@
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
-using Windows.UI.Text;
 
 namespace BabyAI.Desktop;
 
