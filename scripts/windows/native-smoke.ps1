@@ -46,8 +46,11 @@ if (-not $status.ok -or -not $status.snapshot.runtime.ready -or $status.snapshot
 }
 
 Write-Host "[BabyAI native smoke] Running normal desktop chat path..."
-$payload = @{ message = $Prompt } | ConvertTo-Json -Compress
-$chatRaw = & $env:BABYAI_PYTHON -m babyai.desktop_commands_cli exec chat --payload $payload
+# Windows PowerShell 5.1 may strip embedded JSON quotes from native-process
+# arguments. Pass only the prompt through the environment and construct the
+# DesktopCommands payload inside Python so no JSON crosses cmdline parsing.
+$env:BABYAI_NATIVE_SMOKE_PROMPT = $Prompt
+$chatRaw = & $env:BABYAI_PYTHON -c "import json, os; from babyai.desktop_commands import DesktopCommands; print(json.dumps(DesktopCommands().execute('chat', {'message': os.environ['BABYAI_NATIVE_SMOKE_PROMPT']}), ensure_ascii=False))"
 if ($LASTEXITCODE -ne 0) {
     throw "Native chat command failed."
 }
