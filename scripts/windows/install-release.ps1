@@ -114,7 +114,7 @@ try {
     $preferencesPath = Join-Path $InstallRoot "launch.json"
     $preferences = @{
         provider = "native"
-        acceleration = "cpu"
+        acceleration = "auto"
         model = $ModelPath
     }
     if (Test-Path $preferencesPath) {
@@ -132,6 +132,7 @@ try {
 
     Write-Host "BabyAI $version installed to $versionDir"
     Write-Host "User data and GGUF models were not modified."
+    Write-Host "Runtime acceleration defaults to auto (Vulkan when usable, portable CPU fallback otherwise)."
     Write-Host "Launcher: $(Join-Path $InstallRoot 'Start-BabyAI.ps1')"
 }
 finally {
