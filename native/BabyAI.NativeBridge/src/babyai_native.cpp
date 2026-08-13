@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <mutex>
 #include <new>
 #include <string>
@@ -171,6 +172,82 @@ void babyai_native_model_close(babyai_native_model * model) {
     }
 
     delete model;
+}
+
+int32_t babyai_native_model_tokenize(
+    babyai_native_runtime * runtime,
+    babyai_native_model * model,
+    const char * text_utf8,
+    int32_t text_len,
+    int32_t add_special,
+    int32_t parse_special,
+    int32_t * tokens_out,
+    int32_t token_capacity,
+    int32_t * out_token_count) {
+    if (runtime == nullptr || model == nullptr || text_utf8 == nullptr || out_token_count == nullptr) {
+        return static_cast<int32_t>(BABYAI_NATIVE_INVALID_ARGUMENT);
+    }
+    if (text_len < 0 || token_capacity < 0 || (token_capacity > 0 && tokens_out == nullptr)) {
+        return static_cast<int32_t>(BABYAI_NATIVE_INVALID_ARGUMENT);
+    }
+    *out_token_count = 0;
+    runtime->last_error.clear();
+
+    if (model->runtime != runtime || model->handle == nullptr) {
+        return fail(runtime, BABYAI_NATIVE_INVALID_ARGUMENT, "Native model does not belong to this runtime.");
+    }
+
+    try {
+        const llama_vocab * vocab = llama_model_get_vocab(model->handle);
+        if (vocab == nullptr) {
+            return fail(runtime, BABYAI_NATIVE_INTERNAL_ERROR, "Native model vocabulary is unavailable.");
+        }
+
+        const int32_t probe = llama_tokenize(
+            vocab,
+            text_utf8,
+            text_len,
+            nullptr,
+            0,
+            add_special != 0,
+            parse_special != 0);
+
+        if (probe == std::numeric_limits<int32_t>::min()) {
+            return fail(runtime, BABYAI_NATIVE_TOKENIZE_FAILED, "llama.cpp tokenization size overflowed int32.");
+        }
+
+        const int32_t required = probe < 0 ? -probe : probe;
+        *out_token_count = required;
+        if (required == 0) {
+            return static_cast<int32_t>(BABYAI_NATIVE_OK);
+        }
+        if (tokens_out == nullptr || token_capacity < required) {
+            return static_cast<int32_t>(BABYAI_NATIVE_BUFFER_TOO_SMALL);
+        }
+
+        std::vector<llama_token> tokens(static_cast<std::size_t>(required));
+        const int32_t actual = llama_tokenize(
+            vocab,
+            text_utf8,
+            text_len,
+            tokens.data(),
+            required,
+            add_special != 0,
+            parse_special != 0);
+        if (actual < 0 || actual > required) {
+            return fail(runtime, BABYAI_NATIVE_TOKENIZE_FAILED, "llama.cpp could not tokenize the configured text.");
+        }
+
+        for (int32_t index = 0; index < actual; ++index) {
+            tokens_out[index] = static_cast<int32_t>(tokens[static_cast<std::size_t>(index)]);
+        }
+        *out_token_count = actual;
+        return static_cast<int32_t>(BABYAI_NATIVE_OK);
+    } catch (const std::bad_alloc &) {
+        return fail(runtime, BABYAI_NATIVE_OUT_OF_MEMORY, "Could not allocate the native token buffer.");
+    } catch (...) {
+        return fail(runtime, BABYAI_NATIVE_INTERNAL_ERROR, "Unexpected native tokenization error.");
+    }
 }
 
 int32_t babyai_native_context_create(
