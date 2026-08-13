@@ -7,9 +7,10 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 from .config import BabyAIConfig
-from .llm import EchoProvider, LLMProvider, OllamaProvider
+from .llm import EchoProvider, LLMError, LLMProvider, OllamaProvider
 from .native_acceleration import select_native_runtime
 from .native_brain import NativeBrainProvider
+from .native_runtime import NativeRuntimeError
 
 
 class BrainProviderError(ValueError):
@@ -37,11 +38,15 @@ def _build_ollama(config: BabyAIConfig) -> LLMProvider:
 
 
 def _build_native(config: BabyAIConfig) -> LLMProvider:
-    selection = select_native_runtime(
-        config.native_acceleration,
-        config.native_runtime_file,
-        config.native_vulkan_runtime_file,
-    )
+    try:
+        selection = select_native_runtime(
+            config.native_acceleration,
+            config.native_runtime_file,
+            config.native_vulkan_runtime_file,
+        )
+    except NativeRuntimeError as exc:
+        raise LLMError(f"Native brain inference failed: {exc}") from exc
+
     return NativeBrainProvider(
         model_path=config.native_model_file,
         runtime_path=selection.runtime_path,
