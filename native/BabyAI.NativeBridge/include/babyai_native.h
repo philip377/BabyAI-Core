@@ -46,6 +46,10 @@ typedef enum babyai_native_result {
 
 BABYAI_NATIVE_API uint32_t babyai_native_abi_version(void);
 
+// Optional ABI v6 extension. Returns a process-lifetime static UTF-8 literal
+// describing the backend compiled into this DLL (currently "cpu" or "vulkan").
+BABYAI_NATIVE_API const char * babyai_native_build_backend(void);
+
 BABYAI_NATIVE_API int32_t babyai_native_runtime_create(
     babyai_native_runtime ** out_runtime);
 
