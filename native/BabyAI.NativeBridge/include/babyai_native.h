@@ -16,10 +16,11 @@
 extern "C" {
 #endif
 
-#define BABYAI_NATIVE_ABI_VERSION 1u
+#define BABYAI_NATIVE_ABI_VERSION 2u
 
 typedef struct babyai_native_runtime babyai_native_runtime;
 typedef struct babyai_native_model babyai_native_model;
+typedef struct babyai_native_context babyai_native_context;
 
 typedef enum babyai_native_result {
     BABYAI_NATIVE_OK = 0,
@@ -27,6 +28,7 @@ typedef enum babyai_native_result {
     BABYAI_NATIVE_OUT_OF_MEMORY = 2,
     BABYAI_NATIVE_MODEL_LOAD_FAILED = 3,
     BABYAI_NATIVE_INTERNAL_ERROR = 4,
+    BABYAI_NATIVE_CONTEXT_CREATE_FAILED = 5,
 } babyai_native_result;
 
 BABYAI_NATIVE_API uint32_t babyai_native_abi_version(void);
@@ -45,6 +47,23 @@ BABYAI_NATIVE_API int32_t babyai_native_model_open(
 
 BABYAI_NATIVE_API void babyai_native_model_close(
     babyai_native_model * model);
+
+BABYAI_NATIVE_API int32_t babyai_native_context_create(
+    babyai_native_runtime * runtime,
+    babyai_native_model * model,
+    uint32_t n_ctx,
+    uint32_t n_batch,
+    int32_t n_threads,
+    babyai_native_context ** out_context);
+
+BABYAI_NATIVE_API void babyai_native_context_destroy(
+    babyai_native_context * context);
+
+BABYAI_NATIVE_API uint32_t babyai_native_context_n_ctx(
+    const babyai_native_context * context);
+
+BABYAI_NATIVE_API uint32_t babyai_native_context_n_batch(
+    const babyai_native_context * context);
 
 // Pointer remains valid until the next operation on this runtime or runtime destroy.
 BABYAI_NATIVE_API const char * babyai_native_last_error(
