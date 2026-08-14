@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows;
@@ -6,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Shapes;
+using IOPath = System.IO.Path;
 
 namespace BabyAI.Setup;
 
@@ -26,16 +28,16 @@ internal static class Program
         var arg = args.FirstOrDefault(x => x.StartsWith("--bundle=", StringComparison.OrdinalIgnoreCase));
         if (arg is not null)
         {
-            return Path.GetFullPath(arg["--bundle=".Length..].Trim('"'));
+            return IOPath.GetFullPath(arg["--bundle=".Length..].Trim('"'));
         }
 
         var environment = Environment.GetEnvironmentVariable("BABYAI_BUNDLE_ROOT");
         if (!string.IsNullOrWhiteSpace(environment))
         {
-            return Path.GetFullPath(environment);
+            return IOPath.GetFullPath(environment);
         }
 
-        var sibling = Path.Combine(AppContext.BaseDirectory, "bundle");
+        var sibling = IOPath.Combine(AppContext.BaseDirectory, "bundle");
         return Directory.Exists(sibling) ? sibling : null;
     }
 }
@@ -208,7 +210,7 @@ internal static class InstallerEngine
 
     public static string Install(string bundleRoot, IProgress<(string Message, int Value)> progress)
     {
-        bundleRoot = Path.GetFullPath(bundleRoot);
+        bundleRoot = IOPath.GetFullPath(bundleRoot);
         progress.Report(("Проверяю целостность релиза…", 12));
         VerifyChecksums(bundleRoot);
         var manifest = ReadManifest(bundleRoot);
@@ -220,15 +222,15 @@ internal static class InstallerEngine
         var required = new[] { "app", "runtime", "wheels", "python" };
         foreach (var directory in required)
         {
-            if (!Directory.Exists(Path.Combine(bundleRoot, directory)))
+            if (!Directory.Exists(IOPath.Combine(bundleRoot, directory)))
             {
                 throw new InvalidDataException($"В релизе отсутствует папка {directory}.");
             }
         }
 
-        var installRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BabyAI");
-        var versionsRoot = Path.Combine(installRoot, "versions");
-        var versionDir = Path.Combine(versionsRoot, manifest.Version);
+        var installRoot = IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BabyAI");
+        var versionsRoot = IOPath.Combine(installRoot, "versions");
+        var versionDir = IOPath.Combine(versionsRoot, manifest.Version);
         var tempDir = versionDir + ".installing";
         Directory.CreateDirectory(versionsRoot);
 
@@ -238,14 +240,14 @@ internal static class InstallerEngine
         try
         {
             progress.Report(("Устанавливаю приложение…", 35));
-            CopyDirectory(Path.Combine(bundleRoot, "app"), Path.Combine(tempDir, "app"));
+            CopyDirectory(IOPath.Combine(bundleRoot, "app"), IOPath.Combine(tempDir, "app"));
             progress.Report(("Устанавливаю native runtime…", 52));
-            CopyDirectory(Path.Combine(bundleRoot, "runtime"), Path.Combine(tempDir, "runtime"));
+            CopyDirectory(IOPath.Combine(bundleRoot, "runtime"), IOPath.Combine(tempDir, "runtime"));
             progress.Report(("Устанавливаю локальный Python…", 68));
-            CopyDirectory(Path.Combine(bundleRoot, "python"), Path.Combine(tempDir, "python"));
-            CopyDirectory(Path.Combine(bundleRoot, "wheels"), Path.Combine(tempDir, "wheels"));
+            CopyDirectory(IOPath.Combine(bundleRoot, "python"), IOPath.Combine(tempDir, "python"));
+            CopyDirectory(IOPath.Combine(bundleRoot, "wheels"), IOPath.Combine(tempDir, "wheels"));
 
-            var pythonExe = Path.Combine(tempDir, "python", "python.exe");
+            var pythonExe = IOPath.Combine(tempDir, "python", "python.exe");
             if (!File.Exists(pythonExe)) throw new InvalidDataException("Bundled python.exe не найден.");
 
             progress.Report(("Фиксирую атомарную версию…", 82));
@@ -253,7 +255,7 @@ internal static class InstallerEngine
             Directory.Move(tempDir, versionDir);
 
             Directory.CreateDirectory(installRoot);
-            File.WriteAllText(Path.Combine(installRoot, "current.json"), JsonSerializer.Serialize(new
+            File.WriteAllText(IOPath.Combine(installRoot, "current.json"), JsonSerializer.Serialize(new
             {
                 version = manifest.Version,
                 path = versionDir
@@ -262,7 +264,7 @@ internal static class InstallerEngine
             PreserveOrCreateLaunchSettings(installRoot);
 
             progress.Report(("Проверяю запуск BabyAI…", 94));
-            var desktop = Path.Combine(versionDir, "app", "BabyAI.Desktop.exe");
+            var desktop = IOPath.Combine(versionDir, "app", "BabyAI.Desktop.exe");
             if (!File.Exists(desktop)) throw new InvalidDataException("BabyAI.Desktop.exe не найден в установленной версии.");
             return desktop;
         }
@@ -274,16 +276,16 @@ internal static class InstallerEngine
 
     private static void VerifyChecksums(string bundleRoot)
     {
-        var sumsPath = Path.Combine(bundleRoot, "SHA256SUMS.txt");
+        var sumsPath = IOPath.Combine(bundleRoot, "SHA256SUMS.txt");
         if (!File.Exists(sumsPath)) throw new InvalidDataException("SHA256SUMS.txt не найден.");
 
-        var prefix = bundleRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var prefix = bundleRoot.TrimEnd(IOPath.DirectorySeparatorChar, IOPath.AltDirectorySeparatorChar) + IOPath.DirectorySeparatorChar;
         foreach (var raw in File.ReadLines(sumsPath))
         {
             if (string.IsNullOrWhiteSpace(raw)) continue;
             var split = raw.Split("  ", 2, StringSplitOptions.None);
             if (split.Length != 2 || split[0].Length != 64) throw new InvalidDataException("Некорректная строка SHA256SUMS.txt.");
-            var path = Path.GetFullPath(Path.Combine(bundleRoot, split[1].Replace('/', Path.DirectorySeparatorChar)));
+            var path = IOPath.GetFullPath(IOPath.Combine(bundleRoot, split[1].Replace('/', IOPath.DirectorySeparatorChar)));
             if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Путь checksum выходит за пределы релиза.");
             if (!File.Exists(path)) throw new FileNotFoundException("Файл релиза отсутствует.", path);
             using var stream = File.OpenRead(path);
@@ -294,7 +296,7 @@ internal static class InstallerEngine
 
     private static ReleaseManifest ReadManifest(string bundleRoot)
     {
-        var path = Path.Combine(bundleRoot, "release.json");
+        var path = IOPath.Combine(bundleRoot, "release.json");
         if (!File.Exists(path)) throw new InvalidDataException("release.json не найден.");
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         var root = document.RootElement;
@@ -306,7 +308,7 @@ internal static class InstallerEngine
 
     private static void PreserveOrCreateLaunchSettings(string installRoot)
     {
-        var path = Path.Combine(installRoot, "launch.json");
+        var path = IOPath.Combine(installRoot, "launch.json");
         if (File.Exists(path)) return;
         File.WriteAllText(path, JsonSerializer.Serialize(new
         {
@@ -321,11 +323,11 @@ internal static class InstallerEngine
         Directory.CreateDirectory(destination);
         foreach (var file in Directory.EnumerateFiles(source))
         {
-            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), true);
+            File.Copy(file, IOPath.Combine(destination, IOPath.GetFileName(file)), true);
         }
         foreach (var directory in Directory.EnumerateDirectories(source))
         {
-            CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
+            CopyDirectory(directory, IOPath.Combine(destination, IOPath.GetFileName(directory)));
         }
     }
 
