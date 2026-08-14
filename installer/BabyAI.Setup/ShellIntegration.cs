@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using IOPath = System.IO.Path;
@@ -6,6 +7,8 @@ namespace BabyAI.Setup;
 
 internal static class ShellIntegration
 {
+    private static readonly Guid ShellLinkClassId = new("00021401-0000-0000-C000-000000000046");
+
     public static void CreateShortcuts(string desktopExe)
     {
         var workingDirectory = IOPath.GetDirectoryName(desktopExe)
@@ -30,9 +33,14 @@ internal static class ShellIntegration
     {
         Directory.CreateDirectory(IOPath.GetDirectoryName(shortcutPath)!);
 
-        var shellLink = (IShellLinkW)new ShellLink();
+        var shellLinkType = Type.GetTypeFromCLSID(ShellLinkClassId)
+            ?? throw new PlatformNotSupportedException("Windows Shell Link API недоступен.");
+        var shellLinkObject = Activator.CreateInstance(shellLinkType)
+            ?? throw new InvalidOperationException("Не удалось создать Windows Shell Link.");
+
         try
         {
+            var shellLink = (IShellLinkW)shellLinkObject;
             shellLink.SetPath(targetPath);
             shellLink.SetWorkingDirectory(workingDirectory);
             shellLink.SetDescription("BabyAI");
@@ -41,14 +49,8 @@ internal static class ShellIntegration
         }
         finally
         {
-            Marshal.FinalReleaseComObject(shellLink);
+            Marshal.FinalReleaseComObject(shellLinkObject);
         }
-    }
-
-    [ComImport]
-    [Guid("00021401-0000-0000-C000-000000000046")]
-    private sealed class ShellLink
-    {
     }
 
     [ComImport]
