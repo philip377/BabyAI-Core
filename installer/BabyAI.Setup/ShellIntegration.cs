@@ -29,6 +29,31 @@ internal static class ShellIntegration
         }
     }
 
+    public static void RemoveShortcuts()
+    {
+        var desktopDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (!string.IsNullOrWhiteSpace(desktopDirectory))
+        {
+            DeleteIfExists(IOPath.Combine(desktopDirectory, "BabyAI.lnk"));
+        }
+
+        var startMenu = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+        if (!string.IsNullOrWhiteSpace(startMenu))
+        {
+            var babyAiMenu = IOPath.Combine(startMenu, "BabyAI");
+            DeleteIfExists(IOPath.Combine(babyAiMenu, "BabyAI.lnk"));
+            if (Directory.Exists(babyAiMenu) && !Directory.EnumerateFileSystemEntries(babyAiMenu).Any())
+            {
+                Directory.Delete(babyAiMenu);
+            }
+        }
+    }
+
+    private static void DeleteIfExists(string path)
+    {
+        if (File.Exists(path)) File.Delete(path);
+    }
+
     private static void CreateShortcut(string shortcutPath, string targetPath, string workingDirectory)
     {
         Directory.CreateDirectory(IOPath.GetDirectoryName(shortcutPath)!);
