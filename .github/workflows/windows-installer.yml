@@ -1,0 +1,39 @@
+name: Windows Installer
+
+on:
+  pull_request:
+    paths:
+      - 'installer/**'
+      - '.github/workflows/windows-installer.yml'
+  workflow_dispatch:
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish single-file setup
+        shell: pwsh
+        run: |
+          dotnet publish installer/BabyAI.Setup/BabyAI.Setup.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o installer-publish
+          $exe = Join-Path $PWD 'installer-publish/BabyAI-Setup.exe'
+          if (-not (Test-Path $exe -PathType Leaf)) { throw 'BabyAI-Setup.exe was not produced.' }
+          $otherFiles = @(Get-ChildItem installer-publish -File | Where-Object Name -ne 'BabyAI-Setup.exe')
+          if ($otherFiles.Count -gt 0) {
+            Write-Host 'Publish produced auxiliary files:'
+            $otherFiles | ForEach-Object { Write-Host " - $($_.Name)" }
+          }
+          Write-Host "Installer size: $([math]::Round((Get-Item $exe).Length / 1MB, 1)) MB"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BabyAI-Setup-x64
+          path: installer-publish/BabyAI-Setup.exe
