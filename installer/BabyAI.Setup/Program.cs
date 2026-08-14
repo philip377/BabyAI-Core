@@ -254,18 +254,12 @@ internal static class InstallerEngine
             if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true);
             Directory.Move(tempDir, versionDir);
 
-            Directory.CreateDirectory(installRoot);
-            File.WriteAllText(IOPath.Combine(installRoot, "current.json"), JsonSerializer.Serialize(new
-            {
-                version = manifest.Version,
-                path = versionDir
-            }, JsonOptions));
-
-            PreserveOrCreateLaunchSettings(installRoot);
-
-            progress.Report(("Проверяю запуск BabyAI…", 94));
+            progress.Report(("Проверяю новую версию BabyAI…", 90));
             var desktop = IOPath.Combine(versionDir, "app", "BabyAI.Desktop.exe");
             if (!File.Exists(desktop)) throw new InvalidDataException("BabyAI.Desktop.exe не найден в установленной версии.");
+
+            RollbackIntegration.CommitVersionSwitch(installRoot, manifest.Version, versionDir);
+            PreserveOrCreateLaunchSettings(installRoot);
 
             progress.Report(("Создаю ярлыки BabyAI…", 97));
             ShellIntegration.CreateShortcuts(desktop);
