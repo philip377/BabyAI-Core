@@ -15,6 +15,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        InstalledRuntimeBootstrap.ApplyToCurrentProcess();
         var mainWindow = new MainWindow();
         mainWindow.ApplyStartupUiSettings();
         mainWindow.ApplyGlassUi();
