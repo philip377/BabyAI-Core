@@ -130,11 +130,7 @@ internal sealed class SetupWindow : Window
 
         if (_installed)
         {
-            if (_desktopPath is not null && File.Exists(_desktopPath))
-            {
-                Process.Start(new ProcessStartInfo(_desktopPath) { UseShellExecute = true });
-                Close();
-            }
+            await LaunchInstalledDesktopAsync();
             return;
         }
 
@@ -159,10 +155,11 @@ internal sealed class SetupWindow : Window
                 Program.BundleRoot,
                 progress,
                 _installCancellation.Token));
-            _status.Text = "BabyAI установлен и готов к запуску";
+            _status.Text = "BabyAI установлен. Запускаю приложение…";
             _progress.Value = 100;
-            _install.Content = "Запустить BabyAI";
             _installed = true;
+            _installing = false;
+            await LaunchInstalledDesktopAsync();
         }
         catch (Exception ex)
         {
@@ -173,6 +170,59 @@ internal sealed class SetupWindow : Window
         finally
         {
             _installing = false;
+            _install.IsEnabled = true;
+        }
+    }
+
+    private async Task LaunchInstalledDesktopAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_desktopPath) || !File.Exists(_desktopPath))
+        {
+            _status.Text = "BabyAI установлен, но Desktop-файл не найден. Повторите установку.";
+            _install.Content = "Повторить установку";
+            _installed = false;
+            return;
+        }
+
+        _install.IsEnabled = false;
+        _install.Content = "Запускаю BabyAI…";
+        _status.Text = "Запускаю BabyAI и проверяю старт…";
+
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo(_desktopPath)
+            {
+                UseShellExecute = true,
+                WorkingDirectory = IOPath.GetDirectoryName(_desktopPath) ?? AppContext.BaseDirectory,
+            });
+            if (process is null)
+                throw new InvalidOperationException("Windows не создал процесс BabyAI Desktop.");
+
+            await Task.Delay(TimeSpan.FromSeconds(3));
+            if (process.HasExited)
+            {
+                var logPath = IOPath.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "BabyAI",
+                    "logs",
+                    "desktop-startup.log");
+                _status.Text = File.Exists(logPath)
+                    ? $"BabyAI завершился сразу после запуска. Диагностика: {logPath}"
+                    : "BabyAI завершился сразу после запуска. Нажмите «Повторить запуск» для ещё одной попытки.";
+                _install.Content = "Повторить запуск";
+                return;
+            }
+
+            _status.Text = "BabyAI запущен";
+            Close();
+        }
+        catch (Exception ex)
+        {
+            _status.Text = $"Не удалось запустить BabyAI: {ex.Message}";
+            _install.Content = "Повторить запуск";
+        }
+        finally
+        {
             _install.IsEnabled = true;
         }
     }
