@@ -9,7 +9,7 @@ internal static class ShellIntegration
 {
     private static readonly Guid ShellLinkClassId = new("00021401-0000-0000-C000-000000000046");
 
-    public static void CreateShortcuts(string desktopExe)
+    public static void CreateShortcuts(string desktopExe, string displayVersion)
     {
         var workingDirectory = IOPath.GetDirectoryName(desktopExe)
             ?? throw new InvalidOperationException("Не удалось определить папку BabyAI Desktop.");
@@ -28,7 +28,7 @@ internal static class ShellIntegration
             CreateShortcut(IOPath.Combine(babyAiMenu, "BabyAI.lnk"), desktopExe, workingDirectory);
         }
 
-        UninstallIntegration.RegisterFromDesktop(desktopExe);
+        UninstallIntegration.RegisterFromDesktop(desktopExe, displayVersion);
     }
 
     public static void RemoveShortcuts()
