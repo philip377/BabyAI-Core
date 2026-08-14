@@ -52,13 +52,22 @@ if ([string]::IsNullOrWhiteSpace($version)) {
     throw "Release manifest does not contain a version."
 }
 
-$supportedPython = @($manifest.python_versions | ForEach-Object { [string]$_ })
-$pythonVersion = (& $Python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" | Select-Object -Last 1).Trim()
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($pythonVersion)) {
-    throw "Could not determine the Python version."
-}
-if ($pythonVersion -notin $supportedPython) {
-    throw "BabyAI $version supports Python $($supportedPython -join ', '); found Python $pythonVersion."
+$bundledPython = [bool]$manifest.python_included
+$pythonSource = Join-Path $BundleRoot "python"
+if ($bundledPython) {
+    $bundledPythonExe = Join-Path $pythonSource "python.exe"
+    if (-not (Test-Path $bundledPythonExe -PathType Leaf)) {
+        throw "Release manifest declares bundled Python, but python.exe is missing."
+    }
+} else {
+    $supportedPython = @($manifest.python_versions | ForEach-Object { [string]$_ })
+    $pythonVersion = (& $Python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" | Select-Object -Last 1).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($pythonVersion)) {
+        throw "Could not determine the Python version."
+    }
+    if ($pythonVersion -notin $supportedPython) {
+        throw "BabyAI $version supports Python $($supportedPython -join ', '); found Python $pythonVersion."
+    }
 }
 
 $desktopSource = Join-Path $BundleRoot "app"
@@ -89,16 +98,25 @@ try {
     Copy-Item $runtimeSource (Join-Path $tempDir "runtime") -Recurse
     Copy-Item $wheelSource (Join-Path $tempDir "wheels") -Recurse
 
-    $venv = Join-Path $tempDir "python"
-    & $Python -m venv $venv
-    if ($LASTEXITCODE -ne 0) { throw "Could not create the BabyAI Python environment." }
+    if ($bundledPython) {
+        Copy-Item $pythonSource (Join-Path $tempDir "python") -Recurse
+        $installedPython = Join-Path $tempDir "python\python.exe"
+        & $installedPython -c "import babyai; print('Bundled BabyAI Core import OK')"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Bundled BabyAI Core could not be imported."
+        }
+    } else {
+        $venv = Join-Path $tempDir "python"
+        & $Python -m venv $venv
+        if ($LASTEXITCODE -ne 0) { throw "Could not create the BabyAI Python environment." }
 
-    $venvPython = Join-Path $venv "Scripts\python.exe"
-    $babyWheel = Get-ChildItem (Join-Path $tempDir "wheels") -Filter "babyai_core-*.whl" -File | Select-Object -First 1
-    if (-not $babyWheel) { throw "BabyAI Core wheel was not found in the release bundle." }
+        $venvPython = Join-Path $venv "Scripts\python.exe"
+        $babyWheel = Get-ChildItem (Join-Path $tempDir "wheels") -Filter "babyai_core-*.whl" -File | Select-Object -First 1
+        if (-not $babyWheel) { throw "BabyAI Core wheel was not found in the release bundle." }
 
-    & $venvPython -m pip install --disable-pip-version-check --no-index --find-links (Join-Path $tempDir "wheels") $babyWheel.FullName
-    if ($LASTEXITCODE -ne 0) { throw "Could not install BabyAI Core from the release bundle." }
+        & $venvPython -m pip install --disable-pip-version-check --no-index --find-links (Join-Path $tempDir "wheels") $babyWheel.FullName
+        if ($LASTEXITCODE -ne 0) { throw "Could not install BabyAI Core from the release bundle." }
+    }
 
     if (Test-Path $versionDir) {
         Remove-Item $versionDir -Recurse -Force
@@ -133,6 +151,7 @@ try {
     Write-Host "BabyAI $version installed to $versionDir"
     Write-Host "User data and GGUF models were not modified."
     Write-Host "Runtime acceleration defaults to auto (Vulkan when usable, portable CPU fallback otherwise)."
+    Write-Host "Bundled Python runtime: $bundledPython"
     Write-Host "Launcher: $(Join-Path $InstallRoot 'Start-BabyAI.ps1')"
 }
 finally {
