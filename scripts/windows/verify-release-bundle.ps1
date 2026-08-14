@@ -26,6 +26,7 @@ try {
     $root = Join-Path $expanded "BabyAI-$Version-windows-x64"
     foreach ($required in @(
         "release.json",
+        "model.json",
         "SHA256SUMS.txt",
         "install.ps1",
         "start.ps1",
@@ -42,12 +43,29 @@ try {
     if ([string]$manifest.version -ne $Version) {
         throw "Release manifest version mismatch."
     }
+    if ([string]$manifest.model_manifest -ne "model.json") {
+        throw "Release manifest does not point to model.json."
+    }
     if ([bool]$manifest.python_included) {
         foreach ($required in @("python/python.exe", "python/babyai-runtime.json")) {
             if (-not (Test-Path (Join-Path $root $required) -PathType Leaf)) {
                 throw "Self-contained release is missing $required"
             }
         }
+    }
+
+    $model = Get-Content (Join-Path $root "model.json") -Raw | ConvertFrom-Json
+    if (-not ([string]$model.url).StartsWith("https://", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Production model URL must use HTTPS."
+    }
+    if ([string]$model.sha256 -ne "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e") {
+        throw "Production model SHA-256 changed unexpectedly."
+    }
+    if ([long]$model.size -ne 1117320736) {
+        throw "Production model size changed unexpectedly."
+    }
+    if ([string]$model.filename -ne "babyai-qwen2.5-1.5b-instruct-q4_k_m.gguf") {
+        throw "Production model filename changed unexpectedly."
     }
 
     & (Join-Path $root "install.ps1") -InstallRoot $installRoot -Python $Python
@@ -78,6 +96,7 @@ try {
 
     Write-Host "BabyAI release bundle and installer smoke passed."
     Write-Host "Self-contained Python: $([bool]$manifest.python_included)"
+    Write-Host "Production model manifest: $([string]$model.display_name)"
 }
 finally {
     if (Test-Path $workRoot) {
