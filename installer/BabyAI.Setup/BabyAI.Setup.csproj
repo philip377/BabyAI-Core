@@ -13,5 +13,10 @@
     <AssemblyName>BabyAI-Setup</AssemblyName>
     <RootNamespace>BabyAI.Setup</RootNamespace>
     <Version>0.1.0</Version>
+    <BabyAIBundleZip Condition="'$(BabyAIBundleZip)' == ''"></BabyAIBundleZip>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(BabyAIBundleZip)' != '' and Exists('$(BabyAIBundleZip)')">
+    <EmbeddedResource Include="$(BabyAIBundleZip)" LogicalName="BabyAI.ReleaseBundle.zip" />
+  </ItemGroup>
 </Project>
