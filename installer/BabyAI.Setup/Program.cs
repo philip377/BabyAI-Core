@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -8,11 +11,32 @@ namespace BabyAI.Setup;
 
 internal static class Program
 {
+    internal static string? BundleRoot { get; private set; }
+
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        BundleRoot = ResolveBundleRoot(args);
         var app = new Application();
         app.Run(new SetupWindow());
+    }
+
+    private static string? ResolveBundleRoot(string[] args)
+    {
+        var arg = args.FirstOrDefault(x => x.StartsWith("--bundle=", StringComparison.OrdinalIgnoreCase));
+        if (arg is not null)
+        {
+            return Path.GetFullPath(arg["--bundle=".Length..].Trim('"'));
+        }
+
+        var environment = Environment.GetEnvironmentVariable("BABYAI_BUNDLE_ROOT");
+        if (!string.IsNullOrWhiteSpace(environment))
+        {
+            return Path.GetFullPath(environment);
+        }
+
+        var sibling = Path.Combine(AppContext.BaseDirectory, "bundle");
+        return Directory.Exists(sibling) ? sibling : null;
     }
 }
 
@@ -21,6 +45,8 @@ internal sealed class SetupWindow : Window
     private readonly ProgressBar _progress;
     private readonly TextBlock _status;
     private readonly Button _install;
+    private bool _installed;
+    private string? _desktopPath;
 
     public SetupWindow()
     {
@@ -49,9 +75,7 @@ internal sealed class SetupWindow : Window
         {
             Width = 156,
             Height = 156,
-            Fill = new RadialGradientBrush(
-                Color.FromRgb(212, 104, 255),
-                Color.FromRgb(67, 41, 170)),
+            Fill = new RadialGradientBrush(Color.FromRgb(212, 104, 255), Color.FromRgb(67, 41, 170)),
             Effect = new DropShadowEffect { BlurRadius = 44, ShadowDepth = 0, Opacity = 0.85, Color = Color.FromRgb(142, 77, 255) },
             HorizontalAlignment = HorizontalAlignment.Left
         };
@@ -68,11 +92,11 @@ internal sealed class SetupWindow : Window
         body.Child = stack;
         stack.Children.Add(Text("Установка BabyAI", 30, FontWeights.SemiBold, new Thickness(0, 0, 0, 10)));
         stack.Children.Add(Text("Подготовим приложение, локальный мозг и оптимальный backend для этого компьютера.", 15, FontWeights.Normal, new Thickness(0, 0, 0, 30), Color.FromRgb(170, 176, 204)));
-        stack.Children.Add(Step("1", "Проверка системы", "CPU, GPU, Vulkan и доступное место"));
+        stack.Children.Add(Step("1", "Проверка системы", "Целостность релиза и доступное место"));
         stack.Children.Add(Step("2", "Установка ядра", "Самодостаточный Desktop + native runtime"));
-        stack.Children.Add(Step("3", "Подготовка мозга", "Поиск или безопасная загрузка модели"));
+        stack.Children.Add(Step("3", "Подготовка мозга", "Сохраняем модель и выбираем backend автоматически"));
 
-        _status = Text("Готово к установке", 13, FontWeights.Medium, new Thickness(0, 26, 0, 8), Color.FromRgb(158, 166, 198));
+        _status = Text(Program.BundleRoot is null ? "Релизный пакет не найден" : "Готово к установке", 13, FontWeights.Medium, new Thickness(0, 26, 0, 8), Color.FromRgb(158, 166, 198));
         stack.Children.Add(_status);
         _progress = new ProgressBar { Height = 8, Minimum = 0, Maximum = 100, Value = 0, Margin = new Thickness(0, 0, 0, 24) };
         stack.Children.Add(_progress);
@@ -86,7 +110,8 @@ internal sealed class SetupWindow : Window
             Background = new SolidColorBrush(Color.FromRgb(115, 76, 232)),
             Foreground = Brushes.White,
             BorderThickness = new Thickness(0),
-            Cursor = System.Windows.Input.Cursors.Hand
+            Cursor = System.Windows.Input.Cursors.Hand,
+            IsEnabled = Program.BundleRoot is not null
         };
         _install.Click += InstallClicked;
         stack.Children.Add(_install);
@@ -95,27 +120,44 @@ internal sealed class SetupWindow : Window
 
     private async void InstallClicked(object sender, RoutedEventArgs e)
     {
-        _install.IsEnabled = false;
-        var phases = new[]
+        if (_installed)
         {
-            ("Проверяю систему и совместимость…", 18),
-            ("Готовлю защищённую папку установки…", 36),
-            ("Распаковываю BabyAI runtime…", 61),
-            ("Проверяю локальный мозг…", 78),
-            ("Настраиваю оптимальный backend…", 92),
-            ("BabyAI готов к запуску", 100)
-        };
-
-        // v1 UI shell. Real bundle extraction/hardware/model actions are wired in the next installer slice.
-        foreach (var (label, value) in phases)
-        {
-            _status.Text = label;
-            _progress.Value = value;
-            await Task.Delay(240);
+            if (_desktopPath is not null && File.Exists(_desktopPath))
+            {
+                Process.Start(new ProcessStartInfo(_desktopPath) { UseShellExecute = true });
+                Close();
+            }
+            return;
         }
 
-        _install.Content = "Запустить BabyAI";
-        _install.IsEnabled = true;
+        if (Program.BundleRoot is null)
+        {
+            return;
+        }
+
+        _install.IsEnabled = false;
+        try
+        {
+            var progress = new Progress<(string Message, int Value)>(step =>
+            {
+                _status.Text = step.Message;
+                _progress.Value = step.Value;
+            });
+
+            _desktopPath = await Task.Run(() => InstallerEngine.Install(Program.BundleRoot, progress));
+            _status.Text = "BabyAI установлен и готов к запуску";
+            _progress.Value = 100;
+            _install.Content = "Запустить BabyAI";
+            _installed = true;
+            _install.IsEnabled = true;
+        }
+        catch (Exception ex)
+        {
+            _status.Text = $"Ошибка установки: {ex.Message}";
+            _progress.Value = 0;
+            _install.Content = "Повторить установку";
+            _install.IsEnabled = true;
+        }
     }
 
     private static Border Card() => new()
@@ -158,4 +200,134 @@ internal sealed class SetupWindow : Window
         Foreground = new SolidColorBrush(color ?? Colors.White),
         TextWrapping = TextWrapping.Wrap
     };
+}
+
+internal static class InstallerEngine
+{
+    private sealed record ReleaseManifest(string Version, bool PythonIncluded);
+
+    public static string Install(string bundleRoot, IProgress<(string Message, int Value)> progress)
+    {
+        bundleRoot = Path.GetFullPath(bundleRoot);
+        progress.Report(("Проверяю целостность релиза…", 12));
+        VerifyChecksums(bundleRoot);
+        var manifest = ReadManifest(bundleRoot);
+        if (!manifest.PythonIncluded)
+        {
+            throw new InvalidOperationException("Этот установщик требует self-contained Python runtime.");
+        }
+
+        var required = new[] { "app", "runtime", "wheels", "python" };
+        foreach (var directory in required)
+        {
+            if (!Directory.Exists(Path.Combine(bundleRoot, directory)))
+            {
+                throw new InvalidDataException($"В релизе отсутствует папка {directory}.");
+            }
+        }
+
+        var installRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BabyAI");
+        var versionsRoot = Path.Combine(installRoot, "versions");
+        var versionDir = Path.Combine(versionsRoot, manifest.Version);
+        var tempDir = versionDir + ".installing";
+        Directory.CreateDirectory(versionsRoot);
+
+        if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            progress.Report(("Устанавливаю приложение…", 35));
+            CopyDirectory(Path.Combine(bundleRoot, "app"), Path.Combine(tempDir, "app"));
+            progress.Report(("Устанавливаю native runtime…", 52));
+            CopyDirectory(Path.Combine(bundleRoot, "runtime"), Path.Combine(tempDir, "runtime"));
+            progress.Report(("Устанавливаю локальный Python…", 68));
+            CopyDirectory(Path.Combine(bundleRoot, "python"), Path.Combine(tempDir, "python"));
+            CopyDirectory(Path.Combine(bundleRoot, "wheels"), Path.Combine(tempDir, "wheels"));
+
+            var pythonExe = Path.Combine(tempDir, "python", "python.exe");
+            if (!File.Exists(pythonExe)) throw new InvalidDataException("Bundled python.exe не найден.");
+
+            progress.Report(("Фиксирую атомарную версию…", 82));
+            if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true);
+            Directory.Move(tempDir, versionDir);
+
+            Directory.CreateDirectory(installRoot);
+            File.WriteAllText(Path.Combine(installRoot, "current.json"), JsonSerializer.Serialize(new
+            {
+                version = manifest.Version,
+                path = versionDir
+            }, JsonOptions));
+
+            PreserveOrCreateLaunchSettings(installRoot);
+
+            progress.Report(("Проверяю запуск BabyAI…", 94));
+            var desktop = Path.Combine(versionDir, "app", "BabyAI.Desktop.exe");
+            if (!File.Exists(desktop)) throw new InvalidDataException("BabyAI.Desktop.exe не найден в установленной версии.");
+            return desktop;
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+
+    private static void VerifyChecksums(string bundleRoot)
+    {
+        var sumsPath = Path.Combine(bundleRoot, "SHA256SUMS.txt");
+        if (!File.Exists(sumsPath)) throw new InvalidDataException("SHA256SUMS.txt не найден.");
+
+        var prefix = bundleRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        foreach (var raw in File.ReadLines(sumsPath))
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            var split = raw.Split("  ", 2, StringSplitOptions.None);
+            if (split.Length != 2 || split[0].Length != 64) throw new InvalidDataException("Некорректная строка SHA256SUMS.txt.");
+            var path = Path.GetFullPath(Path.Combine(bundleRoot, split[1].Replace('/', Path.DirectorySeparatorChar)));
+            if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Путь checksum выходит за пределы релиза.");
+            if (!File.Exists(path)) throw new FileNotFoundException("Файл релиза отсутствует.", path);
+            using var stream = File.OpenRead(path);
+            var actual = Convert.ToHexString(SHA256.HashData(stream));
+            if (!actual.Equals(split[0], StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException($"SHA-256 не совпадает: {split[1]}");
+        }
+    }
+
+    private static ReleaseManifest ReadManifest(string bundleRoot)
+    {
+        var path = Path.Combine(bundleRoot, "release.json");
+        if (!File.Exists(path)) throw new InvalidDataException("release.json не найден.");
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var root = document.RootElement;
+        var version = root.GetProperty("version").GetString();
+        if (string.IsNullOrWhiteSpace(version)) throw new InvalidDataException("release.json не содержит version.");
+        var pythonIncluded = root.TryGetProperty("python_included", out var python) && python.GetBoolean();
+        return new ReleaseManifest(version, pythonIncluded);
+    }
+
+    private static void PreserveOrCreateLaunchSettings(string installRoot)
+    {
+        var path = Path.Combine(installRoot, "launch.json");
+        if (File.Exists(path)) return;
+        File.WriteAllText(path, JsonSerializer.Serialize(new
+        {
+            provider = "native",
+            acceleration = "auto",
+            model = ""
+        }, JsonOptions));
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), true);
+        }
+        foreach (var directory in Directory.EnumerateDirectories(source))
+        {
+            CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
+        }
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 }
