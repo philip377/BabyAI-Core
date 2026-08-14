@@ -50,6 +50,12 @@ Copy-Item $VulkanRuntime (Join-Path $stageRoot "runtime\vulkan\babyai_native.dll
 Copy-Item "scripts\windows\install-release.ps1" (Join-Path $stageRoot "install.ps1")
 Copy-Item "scripts\windows\start-release.ps1" (Join-Path $stageRoot "start.ps1")
 
+$modelManifestSource = "packaging\windows\model.json"
+if (-not (Test-Path $modelManifestSource -PathType Leaf)) {
+    throw "Production model manifest is missing: $modelManifestSource"
+}
+Copy-Item $modelManifestSource (Join-Path $stageRoot "model.json")
+
 $pythonIncluded = $false
 if (-not [string]::IsNullOrWhiteSpace($PythonRuntimeDir)) {
     $pythonExe = Join-Path $PythonRuntimeDir "python.exe"
@@ -66,6 +72,7 @@ $manifest = [ordered]@{
     version = $Version
     platform = "windows-x64"
     model_included = $false
+    model_manifest = "model.json"
     python_included = $pythonIncluded
     python_layout = if ($pythonIncluded) { "embedded" } else { "external-bootstrap" }
     python_versions = @("3.11", "3.12", "3.13")
@@ -89,3 +96,4 @@ Set-Content $zipHashPath "$archiveHash  $([IO.Path]::GetFileName($zipPath))" -En
 Write-Host "Release bundle: $zipPath"
 Write-Host "SHA256: $archiveHash"
 Write-Host "Self-contained Python included: $pythonIncluded"
+Write-Host "Production model manifest included: model.json"
