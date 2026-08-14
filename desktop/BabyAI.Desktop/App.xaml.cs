@@ -33,6 +33,8 @@ public partial class App : Application
             InstalledRuntimeBootstrap.ApplyToCurrentProcess();
             StartupDiagnostics.Log("Installed runtime bootstrap applied");
 
+            XamlStartupProbe.Run();
+
             try
             {
                 var mainWindow = new MainWindow();
@@ -44,7 +46,8 @@ public partial class App : Application
             }
             catch (XamlParseException ex)
             {
-                StartupDiagnostics.Log("MainWindow XAML failed; starting compatibility fallback", ex);
+                StartupDiagnostics.Log($"MainWindow XAML failed; hresult=0x{ex.HResult:X8}; message={ex.Message}", ex);
+                StartupDiagnostics.Log("MainWindow XAML failed; starting compatibility fallback");
                 _window = new CompatibilityFallbackWindow(ex);
             }
 
