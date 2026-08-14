@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 
 namespace BabyAI.Desktop;
@@ -7,32 +6,28 @@ internal static class InstalledRuntimeBootstrap
 {
     private sealed record LaunchSettings(string Provider, string Acceleration, string Model);
 
-    public static string ResolvePythonAndApplyEnvironment(ProcessStartInfo startInfo)
+    public static void ApplyToCurrentProcess()
     {
-        var configured = Environment.GetEnvironmentVariable("BABYAI_PYTHON");
-        if (!string.IsNullOrWhiteSpace(configured))
-            return configured;
-
         if (!TryResolveInstalledLayout(out var installRoot, out var versionRoot))
-            return "python";
+            return;
 
         var python = Path.Combine(versionRoot, "python", "python.exe");
         var cpuRuntime = Path.Combine(versionRoot, "runtime", "cpu", "babyai_native.dll");
         var vulkanRuntime = Path.Combine(versionRoot, "runtime", "vulkan", "babyai_native.dll");
         if (!File.Exists(python) || !File.Exists(cpuRuntime))
-            return "python";
+            return;
 
         var launch = ReadLaunchSettings(Path.Combine(installRoot, "launch.json"));
-        startInfo.Environment["BABYAI_PYTHON"] = python;
-        startInfo.Environment["BABYAI_PROVIDER"] = launch.Provider;
-        startInfo.Environment["BABYAI_NATIVE_ACCELERATION"] = launch.Acceleration;
-        startInfo.Environment["BABYAI_NATIVE_RUNTIME"] = cpuRuntime;
-        if (File.Exists(vulkanRuntime))
-            startInfo.Environment["BABYAI_NATIVE_VULKAN_RUNTIME"] = vulkanRuntime;
-        if (!string.IsNullOrWhiteSpace(launch.Model) && File.Exists(launch.Model))
-            startInfo.Environment["BABYAI_NATIVE_MODEL"] = launch.Model;
-
-        return python;
+        Environment.SetEnvironmentVariable("BABYAI_PYTHON", python);
+        Environment.SetEnvironmentVariable("BABYAI_PROVIDER", launch.Provider);
+        Environment.SetEnvironmentVariable("BABYAI_NATIVE_ACCELERATION", launch.Acceleration);
+        Environment.SetEnvironmentVariable("BABYAI_NATIVE_RUNTIME", cpuRuntime);
+        Environment.SetEnvironmentVariable(
+            "BABYAI_NATIVE_VULKAN_RUNTIME",
+            File.Exists(vulkanRuntime) ? vulkanRuntime : null);
+        Environment.SetEnvironmentVariable(
+            "BABYAI_NATIVE_MODEL",
+            !string.IsNullOrWhiteSpace(launch.Model) && File.Exists(launch.Model) ? launch.Model : null);
     }
 
     private static bool TryResolveInstalledLayout(out string installRoot, out string versionRoot)
