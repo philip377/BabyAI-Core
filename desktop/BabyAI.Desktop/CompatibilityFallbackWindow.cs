@@ -30,7 +30,7 @@ internal sealed class CompatibilityFallbackWindow : Window
             Text = "BabyAI запущен в режиме совместимости",
             FontSize = 26,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Colors.White),
+            Foreground = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255)),
             TextWrapping = TextWrapping.Wrap,
             HorizontalAlignment = HorizontalAlignment.Center,
         });
