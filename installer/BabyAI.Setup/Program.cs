@@ -260,6 +260,8 @@ internal static class InstallerEngine
 
             RollbackIntegration.CommitVersionSwitch(installRoot, manifest.Version, versionDir);
             PreserveOrCreateLaunchSettings(installRoot);
+            progress.Report(("Ищу локальную GGUF-модель…", 94));
+            ModelDiscovery.TryAdoptLocalModel(installRoot);
 
             progress.Report(("Создаю ярлыки BabyAI…", 97));
             ShellIntegration.CreateShortcuts(desktop);
