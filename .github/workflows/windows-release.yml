@@ -13,8 +13,19 @@ on:
       - "native/**"
       - "pyproject.toml"
   push:
+    branches:
+      - main
     tags:
       - "v*"
+    paths:
+      - ".github/workflows/windows-release.yml"
+      - "scripts/windows/*release*.ps1"
+      - "scripts/windows/build-single-exe-installer.ps1"
+      - "installer/**"
+      - "desktop/**"
+      - "src/**"
+      - "native/**"
+      - "pyproject.toml"
 
 permissions:
   contents: write
