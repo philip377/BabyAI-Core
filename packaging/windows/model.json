@@ -1,0 +1,7 @@
+{
+  "url": "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/dd26da440ef0330c47919d1ecae0966d24022222/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true",
+  "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e",
+  "size": 1117320736,
+  "filename": "babyai-qwen2.5-1.5b-instruct-q4_k_m.gguf",
+  "display_name": "BabyAI Brain · Qwen2.5 1.5B Q4_K_M"
+}
