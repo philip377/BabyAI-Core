@@ -8,7 +8,7 @@ def test_desktop_avoids_progress_ring_on_win10() -> None:
     runtime_behaviors = (
         root / "desktop" / "BabyAI.Desktop" / "MainWindow.RuntimeBehaviors.cs"
     ).read_text(encoding="utf-8")
-    probe = (root / "desktop" / "BabyAI.Desktop" / "XamlStartupProbe.cs").read_text(
+    project = (root / "desktop" / "BabyAI.Desktop" / "BabyAI.Desktop.csproj").read_text(
         encoding="utf-8"
     )
     behavior = (
@@ -17,10 +17,10 @@ def test_desktop_avoids_progress_ring_on_win10() -> None:
 
     assert "<ProgressRing" not in xaml
     assert 'x:Name="ReplyActivityIndicator"' in xaml
-    assert "XamlStartupProbe.Run()" in app
-    assert "ProgressRing" not in probe
-    assert "XAML-PROBE START" in probe
-    assert "SECTION Reply safe indicator" in probe
+    assert "XamlStartupProbe.Run()" not in app
+    assert 'Name="CopyLooseXamlResourcesAfterPublish"' in project
+    assert 'Include="$(TargetDir)*.xbf"' in project
+    assert 'Include="$(TargetDir)$(AssemblyName).pri"' in project
     assert "ReplyActivityBehavior.SetSource(ReplyActivityIndicator, ReplyText)" in runtime_behaviors
     assert "ConditionalWeakTable<FrameworkElement, Subscription>" in behavior
     assert "indicator.Visibility = active ? Visibility.Visible : Visibility.Collapsed" in behavior
