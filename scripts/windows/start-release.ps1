@@ -42,7 +42,9 @@ if (-not [string]::IsNullOrWhiteSpace($ModelPath)) {
 
 $appDir = Join-Path $versionDir "app"
 $exe = Join-Path $appDir "BabyAI.Desktop.exe"
-$python = Join-Path $versionDir "python\Scripts\python.exe"
+$embeddedPython = Join-Path $versionDir "python\python.exe"
+$venvPython = Join-Path $versionDir "python\Scripts\python.exe"
+$python = if (Test-Path $embeddedPython -PathType Leaf) { $embeddedPython } else { $venvPython }
 $cpuRuntime = Join-Path $versionDir "runtime\cpu\babyai_native.dll"
 $vulkanRuntime = Join-Path $versionDir "runtime\vulkan\babyai_native.dll"
 
