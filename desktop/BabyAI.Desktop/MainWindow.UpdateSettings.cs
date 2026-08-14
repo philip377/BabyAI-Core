@@ -43,9 +43,9 @@ public sealed partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 7, 0, 0),
         };
-        var packageButton = new Button
+        var installButton = new Button
         {
-            Content = "Получить пакет",
+            Content = "Скачать и установить",
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 5, 0, 0),
             IsEnabled = false,
@@ -54,7 +54,7 @@ public sealed partial class MainWindow
         checkButton.Click += async (_, _) =>
         {
             checkButton.IsEnabled = false;
-            packageButton.IsEnabled = false;
+            installButton.IsEnabled = false;
             availableUpdate = null;
             status.Text = "Проверяем обновления…";
             try
@@ -64,9 +64,9 @@ public sealed partial class MainWindow
                 {
                     availableUpdate = update;
                     status.Text = update.DownloadAvailable
-                        ? $"Доступна версия {update.LatestVersion}."
-                        : $"Доступна версия {update.LatestVersion}; пакет Windows пока не опубликован.";
-                    packageButton.IsEnabled = update.DownloadAvailable;
+                        ? $"Доступна версия {update.LatestVersion}. Установщик будет проверен по SHA-256 перед запуском."
+                        : $"Доступна версия {update.LatestVersion}; Windows installer пока не опубликован.";
+                    installButton.IsEnabled = update.DownloadAvailable;
                 }
                 else if (string.IsNullOrWhiteSpace(update.LatestVersion))
                 {
@@ -87,23 +87,24 @@ public sealed partial class MainWindow
             }
         };
 
-        packageButton.Click += async (_, _) =>
+        installButton.Click += async (_, _) =>
         {
             if (availableUpdate is null || !availableUpdate.DownloadAvailable)
                 return;
 
             checkButton.IsEnabled = false;
-            packageButton.IsEnabled = false;
-            status.Text = "Получаем пакет и проверяем SHA-256…";
+            installButton.IsEnabled = false;
+            status.Text = "Скачиваем фирменный установщик и проверяем SHA-256…";
             try
             {
                 var ready = await BabyAIUpdateService.DownloadVerifiedAsync(availableUpdate);
-                status.Text = $"Пакет BabyAI {ready.Version} готов. Установка будет доступна отдельной кнопкой.";
+                status.Text = $"BabyAI {ready.Version} проверен. Запускаем обновление…";
+                BabyAIUpdateService.LaunchInstaller(ready);
             }
             catch
             {
-                status.Text = "Не удалось подготовить пакет обновления.";
-                packageButton.IsEnabled = true;
+                status.Text = "Не удалось подготовить или запустить обновление.";
+                installButton.IsEnabled = true;
             }
             finally
             {
@@ -114,10 +115,10 @@ public sealed partial class MainWindow
         var card = new StackPanel { Spacing = 2 };
         card.Children.Add(status);
         card.Children.Add(checkButton);
-        card.Children.Add(packageButton);
+        card.Children.Add(installButton);
         panel.Children.Add(CreateSettingsCard(card));
         panel.Children.Add(CreateSettingsNote(
-            "Пакет получается только по вашему действию и проверяется SHA-256. На этом этапе BabyAI его не устанавливает."));
+            "Обновление скачивает только фирменный BabyAI Setup с GitHub Releases, проверяет SHA-256 и затем передаёт установку существующему atomic/rollback-safe установщику."));
         return panel;
     }
 }
