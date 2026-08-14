@@ -1,5 +1,6 @@
 using Microsoft.Win32;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using IOPath = System.IO.Path;
 
@@ -10,7 +11,54 @@ internal static class UninstallIntegration
     private const string RegistryKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\BabyAI";
     private const int MoveFileDelayUntilReboot = 0x4;
 
-    public static void Register(string installRoot, string version, string displayIcon)
+    [ModuleInitializer]
+    internal static void HandleUninstallCommand()
+    {
+        var args = Environment.GetCommandLineArgs().Skip(1).ToArray();
+        if (!args.Any(x => x.Equals("--uninstall", StringComparison.OrdinalIgnoreCase))) return;
+
+        var quiet = args.Any(x => x.Equals("--quiet", StringComparison.OrdinalIgnoreCase));
+        var final = args.Any(x => x.Equals("--uninstall-final", StringComparison.OrdinalIgnoreCase));
+        var installRoot = ResolveInstallRoot(args);
+
+        if (!final && IsInsideInstallRoot(Environment.ProcessPath, installRoot))
+        {
+            RelaunchFromTemp(installRoot, quiet);
+            Environment.Exit(0);
+        }
+
+        Uninstall(installRoot);
+        if (final && Environment.ProcessPath is { } tempExe)
+        {
+            MoveFileEx(tempExe, null, MoveFileDelayUntilReboot);
+        }
+
+        if (!quiet)
+        {
+            System.Windows.MessageBox.Show(
+                "BabyAI удалён. Ваши настройки, память и локальные модели сохранены.",
+                "BabyAI",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Information);
+        }
+        Environment.Exit(0);
+    }
+
+    public static void RegisterFromDesktop(string desktopExe)
+    {
+        var appDirectory = IOPath.GetDirectoryName(desktopExe)
+            ?? throw new InvalidOperationException("Не удалось определить папку BabyAI Desktop.");
+        var versionDirectory = Directory.GetParent(appDirectory)
+            ?? throw new InvalidOperationException("Не удалось определить версию BabyAI.");
+        var versionsDirectory = versionDirectory.Parent
+            ?? throw new InvalidOperationException("Не удалось определить versions root BabyAI.");
+        var installRoot = versionsDirectory.Parent?.FullName
+            ?? throw new InvalidOperationException("Не удалось определить install root BabyAI.");
+
+        Register(installRoot, versionDirectory.Name, desktopExe);
+    }
+
+    private static void Register(string installRoot, string version, string displayIcon)
     {
         var sourceExe = Environment.ProcessPath
             ?? throw new InvalidOperationException("Не удалось определить путь установщика BabyAI.");
@@ -28,37 +76,6 @@ internal static class UninstallIntegration
         key.SetValue("QuietUninstallString", $"\"{uninstaller}\" --uninstall --quiet");
         key.SetValue("NoModify", 1, RegistryValueKind.DWord);
         key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
-    }
-
-    public static bool TryHandle(string[] args)
-    {
-        if (!args.Any(x => x.Equals("--uninstall", StringComparison.OrdinalIgnoreCase))) return false;
-
-        var quiet = args.Any(x => x.Equals("--quiet", StringComparison.OrdinalIgnoreCase));
-        var final = args.Any(x => x.Equals("--uninstall-final", StringComparison.OrdinalIgnoreCase));
-        var installRoot = ResolveInstallRoot(args);
-
-        if (!final && IsInsideInstallRoot(Environment.ProcessPath, installRoot))
-        {
-            RelaunchFromTemp(installRoot, quiet);
-            return true;
-        }
-
-        Uninstall(installRoot);
-        if (final && Environment.ProcessPath is { } tempExe)
-        {
-            MoveFileEx(tempExe, null, MoveFileDelayUntilReboot);
-        }
-
-        if (!quiet)
-        {
-            System.Windows.MessageBox.Show(
-                "BabyAI удалён. Ваши настройки, память и локальные модели сохранены.",
-                "BabyAI",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Information);
-        }
-        return true;
     }
 
     private static void Uninstall(string installRoot)
