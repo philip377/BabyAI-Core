@@ -27,15 +27,11 @@ internal static class Program
     {
         var arg = args.FirstOrDefault(x => x.StartsWith("--bundle=", StringComparison.OrdinalIgnoreCase));
         if (arg is not null)
-        {
             return IOPath.GetFullPath(arg["--bundle=".Length..].Trim('"'));
-        }
 
         var environment = Environment.GetEnvironmentVariable("BABYAI_BUNDLE_ROOT");
         if (!string.IsNullOrWhiteSpace(environment))
-        {
             return IOPath.GetFullPath(environment);
-        }
 
         var sibling = IOPath.Combine(AppContext.BaseDirectory, "bundle");
         return Directory.Exists(sibling) ? sibling : null;
@@ -48,7 +44,9 @@ internal sealed class SetupWindow : Window
     private readonly TextBlock _status;
     private readonly Button _install;
     private bool _installed;
+    private bool _installing;
     private string? _desktopPath;
+    private CancellationTokenSource? _installCancellation;
 
     public SetupWindow()
     {
@@ -122,6 +120,14 @@ internal sealed class SetupWindow : Window
 
     private async void InstallClicked(object sender, RoutedEventArgs e)
     {
+        if (_installing)
+        {
+            _status.Text = "Отменяю загрузку модели…";
+            _installCancellation?.Cancel();
+            _install.IsEnabled = false;
+            return;
+        }
+
         if (_installed)
         {
             if (_desktopPath is not null && File.Exists(_desktopPath))
@@ -133,11 +139,14 @@ internal sealed class SetupWindow : Window
         }
 
         if (Program.BundleRoot is null)
-        {
             return;
-        }
 
-        _install.IsEnabled = false;
+        _installing = true;
+        _installCancellation?.Dispose();
+        _installCancellation = new CancellationTokenSource();
+        _install.Content = "Отменить загрузку";
+        _install.IsEnabled = true;
+
         try
         {
             var progress = new Progress<(string Message, int Value)>(step =>
@@ -146,18 +155,24 @@ internal sealed class SetupWindow : Window
                 _progress.Value = step.Value;
             });
 
-            _desktopPath = await Task.Run(() => InstallerEngine.Install(Program.BundleRoot, progress));
+            _desktopPath = await Task.Run(() => InstallerEngine.Install(
+                Program.BundleRoot,
+                progress,
+                _installCancellation.Token));
             _status.Text = "BabyAI установлен и готов к запуску";
             _progress.Value = 100;
             _install.Content = "Запустить BabyAI";
             _installed = true;
-            _install.IsEnabled = true;
         }
         catch (Exception ex)
         {
             _status.Text = $"Ошибка установки: {ex.Message}";
             _progress.Value = 0;
             _install.Content = "Повторить установку";
+        }
+        finally
+        {
+            _installing = false;
             _install.IsEnabled = true;
         }
     }
@@ -208,24 +223,23 @@ internal static class InstallerEngine
 {
     private sealed record ReleaseManifest(string Version, bool PythonIncluded);
 
-    public static string Install(string bundleRoot, IProgress<(string Message, int Value)> progress)
+    public static string Install(
+        string bundleRoot,
+        IProgress<(string Message, int Value)> progress,
+        CancellationToken cancellationToken)
     {
         bundleRoot = IOPath.GetFullPath(bundleRoot);
         progress.Report(("Проверяю целостность релиза…", 12));
         VerifyChecksums(bundleRoot);
         var manifest = ReadManifest(bundleRoot);
         if (!manifest.PythonIncluded)
-        {
             throw new InvalidOperationException("Этот установщик требует self-contained Python runtime.");
-        }
 
         var required = new[] { "app", "runtime", "wheels", "python" };
         foreach (var directory in required)
         {
             if (!Directory.Exists(IOPath.Combine(bundleRoot, directory)))
-            {
                 throw new InvalidDataException($"В релизе отсутствует папка {directory}.");
-            }
         }
 
         var installRoot = IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BabyAI");
@@ -260,10 +274,21 @@ internal static class InstallerEngine
 
             RollbackIntegration.CommitVersionSwitch(installRoot, manifest.Version, versionDir);
             PreserveOrCreateLaunchSettings(installRoot);
-            progress.Report(("Ищу локальную GGUF-модель…", 94));
-            ModelDiscovery.TryAdoptLocalModel(installRoot);
 
-            progress.Report(("Создаю ярлыки BabyAI…", 97));
+            try
+            {
+                ModelProvisioning.EnsureModelAsync(
+                    bundleRoot,
+                    installRoot,
+                    progress,
+                    cancellationToken).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                progress.Report(("Загрузка модели отменена — приложение установлено", 96));
+            }
+
+            progress.Report(("Создаю ярлыки BabyAI…", 99));
             ShellIntegration.CreateShortcuts(desktop);
             return desktop;
         }
@@ -321,13 +346,9 @@ internal static class InstallerEngine
     {
         Directory.CreateDirectory(destination);
         foreach (var file in Directory.EnumerateFiles(source))
-        {
             File.Copy(file, IOPath.Combine(destination, IOPath.GetFileName(file)), true);
-        }
         foreach (var directory in Directory.EnumerateDirectories(source))
-        {
             CopyDirectory(directory, IOPath.Combine(destination, IOPath.GetFileName(directory)));
-        }
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };

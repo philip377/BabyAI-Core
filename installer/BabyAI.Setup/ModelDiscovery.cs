@@ -33,13 +33,23 @@ internal static class ModelDiscovery
         if (selected is null)
             return null;
 
+        PersistModelPath(installRoot, selected);
+        return selected;
+    }
+
+    public static void PersistModelPath(string installRoot, string modelPath)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
+            throw new FileNotFoundException("Verified GGUF model file is missing.", modelPath);
+
+        var launchPath = Path.Combine(installRoot, "launch.json");
+        var launch = ReadLaunchSettings(launchPath);
         File.WriteAllText(launchPath, JsonSerializer.Serialize(new
         {
             provider = launch.Provider,
             acceleration = launch.Acceleration,
-            model = selected
+            model = Path.GetFullPath(modelPath)
         }, JsonOptions));
-        return selected;
     }
 
     private static List<string> FindCandidates(string installRoot)
