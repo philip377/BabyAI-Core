@@ -27,6 +27,8 @@ internal static class ShellIntegration
             Directory.CreateDirectory(babyAiMenu);
             CreateShortcut(IOPath.Combine(babyAiMenu, "BabyAI.lnk"), desktopExe, workingDirectory);
         }
+
+        UninstallIntegration.RegisterFromDesktop(desktopExe);
     }
 
     public static void RemoveShortcuts()
