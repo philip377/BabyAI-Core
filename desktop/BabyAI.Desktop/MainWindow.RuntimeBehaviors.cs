@@ -10,7 +10,7 @@ public sealed partial class MainWindow
 
         TryAttachBehavior(
             "ReplyActivityBehavior",
-            () => ReplyActivityBehavior.SetSource(ReplyActivityRing, ReplyText));
+            () => ReplyActivityBehavior.SetSource(ReplyActivityIndicator, ReplyText));
 
         TryAttachBehavior(
             "ConversationTranscriptBehavior",

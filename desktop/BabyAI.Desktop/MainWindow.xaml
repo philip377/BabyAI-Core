@@ -172,13 +172,20 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <ProgressRing x:Name="ReplyActivityRing"
-                                      Grid.Column="0"
-                                      Width="14"
-                                      Height="14"
-                                      IsActive="False"
-                                      Visibility="Collapsed"
-                                      VerticalAlignment="Center" />
+                        <Grid x:Name="ReplyActivityIndicator"
+                              Grid.Column="0"
+                              Width="14"
+                              Height="14"
+                              Visibility="Collapsed"
+                              VerticalAlignment="Center">
+                            <Ellipse Width="12"
+                                     Height="12"
+                                     Stroke="#BFFFFFFF"
+                                     StrokeThickness="2" />
+                            <Ellipse Width="4"
+                                     Height="4"
+                                     Fill="#FFF8FAFF" />
+                        </Grid>
                         <TextBlock x:Name="ReplyText"
                                    Grid.Column="1"
                                    Text="Готов к разговору."

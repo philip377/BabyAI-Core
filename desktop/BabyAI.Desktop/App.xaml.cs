@@ -33,8 +33,6 @@ public partial class App : Application
             InstalledRuntimeBootstrap.ApplyToCurrentProcess();
             StartupDiagnostics.Log("Installed runtime bootstrap applied");
 
-            XamlStartupProbe.Run();
-
             try
             {
                 var mainWindow = new MainWindow();

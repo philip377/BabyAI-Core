@@ -6,7 +6,7 @@ namespace BabyAI.Desktop;
 
 public static class ReplyActivityBehavior
 {
-    private static readonly ConditionalWeakTable<ProgressRing, Subscription> Subscriptions = new();
+    private static readonly ConditionalWeakTable<FrameworkElement, Subscription> Subscriptions = new();
 
     public static readonly DependencyProperty SourceProperty = DependencyProperty.RegisterAttached(
         "Source",
@@ -22,29 +22,29 @@ public static class ReplyActivityBehavior
 
     private static void OnSourceChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
     {
-        if (dependencyObject is not ProgressRing ring)
+        if (dependencyObject is not FrameworkElement indicator)
             return;
 
-        if (Subscriptions.TryGetValue(ring, out var previous))
+        if (Subscriptions.TryGetValue(indicator, out var previous))
         {
             previous.Source.UnregisterPropertyChangedCallback(TextBlock.TextProperty, previous.CallbackToken);
-            Subscriptions.Remove(ring);
+            Subscriptions.Remove(indicator);
         }
 
         if (args.NewValue is not TextBlock source)
         {
-            Update(ring, string.Empty);
+            Update(indicator, string.Empty);
             return;
         }
 
         var token = source.RegisterPropertyChangedCallback(
             TextBlock.TextProperty,
-            (_, _) => Update(ring, source.Text));
-        Subscriptions.Add(ring, new Subscription(source, token));
-        Update(ring, source.Text);
+            (_, _) => Update(indicator, source.Text));
+        Subscriptions.Add(indicator, new Subscription(source, token));
+        Update(indicator, source.Text);
     }
 
-    private static void Update(ProgressRing ring, string status)
+    private static void Update(FrameworkElement indicator, string status)
     {
         var value = status.Trim().ToLowerInvariant();
         var active = value.Contains("thinking")
@@ -54,8 +54,7 @@ public static class ReplyActivityBehavior
             || value.Contains("провер")
             || value.Contains("останав");
 
-        ring.IsActive = active;
-        ring.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        indicator.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private sealed record Subscription(TextBlock Source, long CallbackToken);
