@@ -1,8 +1,7 @@
 <Window
     x:Class="BabyAI.Desktop.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:BabyAI.Desktop">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <Grid x:Name="Root" Background="Transparent" Padding="10">
         <Grid.ColumnDefinitions>
@@ -134,8 +133,7 @@
                                    FontSize="10"
                                    Foreground="#DFFFFFFF"
                                    MaxWidth="128"
-                                   TextTrimming="CharacterEllipsis"
-                                   local:BrainStatusBehavior.Enabled="True" />
+                                   TextTrimming="CharacterEllipsis" />
                     </Border>
 
                     <Button x:Name="DetailsButton"
@@ -174,13 +172,13 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <ProgressRing Grid.Column="0"
+                        <ProgressRing x:Name="ReplyActivityRing"
+                                      Grid.Column="0"
                                       Width="14"
                                       Height="14"
                                       IsActive="False"
                                       Visibility="Collapsed"
-                                      VerticalAlignment="Center"
-                                      local:ReplyActivityBehavior.Source="{Binding ElementName=ReplyText}" />
+                                      VerticalAlignment="Center" />
                         <TextBlock x:Name="ReplyText"
                                    Grid.Column="1"
                                    Text="Готов к разговору."
@@ -210,8 +208,7 @@
                                   HorizontalScrollBarVisibility="Disabled">
                         <StackPanel x:Name="ConversationStack"
                                     Padding="1,2,5,2"
-                                    Spacing="2"
-                                    local:ConversationTranscriptBehavior.Source="{Binding ElementName=ConversationText}" />
+                                    Spacing="2" />
                     </ScrollViewer>
                 </Border>
 
