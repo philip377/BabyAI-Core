@@ -35,6 +35,21 @@ jobs:
           $exe = Get-ChildItem desktop/BabyAI.Desktop/bin/x64/Release -Filter BabyAI.Desktop.exe -File -Recurse | Select-Object -First 1
           if (-not $exe) { throw "BabyAI.Desktop.exe was not produced." }
           Write-Host "Runnable desktop executable: $($exe.FullName)"
+      - name: Smoke-test Desktop startup
+        shell: pwsh
+        env:
+          BABYAI_PROVIDER: echo
+        run: |
+          $exe = Get-ChildItem desktop/BabyAI.Desktop/bin/x64/Release -Filter BabyAI.Desktop.exe -File -Recurse | Select-Object -First 1
+          if (-not $exe) { throw "BabyAI.Desktop.exe was not produced." }
+          $process = Start-Process -FilePath $exe.FullName -PassThru
+          Start-Sleep -Seconds 4
+          if ($process.HasExited) {
+            $log = Join-Path $env:LOCALAPPDATA "BabyAI\logs\desktop-startup.log"
+            if (Test-Path $log) { Get-Content $log }
+            throw "BabyAI Desktop exited during startup with code $($process.ExitCode)."
+          }
+          Stop-Process -Id $process.Id -Force
       - name: Verify safe diagnostics export
         shell: pwsh
         env:
