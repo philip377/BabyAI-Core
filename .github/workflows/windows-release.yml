@@ -6,6 +6,8 @@ on:
     paths:
       - ".github/workflows/windows-release.yml"
       - "scripts/windows/*release*.ps1"
+      - "scripts/windows/build-single-exe-installer.ps1"
+      - "installer/**"
       - "desktop/**"
       - "src/**"
       - "native/**"
@@ -140,12 +142,41 @@ jobs:
         shell: pwsh
         run: .\scripts\windows\verify-release-bundle.ps1 -Version $env:BABYAI_RELEASE_VERSION -OutputDir dist-release -Python python
 
+      - name: Publish branded setup shell
+        shell: pwsh
+        run: |
+          dotnet publish installer/BabyAI.Setup/BabyAI.Setup.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o installer-publish
+          if (-not (Test-Path installer-publish/BabyAI-Setup.exe -PathType Leaf)) {
+            throw "BabyAI-Setup.exe was not produced."
+          }
+
+      - name: Build single EXE installer
+        shell: pwsh
+        run: |
+          $bundle = "dist-release/BabyAI-$env:BABYAI_RELEASE_VERSION-windows-x64"
+          $output = "dist-release/BabyAI-Setup-$env:BABYAI_RELEASE_VERSION.exe"
+          .\scripts\windows\build-single-exe-installer.ps1 `
+            -SetupExe installer-publish/BabyAI-Setup.exe `
+            -BundleDir $bundle `
+            -OutputExe $output
+          if (-not (Test-Path $output -PathType Leaf)) { throw "Single EXE installer was not produced." }
+          $hash = (Get-FileHash $output -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content "$output.sha256" "$hash  $([IO.Path]::GetFileName($output))" -Encoding ASCII
+
       - uses: actions/upload-artifact@v4
         with:
           name: BabyAI-Windows-Release-x64
           path: |
             dist-release/BabyAI-*-windows-x64.zip
             dist-release/BabyAI-*-windows-x64.zip.sha256
+            dist-release/BabyAI-Setup-*.exe
+            dist-release/BabyAI-Setup-*.exe.sha256
           if-no-files-found: error
 
       - name: Publish GitHub Release assets
@@ -156,11 +187,13 @@ jobs:
         run: |
           $zip = "dist-release/BabyAI-$env:BABYAI_RELEASE_VERSION-windows-x64.zip"
           $sha = "$zip.sha256"
+          $setup = "dist-release/BabyAI-Setup-$env:BABYAI_RELEASE_VERSION.exe"
+          $setupSha = "$setup.sha256"
           $releaseExists = $false
           gh release view $env:GITHUB_REF_NAME *> $null
           if ($LASTEXITCODE -eq 0) { $releaseExists = $true }
           if ($releaseExists) {
-            gh release upload $env:GITHUB_REF_NAME $zip $sha --clobber
+            gh release upload $env:GITHUB_REF_NAME $zip $sha $setup $setupSha --clobber
           } else {
-            gh release create $env:GITHUB_REF_NAME $zip $sha --title "BabyAI $env:GITHUB_REF_NAME" --generate-notes
+            gh release create $env:GITHUB_REF_NAME $zip $sha $setup $setupSha --title "BabyAI $env:GITHUB_REF_NAME" --generate-notes
           }
