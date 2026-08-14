@@ -266,6 +266,9 @@ internal static class InstallerEngine
             progress.Report(("Проверяю запуск BabyAI…", 94));
             var desktop = IOPath.Combine(versionDir, "app", "BabyAI.Desktop.exe");
             if (!File.Exists(desktop)) throw new InvalidDataException("BabyAI.Desktop.exe не найден в установленной версии.");
+
+            progress.Report(("Создаю ярлыки BabyAI…", 97));
+            ShellIntegration.CreateShortcuts(desktop);
             return desktop;
         }
         finally
