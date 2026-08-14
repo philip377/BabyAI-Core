@@ -294,9 +294,9 @@ internal static class InstallerEngine
 
         var installRoot = IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BabyAI");
         var versionsRoot = IOPath.Combine(installRoot, "versions");
-        var versionDir = IOPath.Combine(versionsRoot, manifest.Version);
-        var tempDir = versionDir + ".installing";
         Directory.CreateDirectory(versionsRoot);
+        var versionDir = InstallSlotAllocator.Allocate(versionsRoot, manifest.Version);
+        var tempDir = versionDir + ".installing";
 
         if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
         Directory.CreateDirectory(tempDir);
@@ -315,7 +315,6 @@ internal static class InstallerEngine
             if (!File.Exists(pythonExe)) throw new InvalidDataException("Bundled python.exe не найден.");
 
             progress.Report(("Фиксирую атомарную версию…", 82));
-            if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true);
             Directory.Move(tempDir, versionDir);
 
             progress.Report(("Проверяю новую версию BabyAI…", 90));
@@ -339,7 +338,7 @@ internal static class InstallerEngine
             }
 
             progress.Report(("Создаю ярлыки BabyAI…", 99));
-            ShellIntegration.CreateShortcuts(desktop);
+            ShellIntegration.CreateShortcuts(desktop, manifest.Version);
             return desktop;
         }
         finally
