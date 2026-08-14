@@ -1,0 +1,1 @@
+CI should continue to publish BabyAI.Setup as a self-contained single-file Windows executable. Functional uninstall verification should assert that runtime/versioned files and shell links are removable while user-owned state remains preserved.
