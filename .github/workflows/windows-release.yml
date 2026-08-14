@@ -77,6 +77,10 @@ jobs:
         shell: pwsh
         run: .\scripts\windows\prepare-release-wheels.ps1 -OutputDir release-wheels -Python python
 
+      - name: Prepare self-contained Python runtime
+        shell: pwsh
+        run: .\scripts\windows\prepare-release-python.ps1 -WheelsDir release-wheels -OutputDir release-python -Python python
+
       - name: Publish WinUI Desktop
         shell: pwsh
         run: |
@@ -129,6 +133,7 @@ jobs:
             -WheelsDir release-wheels `
             -CpuRuntime native/build-release-cpu/Release/babyai_native.dll `
             -VulkanRuntime native/build-release-vulkan/Release/babyai_native.dll `
+            -PythonRuntimeDir release-python `
             -OutputDir dist-release
 
       - name: Verify release bundle and installer

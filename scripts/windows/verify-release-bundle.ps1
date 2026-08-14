@@ -42,6 +42,13 @@ try {
     if ([string]$manifest.version -ne $Version) {
         throw "Release manifest version mismatch."
     }
+    if ([bool]$manifest.python_included) {
+        foreach ($required in @("python/python.exe", "python/babyai-runtime.json")) {
+            if (-not (Test-Path (Join-Path $root $required) -PathType Leaf)) {
+                throw "Self-contained release is missing $required"
+            }
+        }
+    }
 
     & (Join-Path $root "install.ps1") -InstallRoot $installRoot -Python $Python
     if ($LASTEXITCODE -ne 0) {
@@ -57,13 +64,20 @@ try {
         throw "Installed launcher is missing."
     }
 
-    $installedPython = Join-Path $installed "python\Scripts\python.exe"
+    $embeddedPython = Join-Path $installed "python\python.exe"
+    $venvPython = Join-Path $installed "python\Scripts\python.exe"
+    $installedPython = if (Test-Path $embeddedPython -PathType Leaf) { $embeddedPython } else { $venvPython }
+    if (-not (Test-Path $installedPython -PathType Leaf)) {
+        throw "Installed Python runtime is missing."
+    }
+
     & $installedPython -c "import babyai; print('BabyAI release Core import OK')"
     if ($LASTEXITCODE -ne 0) {
         throw "Installed BabyAI Core could not be imported."
     }
 
     Write-Host "BabyAI release bundle and installer smoke passed."
+    Write-Host "Self-contained Python: $([bool]$manifest.python_included)"
 }
 finally {
     if (Test-Path $workRoot) {

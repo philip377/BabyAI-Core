@@ -15,6 +15,9 @@ param(
     [string]$VulkanRuntime,
 
     [Parameter(Mandatory = $false)]
+    [string]$PythonRuntimeDir = "",
+
+    [Parameter(Mandatory = $false)]
     [string]$OutputDir = "dist-release"
 )
 
@@ -24,6 +27,9 @@ $DesktopDir = (Resolve-Path $DesktopDir).Path
 $WheelsDir = (Resolve-Path $WheelsDir).Path
 $CpuRuntime = (Resolve-Path $CpuRuntime).Path
 $VulkanRuntime = (Resolve-Path $VulkanRuntime).Path
+if (-not [string]::IsNullOrWhiteSpace($PythonRuntimeDir)) {
+    $PythonRuntimeDir = (Resolve-Path $PythonRuntimeDir).Path
+}
 $OutputDir = [IO.Path]::GetFullPath($OutputDir)
 
 $rootName = "BabyAI-$Version-windows-x64"
@@ -44,12 +50,24 @@ Copy-Item $VulkanRuntime (Join-Path $stageRoot "runtime\vulkan\babyai_native.dll
 Copy-Item "scripts\windows\install-release.ps1" (Join-Path $stageRoot "install.ps1")
 Copy-Item "scripts\windows\start-release.ps1" (Join-Path $stageRoot "start.ps1")
 
+$pythonIncluded = $false
+if (-not [string]::IsNullOrWhiteSpace($PythonRuntimeDir)) {
+    $pythonExe = Join-Path $PythonRuntimeDir "python.exe"
+    if (-not (Test-Path $pythonExe -PathType Leaf)) {
+        throw "Self-contained Python runtime is missing python.exe: $pythonExe"
+    }
+    Copy-Item $PythonRuntimeDir (Join-Path $stageRoot "python") -Recurse
+    $pythonIncluded = $true
+}
+
 $manifest = [ordered]@{
     schema = 1
     product = "BabyAI"
     version = $Version
     platform = "windows-x64"
     model_included = $false
+    python_included = $pythonIncluded
+    python_layout = if ($pythonIncluded) { "embedded" } else { "external-bootstrap" }
     python_versions = @("3.11", "3.12", "3.13")
     runtimes = @("cpu", "vulkan")
 } | ConvertTo-Json -Depth 4
@@ -70,3 +88,4 @@ Set-Content $zipHashPath "$archiveHash  $([IO.Path]::GetFileName($zipPath))" -En
 
 Write-Host "Release bundle: $zipPath"
 Write-Host "SHA256: $archiveHash"
+Write-Host "Self-contained Python included: $pythonIncluded"
