@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Markup;
 
 namespace BabyAI.Desktop;
 
@@ -31,13 +32,25 @@ public partial class App : Application
         {
             InstalledRuntimeBootstrap.ApplyToCurrentProcess();
             StartupDiagnostics.Log("Installed runtime bootstrap applied");
-            var mainWindow = new MainWindow();
-            StartupDiagnostics.Log("MainWindow constructed");
-            mainWindow.ApplyStartupUiSettings();
-            mainWindow.ApplyGlassUi();
-            _window = mainWindow;
+
+            try
+            {
+                var mainWindow = new MainWindow();
+                StartupDiagnostics.Log("MainWindow constructed");
+                mainWindow.ApplyStartupUiSettings();
+                mainWindow.ApplyGlassUi();
+                _window = mainWindow;
+            }
+            catch (XamlParseException ex)
+            {
+                StartupDiagnostics.Log("MainWindow XAML failed; starting compatibility fallback", ex);
+                _window = new CompatibilityFallbackWindow(ex);
+            }
+
             _window.Activate();
-            StartupDiagnostics.Log("MainWindow activated");
+            StartupDiagnostics.Log(_window is MainWindow
+                ? "MainWindow activated"
+                : "Compatibility fallback activated");
         }
         catch (Exception ex)
         {
