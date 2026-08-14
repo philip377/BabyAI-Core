@@ -37,6 +37,7 @@ public partial class App : Application
             {
                 var mainWindow = new MainWindow();
                 StartupDiagnostics.Log("MainWindow constructed");
+                mainWindow.AttachRuntimeBehaviors();
                 mainWindow.ApplyStartupUiSettings();
                 mainWindow.ApplyGlassUi();
                 _window = mainWindow;
