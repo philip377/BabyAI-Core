@@ -45,8 +45,11 @@ internal static class UninstallIntegration
         Environment.Exit(0);
     }
 
-    public static void RegisterFromDesktop(string desktopExe)
+    public static void RegisterFromDesktop(string desktopExe, string displayVersion)
     {
+        if (string.IsNullOrWhiteSpace(displayVersion))
+            throw new InvalidDataException("Версия BabyAI для Installed Apps не задана.");
+
         var appDirectory = IOPath.GetDirectoryName(desktopExe)
             ?? throw new InvalidOperationException("Не удалось определить папку BabyAI Desktop.");
         var versionDirectory = Directory.GetParent(appDirectory)
@@ -56,7 +59,7 @@ internal static class UninstallIntegration
         var installRoot = versionsDirectory.Parent?.FullName
             ?? throw new InvalidOperationException("Не удалось определить install root BabyAI.");
 
-        Register(installRoot, versionDirectory.Name, desktopExe);
+        Register(installRoot, displayVersion.Trim(), desktopExe);
     }
 
     private static void Register(string installRoot, string version, string displayIcon)
