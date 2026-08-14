@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -10,19 +11,19 @@ public sealed record BabyAIUpdateInfo(
     string? LatestVersion,
     string? ReleaseUrl,
     bool UpdateAvailable,
-    string? BundleUrl = null,
-    string? BundleChecksumUrl = null)
+    string? InstallerUrl = null,
+    string? InstallerChecksumUrl = null)
 {
     public bool DownloadAvailable =>
         UpdateAvailable
         && !string.IsNullOrWhiteSpace(LatestVersion)
-        && !string.IsNullOrWhiteSpace(BundleUrl)
-        && !string.IsNullOrWhiteSpace(BundleChecksumUrl);
+        && !string.IsNullOrWhiteSpace(InstallerUrl)
+        && !string.IsNullOrWhiteSpace(InstallerChecksumUrl);
 }
 
 public sealed record BabyAIDownloadedUpdate(
     string Version,
-    string BundlePath,
+    string InstallerPath,
     string Sha256);
 
 public static class BabyAIUpdateService
@@ -80,9 +81,9 @@ public static class BabyAIUpdateService
         }
 
         var latestText = FormatVersion(latest);
-        var bundleName = $"BabyAI-{latestText}-windows-x64.zip";
-        var checksumName = bundleName + ".sha256";
-        var bundleUrl = FindReleaseAssetUrl(root, bundleName);
+        var installerName = $"BabyAI-Setup-{latestText}.exe";
+        var checksumName = installerName + ".sha256";
+        var installerUrl = FindReleaseAssetUrl(root, installerName);
         var checksumUrl = FindReleaseAssetUrl(root, checksumName);
 
         return new BabyAIUpdateInfo(
@@ -90,7 +91,7 @@ public static class BabyAIUpdateService
             latestText,
             releaseUrl,
             latest.CompareTo(CurrentVersion) > 0,
-            bundleUrl,
+            installerUrl,
             checksumUrl);
     }
 
@@ -99,12 +100,12 @@ public static class BabyAIUpdateService
         CancellationToken cancellationToken = default)
     {
         if (!update.DownloadAvailable || string.IsNullOrWhiteSpace(update.LatestVersion))
-            throw new InvalidOperationException("This release does not contain a downloadable BabyAI Windows package.");
+            throw new InvalidOperationException("This release does not contain a downloadable BabyAI Windows installer.");
 
-        var bundleUri = RequireGitHubHttpsUri(update.BundleUrl);
-        var checksumUri = RequireGitHubHttpsUri(update.BundleChecksumUrl);
+        var installerUri = RequireGitHubHttpsUri(update.InstallerUrl);
+        var checksumUri = RequireGitHubHttpsUri(update.InstallerChecksumUrl);
         var version = update.LatestVersion;
-        var bundleName = $"BabyAI-{version}-windows-x64.zip";
+        var installerName = $"BabyAI-Setup-{version}.exe";
         var cacheDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "BabyAI",
@@ -112,20 +113,20 @@ public static class BabyAIUpdateService
             version);
         Directory.CreateDirectory(cacheDir);
 
-        var bundlePath = Path.Combine(cacheDir, bundleName);
-        var partialPath = bundlePath + ".partial";
-        var checksumPath = bundlePath + ".sha256";
+        var installerPath = Path.Combine(cacheDir, installerName);
+        var partialPath = installerPath + ".partial";
+        var checksumPath = installerPath + ".sha256";
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(10));
 
         var checksumText = await Client.GetStringAsync(checksumUri, timeout.Token);
-        var expectedHash = ParseChecksum(checksumText, bundleName);
+        var expectedHash = ParseChecksum(checksumText, installerName);
         await File.WriteAllTextAsync(checksumPath, checksumText, timeout.Token);
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, bundleUri);
+            using var request = new HttpRequestMessage(HttpMethod.Get, installerUri);
             using var response = await Client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
@@ -133,7 +134,7 @@ public static class BabyAIUpdateService
             response.EnsureSuccessStatusCode();
 
             if (response.Content.Headers.ContentLength is long length && length > MaxReleaseBytes)
-                throw new InvalidOperationException("The BabyAI release package is unexpectedly large.");
+                throw new InvalidOperationException("The BabyAI installer is unexpectedly large.");
 
             await using var source = await response.Content.ReadAsStreamAsync(timeout.Token);
             await using var target = new FileStream(
@@ -153,21 +154,21 @@ public static class BabyAIUpdateService
                     break;
                 total += read;
                 if (total > MaxReleaseBytes)
-                    throw new InvalidOperationException("The BabyAI release package exceeded the download limit.");
+                    throw new InvalidOperationException("The BabyAI installer exceeded the download limit.");
                 await target.WriteAsync(buffer.AsMemory(0, read), timeout.Token);
             }
 
             await target.FlushAsync(timeout.Token);
-            await using var package = File.OpenRead(partialPath);
-            var actualHashBytes = await SHA256.HashDataAsync(package, timeout.Token);
+            await using var installer = File.OpenRead(partialPath);
+            var actualHashBytes = await SHA256.HashDataAsync(installer, timeout.Token);
             var expectedHashBytes = Convert.FromHexString(expectedHash);
             if (!CryptographicOperations.FixedTimeEquals(actualHashBytes, expectedHashBytes))
-                throw new InvalidOperationException("The downloaded BabyAI package failed SHA-256 verification.");
+                throw new InvalidOperationException("The downloaded BabyAI installer failed SHA-256 verification.");
 
-            File.Move(partialPath, bundlePath, overwrite: true);
+            File.Move(partialPath, installerPath, overwrite: true);
             return new BabyAIDownloadedUpdate(
                 version,
-                bundlePath,
+                installerPath,
                 Convert.ToHexString(actualHashBytes).ToLowerInvariant());
         }
         finally
@@ -175,6 +176,17 @@ public static class BabyAIUpdateService
             if (File.Exists(partialPath))
                 File.Delete(partialPath);
         }
+    }
+
+    public static void LaunchInstaller(BabyAIDownloadedUpdate update)
+    {
+        if (!File.Exists(update.InstallerPath))
+            throw new FileNotFoundException("The verified BabyAI installer is missing.", update.InstallerPath);
+
+        Process.Start(new ProcessStartInfo(update.InstallerPath)
+        {
+            UseShellExecute = true,
+        });
     }
 
     internal static bool TryParseReleaseVersion(string? tag, out Version version)
@@ -245,7 +257,7 @@ public static class BabyAIUpdateService
     private static Uri RequireGitHubHttpsUri(string? value)
     {
         if (!IsGitHubHttpsUrl(value) || !Uri.TryCreate(value, UriKind.Absolute, out var uri))
-            throw new InvalidOperationException("The release package URL is not a trusted GitHub HTTPS URL.");
+            throw new InvalidOperationException("The release installer URL is not a trusted GitHub HTTPS URL.");
         return uri;
     }
 
