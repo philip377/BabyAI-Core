@@ -31,6 +31,9 @@ try {
         "install.ps1",
         "start.ps1",
         "app/BabyAI.Desktop.exe",
+        "app/App.xbf",
+        "app/MainWindow.xbf",
+        "app/BabyAI.Desktop.pri",
         "runtime/cpu/babyai_native.dll",
         "runtime/vulkan/babyai_native.dll"
     )) {
