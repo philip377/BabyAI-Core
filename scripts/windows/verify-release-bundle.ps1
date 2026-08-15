@@ -35,6 +35,8 @@ try {
         "app/MainWindow.xbf",
         "app/BabyAI.Desktop.pri",
         "runtime/cpu/babyai_native.dll",
+        "runtime/cpu-avx/babyai_native.dll",
+        "runtime/cpu-avx2/babyai_native.dll",
         "runtime/vulkan/babyai_native.dll"
     )) {
         if (-not (Test-Path (Join-Path $root $required) -PathType Leaf)) {
@@ -48,6 +50,11 @@ try {
     }
     if ([string]$manifest.model_manifest -ne "model.json") {
         throw "Release manifest does not point to model.json."
+    }
+    foreach ($runtime in @("cpu", "cpu-avx", "cpu-avx2", "vulkan")) {
+        if ($manifest.runtimes -notcontains $runtime) {
+            throw "Release manifest is missing runtime tier $runtime"
+        }
     }
     if ([bool]$manifest.python_included) {
         foreach ($required in @("python/python.exe", "python/babyai-runtime.json")) {
@@ -85,6 +92,17 @@ try {
         throw "Installed launcher is missing."
     }
 
+    foreach ($required in @(
+        "runtime\cpu\babyai_native.dll",
+        "runtime\cpu-avx\babyai_native.dll",
+        "runtime\cpu-avx2\babyai_native.dll",
+        "runtime\vulkan\babyai_native.dll"
+    )) {
+        if (-not (Test-Path (Join-Path $installed $required) -PathType Leaf)) {
+            throw "Installed release is missing $required"
+        }
+    }
+
     $embeddedPython = Join-Path $installed "python\python.exe"
     $venvPython = Join-Path $installed "python\Scripts\python.exe"
     $installedPython = if (Test-Path $embeddedPython -PathType Leaf) { $embeddedPython } else { $venvPython }
@@ -100,6 +118,7 @@ try {
     Write-Host "BabyAI release bundle and installer smoke passed."
     Write-Host "Self-contained Python: $([bool]$manifest.python_included)"
     Write-Host "Production model manifest: $([string]$model.display_name)"
+    Write-Host "CPU runtime tiers verified: portable, AVX, AVX2"
 }
 finally {
     if (Test-Path $workRoot) {
