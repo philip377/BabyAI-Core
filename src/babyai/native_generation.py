@@ -62,7 +62,18 @@ def generate_greedy(
     cancel_check: Callable[[], bool] | None = None,
     stop_sequences: Sequence[str] = (),
 ) -> NativeGenerationResult:
-    """Generate bounded text through the native ABI v6 sample/decode state machine."""
+    """Generate bounded text through the native ABI v6 sample/decode state machine.
+
+    Cancellation is cooperative at token boundaries. Token pieces are accumulated as
+    raw bytes and decoded together so UTF-8 code points may safely span token pieces.
+    If generation stops at a caller-imposed boundary while a final code point is only
+    partially available, that incomplete suffix is omitted rather than replaced.
+
+    Optional stop sequences are matched against the accumulated raw UTF-8 bytes after
+    the sampled token is committed. A matching delimiter is removed from returned text.
+    This lets managed chat policy stop a model before it starts inventing the next turn
+    without extending BabyAI's native ABI.
+    """
 
     if not isinstance(prompt, str):
         raise NativeRuntimeError("Native generation prompt must be a string.")
@@ -131,6 +142,8 @@ def generate_greedy(
                     stop_reason="cancelled",
                 )
 
+            # Sampling a token that cannot be appended would leave no valid path to
+            # refresh logits, so stop before sampling when the context is full.
             if context.token_count >= context.context_size:
                 return NativeGenerationResult(
                     text=_decode_complete_utf8(bytes(output), final=False),
