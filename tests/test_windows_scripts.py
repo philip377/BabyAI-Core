@@ -102,3 +102,25 @@ def test_windows_desktop_bundles_windows_app_sdk_runtime() -> None:
     project = (root / "desktop" / "BabyAI.Desktop" / "BabyAI.Desktop.csproj").read_text(encoding="utf-8")
 
     assert "<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>" in project
+
+
+def test_release_installer_uses_pinned_installer_sfx_module() -> None:
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "windows-release.yml").read_text(
+        encoding="utf-8"
+    )
+    builder = (
+        root / "scripts" / "windows" / "build-single-exe-installer.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert 'SEVEN_ZIP_LZMA_VERSION: "26.02"' in workflow
+    assert 'SEVEN_ZIP_LZMA_SHA256: "2878c85f' in workflow
+    assert '"bin\\7zSD.sfx"' in workflow
+    assert "-SfxModule $env:BABYAI_INSTALLER_SFX" in workflow
+    assert "[string]$SfxModule" in builder
+    assert "[string]$SevenZipExe" in builder
+    assert 'RunProgram="BabyAI-Setup.exe"' in builder
+    assert 'Progress="no"' in builder
+    assert "[System.Text.UTF8Encoding]::new($false)" in builder
+    assert "utf8NoBOM" not in builder
+    assert "7-Zip\\7z.sfx" not in builder
