@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from .llm import LLMError, LLMProvider
 from .native_brain import _NATIVE_STOP_SEQUENCES, _normalise_native_reply, _prepare_native_prompt
 from .native_generation import generate_greedy
 from .native_runtime import NativeModelHandle, NativeRuntimeError, NativeRuntimeLoader, NativeRuntimeSession
+from .runtime_trace import trace
 
 
 @dataclass(slots=True)
@@ -30,8 +32,23 @@ class ResidentNativeBrainProvider(LLMProvider):
 
     def generate(self, prompt: str) -> str:
         native_prompt = _prepare_native_prompt(prompt)
+        started = time.monotonic()
+        trace(
+            "native.generate.start",
+            prompt_chars=len(native_prompt),
+            model_resident=self.model_is_resident,
+            max_tokens=self.max_tokens,
+            n_ctx=self.n_ctx,
+            n_batch=self.n_batch,
+            n_gpu_layers=self.n_gpu_layers,
+        )
         try:
             model = self._ensure_model()
+            trace(
+                "native.generate.model_ready",
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+            )
+            generation_started = time.monotonic()
             result = generate_greedy(
                 model,
                 native_prompt,
@@ -42,7 +59,20 @@ class ResidentNativeBrainProvider(LLMProvider):
                 n_threads=self.n_threads,
                 stop_sequences=_NATIVE_STOP_SEQUENCES,
             )
+            trace(
+                "native.generate.done",
+                elapsed_ms=round((time.monotonic() - generation_started) * 1000),
+                total_elapsed_ms=round((time.monotonic() - started) * 1000),
+                generated_tokens=result.generated_tokens,
+                stop_reason=result.stop_reason,
+                output_bytes=result.output_bytes,
+            )
         except NativeRuntimeError as exc:
+            trace(
+                "native.generate.error",
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+                error=type(exc).__name__,
+            )
             self.close()
             raise LLMError(f"Native brain inference failed: {exc}") from exc
 
@@ -57,12 +87,30 @@ class ResidentNativeBrainProvider(LLMProvider):
     def _ensure_model(self) -> NativeModelHandle:
         if self.model_is_resident:
             assert self._model is not None
+            trace("native.model.reuse")
             return self._model
 
+        runtime_started = time.monotonic()
+        trace("native.runtime.open.start", runtime=self.runtime_path.name)
         runtime = NativeRuntimeLoader(self.runtime_path).open_runtime()
+        trace(
+            "native.runtime.open.done",
+            elapsed_ms=round((time.monotonic() - runtime_started) * 1000),
+        )
         try:
+            model_started = time.monotonic()
+            trace(
+                "native.model.open.start",
+                model=self.model_path.name,
+                n_gpu_layers=self.n_gpu_layers,
+            )
             model = runtime.open_model(self.model_path, n_gpu_layers=self.n_gpu_layers)
+            trace(
+                "native.model.open.done",
+                elapsed_ms=round((time.monotonic() - model_started) * 1000),
+            )
         except Exception:
+            trace("native.model.open.error")
             runtime.close()
             raise
 
