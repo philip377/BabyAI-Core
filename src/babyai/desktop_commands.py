@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import asdict
 
@@ -55,6 +56,7 @@ class DesktopCommands:
                     "provider.native.select.done",
                     mode=getattr(route, "mode", "unknown"),
                     runtime=route.runtime_path.name,
+                    cpu_profile=os.getenv("BABYAI_NATIVE_CPU_PROFILE", "unknown"),
                     n_gpu_layers=route.n_gpu_layers,
                     elapsed_ms=round((time.monotonic() - started) * 1000),
                 )
