@@ -53,7 +53,7 @@ class DesktopCommands:
                 )
                 trace(
                     "provider.native.select.done",
-                    mode=route.mode,
+                    mode=getattr(route, "mode", "unknown"),
                     runtime=route.runtime_path.name,
                     n_gpu_layers=route.n_gpu_layers,
                     elapsed_ms=round((time.monotonic() - started) * 1000),
