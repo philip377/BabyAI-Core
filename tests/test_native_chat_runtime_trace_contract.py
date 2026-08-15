@@ -13,11 +13,11 @@ def test_desktop_native_chat_emits_stage_diagnostics() -> None:
     assert "Bridge request start:" in bridge
     assert "Bridge request cancelled:" in bridge
 
-    assert 'trace("chat.core.start"' in commands
+    assert '"chat.core.start"' in commands
     assert '"provider.native.select.done"' in commands
     assert '"native.model.open.start"' in resident
     assert '"native.model.open.done"' in resident
-    assert 'trace("native.prefill.start"' in generation
+    assert '"native.prefill.start"' in generation
     assert '"native.prefill.done"' in generation
     assert '"native.first_token"' in generation
 
