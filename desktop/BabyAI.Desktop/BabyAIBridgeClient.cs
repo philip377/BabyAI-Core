@@ -67,6 +67,7 @@ public sealed class BabyAIBridgeClient : IDisposable
         CancellationToken cancellationToken = default)
     {
         await _requestGate.WaitAsync(cancellationToken);
+        var requestWatch = Stopwatch.StartNew();
         try
         {
             ThrowIfDisposed();
@@ -74,6 +75,7 @@ public sealed class BabyAIBridgeClient : IDisposable
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
             var worker = EnsureWorker();
             var requestId = Interlocked.Increment(ref _nextRequestId);
+            StartupDiagnostics.Log($"Bridge request start: id={requestId}; command={command}");
 
             using var payloadDocument = JsonDocument.Parse(payload);
             if (payloadDocument.RootElement.ValueKind != JsonValueKind.Object)
@@ -95,13 +97,18 @@ public sealed class BabyAIBridgeClient : IDisposable
             }
             catch (OperationCanceledException) when (linked.IsCancellationRequested)
             {
+                StartupDiagnostics.Log(
+                    $"Bridge request cancelled: id={requestId}; command={command}; elapsed_ms={requestWatch.ElapsedMilliseconds}; timeout={timeout.IsCancellationRequested}");
                 ResetWorker();
                 if (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                    throw new TimeoutException("BabyAI response timed out after 3 minutes.");
+                    throw new TimeoutException("BabyAI response timed out after 3 minutes. See native-runtime.log for the last native stage.");
                 throw;
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
             {
+                StartupDiagnostics.Log(
+                    $"Bridge request transport failed: id={requestId}; command={command}; elapsed_ms={requestWatch.ElapsedMilliseconds}",
+                    ex);
                 ResetWorker();
                 throw new InvalidOperationException("BabyAI desktop worker connection failed.", ex);
             }
@@ -109,6 +116,8 @@ public sealed class BabyAIBridgeClient : IDisposable
             if (response is null)
             {
                 var stderr = ReadWorkerError();
+                StartupDiagnostics.Log(
+                    $"Bridge worker exited: id={requestId}; command={command}; elapsed_ms={requestWatch.ElapsedMilliseconds}");
                 ResetWorker();
                 throw new InvalidOperationException(
                     string.IsNullOrWhiteSpace(stderr)
@@ -134,10 +143,15 @@ public sealed class BabyAIBridgeClient : IDisposable
             }
             catch (JsonException ex)
             {
+                StartupDiagnostics.Log(
+                    $"Bridge invalid response: id={requestId}; command={command}; elapsed_ms={requestWatch.ElapsedMilliseconds}",
+                    ex);
                 ResetWorker();
                 throw new InvalidOperationException("BabyAI desktop worker returned an invalid response.", ex);
             }
 
+            StartupDiagnostics.Log(
+                $"Bridge request done: id={requestId}; command={command}; elapsed_ms={requestWatch.ElapsedMilliseconds}");
             return response;
         }
         finally
@@ -173,10 +187,19 @@ public sealed class BabyAIBridgeClient : IDisposable
             startInfo.ArgumentList.Add("-m");
             startInfo.ArgumentList.Add("babyai.desktop_worker");
 
+            var runtimeLog = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "BabyAI",
+                "logs",
+                "native-runtime.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(runtimeLog)!);
+            startInfo.Environment["BABYAI_RUNTIME_LOG"] = runtimeLog;
+
             try
             {
                 _worker = Process.Start(startInfo)
                     ?? throw new InvalidOperationException("Could not start BabyAI Python bridge.");
+                StartupDiagnostics.Log($"Desktop worker started: pid={_worker.Id}; runtime_log={runtimeLog}");
                 _workerStderr = _worker.StandardError.ReadToEndAsync();
                 return _worker;
             }
@@ -185,7 +208,7 @@ public sealed class BabyAIBridgeClient : IDisposable
                 _worker = null;
                 _workerStderr = null;
                 throw new InvalidOperationException(
-                    $"Could not start BabyAI Python bridge using '{python}'. Run scripts/windows/bootstrap.ps1 first.", ex);
+                    $"Could not start BabyAI Python bridge using '{python}'.", ex);
             }
         }
     }

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import codecs
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 from .native_runtime import MAX_NATIVE_TEXT_BYTES, NativeModelHandle, NativeRuntimeError
+from .runtime_trace import trace
 
 
 MAX_NATIVE_GENERATION_TOKENS = 4096
@@ -99,15 +101,37 @@ def generate_greedy(
         raise NativeRuntimeError("Native generation stop_sequences must be a sequence of strings.")
     encoded_stops = _encode_stop_sequences(stop_sequences)
 
+    tokenize_started = time.monotonic()
+    trace("native.tokenize.start", prompt_chars=len(prompt))
     prompt_tokens = model.tokenize(prompt, add_special=True, parse_special=True)
+    trace(
+        "native.tokenize.done",
+        prompt_tokens=len(prompt_tokens),
+        elapsed_ms=round((time.monotonic() - tokenize_started) * 1000),
+    )
     if not prompt_tokens:
         raise NativeRuntimeError("Native generation prompt tokenized to an empty sequence.")
 
     output = bytearray()
     generated = 0
 
+    context_started = time.monotonic()
+    trace("native.context.open.start", n_ctx=n_ctx, n_batch=n_batch, n_threads=n_threads)
     with model.open_context(n_ctx=n_ctx, n_batch=n_batch, n_threads=n_threads) as context:
+        trace(
+            "native.context.open.done",
+            context_size=context.context_size,
+            elapsed_ms=round((time.monotonic() - context_started) * 1000),
+        )
+        prefill_started = time.monotonic()
+        trace("native.prefill.start", prompt_tokens=len(prompt_tokens))
         context.prefill(prompt_tokens)
+        trace(
+            "native.prefill.done",
+            elapsed_ms=round((time.monotonic() - prefill_started) * 1000),
+            token_count=context.token_count,
+        )
+        generation_started = time.monotonic()
 
         while generated < max_tokens:
             if cancel_check is not None and cancel_check():
@@ -149,6 +173,12 @@ def generate_greedy(
             output.extend(piece)
             context.decode_sampled(sample.token_id)
             generated += 1
+            if generated == 1:
+                trace(
+                    "native.first_token",
+                    elapsed_ms=round((time.monotonic() - generation_started) * 1000),
+                    total_context_tokens=context.token_count,
+                )
 
             for stop in encoded_stops:
                 if output.endswith(stop):

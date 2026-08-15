@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
 
 from .agent import AgentExecutor
@@ -17,6 +18,7 @@ from .permissions import PermissionStore
 from .planner import Planner
 from .primus import Primus
 from .resident_native_brain import ResidentNativeBrainProvider
+from .runtime_trace import trace
 from .working_memory import TaskState, WorkingMemoryStore
 
 
@@ -34,14 +36,27 @@ class DesktopCommands:
 
     def _provider(self) -> LLMProvider:
         if self.persistent and self._provider_instance is not None:
+            trace("provider.reuse", provider=self.config.provider)
             return self._provider_instance
 
+        started = time.monotonic()
         try:
             if self.persistent and self.config.provider == "native":
+                trace(
+                    "provider.native.select.start",
+                    acceleration=self.config.native_acceleration,
+                )
                 route = select_native_runtime(
                     self.config.native_acceleration,
                     self.config.native_runtime_file,
                     self.config.native_vulkan_runtime_file,
+                )
+                trace(
+                    "provider.native.select.done",
+                    mode=getattr(route, "mode", "unknown"),
+                    runtime=route.runtime_path.name,
+                    n_gpu_layers=route.n_gpu_layers,
+                    elapsed_ms=round((time.monotonic() - started) * 1000),
                 )
                 provider: LLMProvider = ResidentNativeBrainProvider(
                     model_path=self.config.native_model_file,
@@ -57,6 +72,11 @@ class DesktopCommands:
 
         if self.persistent:
             self._provider_instance = provider
+        trace(
+            "provider.ready",
+            provider=self.config.provider,
+            elapsed_ms=round((time.monotonic() - started) * 1000),
+        )
         return provider
 
     def _core(self) -> Primus:
@@ -98,10 +118,26 @@ class DesktopCommands:
             message = str(payload.get("message", "")).strip()
             if not message:
                 raise DesktopCommandError("chat.message is required")
+            started = time.monotonic()
+            trace(
+                "chat.core.start",
+                provider=self.config.provider,
+                message_chars=len(message),
+            )
             try:
                 reply = self._core().think(message)
             except LLMError as exc:
+                trace(
+                    "chat.core.error",
+                    elapsed_ms=round((time.monotonic() - started) * 1000),
+                    error=type(exc).__name__,
+                )
                 raise DesktopCommandError(f"Local brain unavailable: {exc}") from exc
+            trace(
+                "chat.core.done",
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+                reply_chars=len(reply),
+            )
             return {"ok": True, "command": command, "reply": reply}
 
         if command == "task.set":

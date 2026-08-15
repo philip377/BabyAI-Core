@@ -60,19 +60,30 @@ public static class FriendlyDesktopTextBehavior
         }
     }
 
-    private static string Translate(string value) => value.Trim() switch
+    private static string Translate(string value)
     {
-        "No active task" => "Нет активной задачи",
-        "Thinking…" => "Думаю…",
-        "Response complete." => "Ответ готов.",
-        "Generation stopped." => "Генерация остановлена.",
-        "Stopping generation…" => "Останавливаю…",
-        "Checking BabyAI Core…" => "Проверяю BabyAI…",
-        "Core connection restored." => "Связь восстановлена.",
-        "Lesson approved and saved to MEMORIA." => "Сохранено в памяти.",
-        "Lesson rejected." => "Изменение отклонено.",
-        _ => value,
-    };
+        var trimmed = value.Trim();
+        var provider = Environment.GetEnvironmentVariable("BABYAI_PROVIDER")?.Trim();
+        if (string.Equals(provider, "native", StringComparison.OrdinalIgnoreCase)
+            && trimmed == "Ответ BabyAI занял слишком много времени. Проверь Ollama/модель и попробуй снова.")
+        {
+            return "Локальный Brain не успел ответить. Диагностика сохранена в native-runtime.log.";
+        }
+
+        return trimmed switch
+        {
+            "No active task" => "Нет активной задачи",
+            "Thinking…" => "Думаю…",
+            "Response complete." => "Ответ готов.",
+            "Generation stopped." => "Генерация остановлена.",
+            "Stopping generation…" => "Останавливаю…",
+            "Checking BabyAI Core…" => "Проверяю BabyAI…",
+            "Core connection restored." => "Связь восстановлена.",
+            "Lesson approved and saved to MEMORIA." => "Сохранено в памяти.",
+            "Lesson rejected." => "Изменение отклонено.",
+            _ => value,
+        };
+    }
 
     private sealed class Subscription
     {
