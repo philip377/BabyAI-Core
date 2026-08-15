@@ -104,15 +104,35 @@ jobs:
             throw "BabyAI.Desktop.exe was not produced."
           }
 
-      - name: Configure CPU native runtime
+      - name: Configure portable CPU native runtime
         shell: pwsh
         run: |
           $llama = Join-Path $env:GITHUB_WORKSPACE "external\llama.cpp"
-          cmake -S native/BabyAI.NativeBridge -B native/build-release-cpu -A x64 "-DBABYAI_LLAMA_CPP_DIR=$llama" -DBABYAI_NATIVE_BACKEND=cpu
+          cmake -S native/BabyAI.NativeBridge -B native/build-release-cpu -A x64 "-DBABYAI_LLAMA_CPP_DIR=$llama" -DBABYAI_NATIVE_BACKEND=cpu -DBABYAI_NATIVE_CPU_PROFILE=portable
 
-      - name: Build CPU native runtime
+      - name: Build portable CPU native runtime
         shell: pwsh
         run: cmake --build native/build-release-cpu --config Release --target babyai_native --parallel 2
+
+      - name: Configure AVX CPU native runtime
+        shell: pwsh
+        run: |
+          $llama = Join-Path $env:GITHUB_WORKSPACE "external\llama.cpp"
+          cmake -S native/BabyAI.NativeBridge -B native/build-release-cpu-avx -A x64 "-DBABYAI_LLAMA_CPP_DIR=$llama" -DBABYAI_NATIVE_BACKEND=cpu -DBABYAI_NATIVE_CPU_PROFILE=avx
+
+      - name: Build AVX CPU native runtime
+        shell: pwsh
+        run: cmake --build native/build-release-cpu-avx --config Release --target babyai_native --parallel 2
+
+      - name: Configure AVX2 CPU native runtime
+        shell: pwsh
+        run: |
+          $llama = Join-Path $env:GITHUB_WORKSPACE "external\llama.cpp"
+          cmake -S native/BabyAI.NativeBridge -B native/build-release-cpu-avx2 -A x64 "-DBABYAI_LLAMA_CPP_DIR=$llama" -DBABYAI_NATIVE_BACKEND=cpu -DBABYAI_NATIVE_CPU_PROFILE=avx2
+
+      - name: Build AVX2 CPU native runtime
+        shell: pwsh
+        run: cmake --build native/build-release-cpu-avx2 --config Release --target babyai_native --parallel 2
 
       - name: Install pinned Vulkan SDK
         shell: pwsh
@@ -133,7 +153,7 @@ jobs:
         shell: pwsh
         run: |
           $llama = Join-Path $env:GITHUB_WORKSPACE "external\llama.cpp"
-          cmake -S native/BabyAI.NativeBridge -B native/build-release-vulkan -A x64 "-DBABYAI_LLAMA_CPP_DIR=$llama" -DBABYAI_NATIVE_BACKEND=vulkan
+          cmake -S native/BabyAI.NativeBridge -B native/build-release-vulkan -A x64 "-DBABYAI_LLAMA_CPP_DIR=$llama" -DBABYAI_NATIVE_BACKEND=vulkan -DBABYAI_NATIVE_CPU_PROFILE=portable
 
       - name: Build Vulkan native runtime
         shell: pwsh
@@ -147,6 +167,8 @@ jobs:
             -DesktopDir release-desktop `
             -WheelsDir release-wheels `
             -CpuRuntime native/build-release-cpu/Release/babyai_native.dll `
+            -AvxRuntime native/build-release-cpu-avx/Release/babyai_native.dll `
+            -Avx2Runtime native/build-release-cpu-avx2/Release/babyai_native.dll `
             -VulkanRuntime native/build-release-vulkan/Release/babyai_native.dll `
             -PythonRuntimeDir release-python `
             -OutputDir dist-release
