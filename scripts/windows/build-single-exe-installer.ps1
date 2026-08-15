@@ -1,7 +1,9 @@
 param(
     [Parameter(Mandatory = $true)][string]$SetupExe,
     [Parameter(Mandatory = $true)][string]$BundleDir,
-    [Parameter(Mandatory = $true)][string]$OutputExe
+    [Parameter(Mandatory = $true)][string]$SfxModule,
+    [Parameter(Mandatory = $true)][string]$OutputExe,
+    [string]$SevenZipExe = (Join-Path $env:ProgramFiles '7-Zip\7z.exe')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,10 +11,10 @@ $ErrorActionPreference = 'Stop'
 $setup = (Resolve-Path $SetupExe).Path
 $bundle = (Resolve-Path $BundleDir).Path
 $output = [System.IO.Path]::GetFullPath($OutputExe)
-$sevenZip = Join-Path $env:ProgramFiles '7-Zip\7z.exe'
-$sfx = Join-Path $env:ProgramFiles '7-Zip\7z.sfx'
-if (-not (Test-Path $sevenZip -PathType Leaf)) { throw "7z.exe was not found at $sevenZip" }
-if (-not (Test-Path $sfx -PathType Leaf)) { throw "7z.sfx was not found at $sfx" }
+if (-not (Test-Path $SevenZipExe -PathType Leaf)) { throw "7z.exe was not found at $SevenZipExe" }
+if (-not (Test-Path $SfxModule -PathType Leaf)) { throw "Installer SFX module was not found at $SfxModule" }
+$sevenZip = (Resolve-Path $SevenZipExe).Path
+$sfx = (Resolve-Path $SfxModule).Path
 
 $work = Join-Path $env:RUNNER_TEMP ("babyai-sfx-" + [guid]::NewGuid().ToString('N'))
 $payload = Join-Path $work 'payload'
@@ -31,13 +33,14 @@ try {
 }
 
 $config = Join-Path $work 'config.txt'
-@'
+$configText = @'
 ;!@Install@!UTF-8!
 Title="BabyAI Setup"
 RunProgram="BabyAI-Setup.exe"
-GUIMode="2"
+Progress="no"
 ;!@InstallEnd@!
-'@ | Set-Content -Path $config -Encoding utf8NoBOM
+'@
+[System.IO.File]::WriteAllText($config, $configText, [System.Text.UTF8Encoding]::new($false))
 
 $parent = Split-Path $output -Parent
 if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }

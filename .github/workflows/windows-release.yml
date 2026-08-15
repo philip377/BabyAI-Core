@@ -37,6 +37,8 @@ jobs:
     env:
       VULKAN_SDK_VERSION: "1.4.350.0"
       VULKAN_SDK_SHA256: "855b27ba05d2d8119c5114c5d4ff870ca38f2c632b11e1bb9923b9b7e6ecfe7b"
+      SEVEN_ZIP_LZMA_VERSION: "26.02"
+      SEVEN_ZIP_LZMA_SHA256: "2878c85f5f43a4a4e0952b1fd4e5fe097c1c143997a8047c7e1e788892aa9357"
 
     steps:
       - name: Checkout BabyAI
@@ -167,6 +169,22 @@ jobs:
             throw "BabyAI-Setup.exe was not produced."
           }
 
+      - name: Prepare pinned 7-Zip installer SFX module
+        shell: pwsh
+        run: |
+          $compactVersion = $env:SEVEN_ZIP_LZMA_VERSION.Replace('.', '')
+          $archive = Join-Path $env:RUNNER_TEMP "lzma$compactVersion.7z"
+          $sdkRoot = Join-Path $env:RUNNER_TEMP "lzma-sdk-$compactVersion"
+          $url = "https://github.com/ip7z/7zip/releases/download/$env:SEVEN_ZIP_LZMA_VERSION/lzma$compactVersion.7z"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $env:SEVEN_ZIP_LZMA_SHA256) { throw "LZMA SDK SHA256 mismatch." }
+          & "$env:ProgramFiles\7-Zip\7z.exe" x -y $archive "-o$sdkRoot"
+          if ($LASTEXITCODE -ne 0) { throw "7-Zip exited with code $LASTEXITCODE" }
+          $sfx = Join-Path $sdkRoot "bin\7zSD.sfx"
+          if (-not (Test-Path $sfx -PathType Leaf)) { throw "7zSD.sfx was not found." }
+          "BABYAI_INSTALLER_SFX=$sfx" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build single EXE installer
         shell: pwsh
         run: |
@@ -175,6 +193,7 @@ jobs:
           .\scripts\windows\build-single-exe-installer.ps1 `
             -SetupExe installer-publish/BabyAI-Setup.exe `
             -BundleDir $bundle `
+            -SfxModule $env:BABYAI_INSTALLER_SFX `
             -OutputExe $output
           if (-not (Test-Path $output -PathType Leaf)) { throw "Single EXE installer was not produced." }
           $hash = (Get-FileHash $output -Algorithm SHA256).Hash.ToLowerInvariant()
