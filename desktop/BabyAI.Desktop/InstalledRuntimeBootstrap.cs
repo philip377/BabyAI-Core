@@ -1,3 +1,4 @@
+using System.Runtime.Intrinsics.X86;
 using System.Text.Json;
 
 namespace BabyAI.Desktop;
@@ -5,6 +6,7 @@ namespace BabyAI.Desktop;
 internal static class InstalledRuntimeBootstrap
 {
     private sealed record LaunchSettings(string Provider, string Acceleration, string Model);
+    private sealed record CpuRuntimeSelection(string Path, string Profile);
 
     public static void ApplyToCurrentProcess()
     {
@@ -12,22 +14,46 @@ internal static class InstalledRuntimeBootstrap
             return;
 
         var python = Path.Combine(versionRoot, "python", "python.exe");
-        var cpuRuntime = Path.Combine(versionRoot, "runtime", "cpu", "babyai_native.dll");
+        var portableCpuRuntime = Path.Combine(versionRoot, "runtime", "cpu", "babyai_native.dll");
+        var avxCpuRuntime = Path.Combine(versionRoot, "runtime", "cpu-avx", "babyai_native.dll");
+        var avx2CpuRuntime = Path.Combine(versionRoot, "runtime", "cpu-avx2", "babyai_native.dll");
         var vulkanRuntime = Path.Combine(versionRoot, "runtime", "vulkan", "babyai_native.dll");
-        if (!File.Exists(python) || !File.Exists(cpuRuntime))
+        if (!File.Exists(python) || !File.Exists(portableCpuRuntime))
             return;
 
+        var cpu = SelectCpuRuntime(portableCpuRuntime, avxCpuRuntime, avx2CpuRuntime);
         var launch = ReadLaunchSettings(Path.Combine(installRoot, "launch.json"));
         Environment.SetEnvironmentVariable("BABYAI_PYTHON", python);
         Environment.SetEnvironmentVariable("BABYAI_PROVIDER", launch.Provider);
         Environment.SetEnvironmentVariable("BABYAI_NATIVE_ACCELERATION", launch.Acceleration);
-        Environment.SetEnvironmentVariable("BABYAI_NATIVE_RUNTIME", cpuRuntime);
+        Environment.SetEnvironmentVariable("BABYAI_NATIVE_RUNTIME", cpu.Path);
+        Environment.SetEnvironmentVariable("BABYAI_NATIVE_CPU_PROFILE", cpu.Profile);
         Environment.SetEnvironmentVariable(
             "BABYAI_NATIVE_VULKAN_RUNTIME",
             File.Exists(vulkanRuntime) ? vulkanRuntime : null);
         Environment.SetEnvironmentVariable(
             "BABYAI_NATIVE_MODEL",
             !string.IsNullOrWhiteSpace(launch.Model) && File.Exists(launch.Model) ? launch.Model : null);
+    }
+
+    private static CpuRuntimeSelection SelectCpuRuntime(
+        string portableRuntime,
+        string avxRuntime,
+        string avx2Runtime)
+    {
+        if (File.Exists(avx2Runtime)
+            && Sse42.IsSupported
+            && Avx.IsSupported
+            && Avx2.IsSupported
+            && Bmi2.IsSupported)
+        {
+            return new CpuRuntimeSelection(avx2Runtime, "avx2");
+        }
+
+        if (File.Exists(avxRuntime) && Sse42.IsSupported && Avx.IsSupported)
+            return new CpuRuntimeSelection(avxRuntime, "avx");
+
+        return new CpuRuntimeSelection(portableRuntime, "portable");
     }
 
     private static bool TryResolveInstalledLayout(out string installRoot, out string versionRoot)

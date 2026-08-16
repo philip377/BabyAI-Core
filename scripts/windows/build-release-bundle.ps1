@@ -11,6 +11,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$CpuRuntime,
 
+    [Parameter(Mandatory = $false)]
+    [string]$AvxRuntime = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$Avx2Runtime = "",
+
     [Parameter(Mandatory = $true)]
     [string]$VulkanRuntime,
 
@@ -26,6 +32,12 @@ $ErrorActionPreference = "Stop"
 $DesktopDir = (Resolve-Path $DesktopDir).Path
 $WheelsDir = (Resolve-Path $WheelsDir).Path
 $CpuRuntime = (Resolve-Path $CpuRuntime).Path
+if (-not [string]::IsNullOrWhiteSpace($AvxRuntime)) {
+    $AvxRuntime = (Resolve-Path $AvxRuntime).Path
+}
+if (-not [string]::IsNullOrWhiteSpace($Avx2Runtime)) {
+    $Avx2Runtime = (Resolve-Path $Avx2Runtime).Path
+}
 $VulkanRuntime = (Resolve-Path $VulkanRuntime).Path
 if (-not [string]::IsNullOrWhiteSpace($PythonRuntimeDir)) {
     $PythonRuntimeDir = (Resolve-Path $PythonRuntimeDir).Path
@@ -41,11 +53,23 @@ if (Test-Path $stageRoot) { Remove-Item $stageRoot -Recurse -Force }
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 New-Item -ItemType Directory -Force $stageRoot | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $stageRoot "runtime\cpu") | Out-Null
+if (-not [string]::IsNullOrWhiteSpace($AvxRuntime)) {
+    New-Item -ItemType Directory -Force (Join-Path $stageRoot "runtime\cpu-avx") | Out-Null
+}
+if (-not [string]::IsNullOrWhiteSpace($Avx2Runtime)) {
+    New-Item -ItemType Directory -Force (Join-Path $stageRoot "runtime\cpu-avx2") | Out-Null
+}
 New-Item -ItemType Directory -Force (Join-Path $stageRoot "runtime\vulkan") | Out-Null
 
 Copy-Item $DesktopDir (Join-Path $stageRoot "app") -Recurse
 Copy-Item $WheelsDir (Join-Path $stageRoot "wheels") -Recurse
 Copy-Item $CpuRuntime (Join-Path $stageRoot "runtime\cpu\babyai_native.dll")
+if (-not [string]::IsNullOrWhiteSpace($AvxRuntime)) {
+    Copy-Item $AvxRuntime (Join-Path $stageRoot "runtime\cpu-avx\babyai_native.dll")
+}
+if (-not [string]::IsNullOrWhiteSpace($Avx2Runtime)) {
+    Copy-Item $Avx2Runtime (Join-Path $stageRoot "runtime\cpu-avx2\babyai_native.dll")
+}
 Copy-Item $VulkanRuntime (Join-Path $stageRoot "runtime\vulkan\babyai_native.dll")
 Copy-Item "scripts\windows\install-release.ps1" (Join-Path $stageRoot "install.ps1")
 Copy-Item "scripts\windows\start-release.ps1" (Join-Path $stageRoot "start.ps1")
@@ -66,6 +90,14 @@ if (-not [string]::IsNullOrWhiteSpace($PythonRuntimeDir)) {
     $pythonIncluded = $true
 }
 
+$runtimes = @("cpu", "vulkan")
+if (-not [string]::IsNullOrWhiteSpace($AvxRuntime)) {
+    $runtimes += "cpu-avx"
+}
+if (-not [string]::IsNullOrWhiteSpace($Avx2Runtime)) {
+    $runtimes += "cpu-avx2"
+}
+
 $manifest = [ordered]@{
     schema = 1
     product = "BabyAI"
@@ -76,7 +108,7 @@ $manifest = [ordered]@{
     python_included = $pythonIncluded
     python_layout = if ($pythonIncluded) { "embedded" } else { "external-bootstrap" }
     python_versions = @("3.11", "3.12", "3.13")
-    runtimes = @("cpu", "vulkan")
+    runtimes = $runtimes
 } | ConvertTo-Json -Depth 4
 Set-Content (Join-Path $stageRoot "release.json") $manifest -Encoding UTF8
 
@@ -97,3 +129,4 @@ Write-Host "Release bundle: $zipPath"
 Write-Host "SHA256: $archiveHash"
 Write-Host "Self-contained Python included: $pythonIncluded"
 Write-Host "Production model manifest included: model.json"
+Write-Host "CPU runtime tiers: $($runtimes -join ', ')"

@@ -15,8 +15,8 @@ set(BABYAI_NATIVE_BACKEND "cpu" CACHE STRING "BabyAI native backend: cpu or vulk
 set_property(CACHE BABYAI_NATIVE_BACKEND PROPERTY STRINGS cpu vulkan)
 string(TOLOWER "${BABYAI_NATIVE_BACKEND}" BABYAI_NATIVE_BACKEND_NORMALIZED)
 
-set(BABYAI_NATIVE_CPU_PROFILE "portable" CACHE STRING "BabyAI x64 CPU profile: portable or avx2")
-set_property(CACHE BABYAI_NATIVE_CPU_PROFILE PROPERTY STRINGS portable avx2)
+set(BABYAI_NATIVE_CPU_PROFILE "portable" CACHE STRING "BabyAI x64 CPU profile: portable, avx, or avx2")
+set_property(CACHE BABYAI_NATIVE_CPU_PROFILE PROPERTY STRINGS portable avx avx2)
 string(TOLOWER "${BABYAI_NATIVE_CPU_PROFILE}" BABYAI_NATIVE_CPU_PROFILE_NORMALIZED)
 
 if (BABYAI_NATIVE_BACKEND_NORMALIZED STREQUAL "vulkan")
@@ -33,14 +33,17 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(GGML_STATIC ON CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 
-# llama.cpp enables AVX2/BMI2 by default on a normal non-native x86 build. That
-# makes an apparently generic Windows artifact execute AVX2 instructions and can
-# terminate with STATUS_ILLEGAL_INSTRUCTION (0xc000001d) on machines where those
-# instructions are not available to the process. BabyAI's default runtime must
-# be a portable fallback, including the CPU side of the Vulkan build.
+# The portable runtime is the safety floor and must run without AVX/AVX2/BMI2.
+# Faster CPU builds are shipped beside it and selected only after managed runtime
+# feature checks, so an older CPU never executes unsupported instructions.
 if (BABYAI_NATIVE_CPU_PROFILE_NORMALIZED STREQUAL "portable")
     set(GGML_SSE42 OFF CACHE BOOL "" FORCE)
     set(GGML_AVX OFF CACHE BOOL "" FORCE)
+    set(GGML_AVX2 OFF CACHE BOOL "" FORCE)
+    set(GGML_BMI2 OFF CACHE BOOL "" FORCE)
+elseif (BABYAI_NATIVE_CPU_PROFILE_NORMALIZED STREQUAL "avx")
+    set(GGML_SSE42 ON CACHE BOOL "" FORCE)
+    set(GGML_AVX ON CACHE BOOL "" FORCE)
     set(GGML_AVX2 OFF CACHE BOOL "" FORCE)
     set(GGML_BMI2 OFF CACHE BOOL "" FORCE)
 elseif (BABYAI_NATIVE_CPU_PROFILE_NORMALIZED STREQUAL "avx2")
@@ -49,7 +52,7 @@ elseif (BABYAI_NATIVE_CPU_PROFILE_NORMALIZED STREQUAL "avx2")
     set(GGML_AVX2 ON CACHE BOOL "" FORCE)
     set(GGML_BMI2 ON CACHE BOOL "" FORCE)
 else()
-    message(FATAL_ERROR "BABYAI_NATIVE_CPU_PROFILE must be either portable or avx2")
+    message(FATAL_ERROR "BABYAI_NATIVE_CPU_PROFILE must be portable, avx, or avx2")
 endif()
 message(STATUS "BabyAI native CPU profile: ${BABYAI_NATIVE_CPU_PROFILE_NORMALIZED}")
 
