@@ -33,6 +33,32 @@ def test_tool_call_can_be_extracted_after_model_prose(tmp_path) -> None:
     assert call.arguments == {"path": "~/Desktop"}
 
 
+def test_malformed_tool_discussion_gets_one_structured_repair(tmp_path) -> None:
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    approvals = PendingToolApprovalStore(tmp_path / "pending_tool_approval.json")
+    provider = ScriptedProvider([
+        "I need to use filesystem.list to inspect their desktop, but I should ask for permission first.",
+        '{"tool":"filesystem.list","arguments":{"path":"~/Desktop"}}',
+    ])
+    primus = Primus(
+        llm=provider,
+        memory=SQLiteMemoryStore(tmp_path / "memory.sqlite3"),
+        identity=Identity(),
+        agent=AgentExecutor(permissions),
+        tool_approvals=approvals,
+    )
+
+    reply = primus.think("Назови любой файл на моём рабочем столе")
+
+    assert "разреш" in reply.lower()
+    pending = approvals.load()
+    assert pending is not None
+    assert pending.tool == "filesystem.list"
+    assert pending.arguments == {"path": "~/Desktop"}
+    assert len(provider.prompts) == 2
+    assert "Return exactly one JSON object now" in provider.prompts[-1]
+
+
 def test_tool_permission_pauses_then_executes_once(tmp_path) -> None:
     folder = tmp_path / "Desktop"
     folder.mkdir()
