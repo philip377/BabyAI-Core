@@ -99,6 +99,7 @@ class DesktopCommands:
             planner=planner,
             working_memory=WorkingMemoryStore(self.config.working_memory_file),
             tool_approvals=PendingToolApprovalStore(self.config.pending_tool_approval_file),
+            repair_tool_calls=self.config.provider == "native",
         )
 
     def close(self) -> None:
