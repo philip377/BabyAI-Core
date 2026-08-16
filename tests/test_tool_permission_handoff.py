@@ -9,6 +9,7 @@ from babyai.memory import SQLiteMemoryStore
 from babyai.permissions import Capability, PermissionStore
 from babyai.primus import Primus
 from babyai.tool_approval import PendingToolApprovalStore
+from babyai.tools import Toolset
 
 
 class ScriptedProvider(LLMProvider):
@@ -117,6 +118,21 @@ def test_reject_pending_tool_does_not_execute_or_grant(tmp_path) -> None:
     assert approvals.load() is None
     assert not permissions.is_granted(Capability.FILESYSTEM_LIST)
     assert len(provider.prompts) == 1
+
+
+def test_windows_desktop_alias_uses_known_folder(monkeypatch, tmp_path) -> None:
+    desktop = tmp_path / "OneDrive" / "Desktop"
+    desktop.mkdir(parents=True)
+    (desktop / "real-desktop-file.txt").write_text("hello", encoding="utf-8")
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    permissions.grant(Capability.FILESYSTEM_LIST)
+
+    monkeypatch.setattr("babyai.tools._is_windows", lambda: True)
+    monkeypatch.setattr("babyai.tools._windows_desktop_directory", lambda: desktop)
+
+    result = Toolset(permissions).list_directory("~/Desktop")
+
+    assert result == ["real-desktop-file.txt"]
 
 
 def test_desktop_contract_surfaces_tool_approval_controls() -> None:
