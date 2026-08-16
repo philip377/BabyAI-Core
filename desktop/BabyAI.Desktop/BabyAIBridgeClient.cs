@@ -25,8 +25,11 @@ public sealed class BabyAIBridgeClient : IDisposable
         var task = snapshot.TryGetProperty("task", out var taskElement) && taskElement.ValueKind != JsonValueKind.Null
             ? taskElement.GetProperty("goal").GetString()
             : null;
-        var requiresApproval = learning.TryGetProperty("lesson", out var lesson)
+        var hasLessonApproval = learning.TryGetProperty("lesson", out var lesson)
             && lesson.ValueKind != JsonValueKind.Null;
+        var hasToolApproval = learning.TryGetProperty("tool_approval", out var toolApproval)
+            && toolApproval.ValueKind != JsonValueKind.Null;
+        var requiresApproval = hasLessonApproval || hasToolApproval;
 
         return new DesktopStatus(
             identity.GetProperty("name").GetString() ?? "BabyAI",
@@ -60,6 +63,19 @@ public sealed class BabyAIBridgeClient : IDisposable
     public Task ApproveLessonAsync() => ExecuteAsync("lesson.approve", "{}");
 
     public Task RejectLessonAsync() => ExecuteAsync("lesson.reject", "{}");
+
+    public Task<string> ApproveToolAsync() => ExecuteReplyCommandAsync("approval.approve");
+
+    public Task<string> RejectToolAsync() => ExecuteReplyCommandAsync("approval.reject");
+
+    private async Task<string> ExecuteReplyCommandAsync(string command)
+    {
+        var json = await ExecuteAsync(command, "{}");
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.TryGetProperty("reply", out var reply)
+            ? reply.GetString() ?? string.Empty
+            : string.Empty;
+    }
 
     private async Task<string> ExecuteAsync(
         string command,

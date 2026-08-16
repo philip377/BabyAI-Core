@@ -4,7 +4,7 @@ import os
 import time
 from dataclasses import asdict
 
-from .agent import AgentExecutor
+from .agent import AgentExecutor, ToolProtocolError
 from .autodidact import LessonCandidateStore
 from .brain import BrainProviderError, build_brain_provider
 from .config import BabyAIConfig
@@ -20,6 +20,7 @@ from .planner import Planner
 from .primus import Primus
 from .resident_native_brain import ResidentNativeBrainProvider
 from .runtime_trace import trace
+from .tool_approval import PendingToolApprovalStore
 from .working_memory import TaskState, WorkingMemoryStore
 
 
@@ -97,6 +98,8 @@ class DesktopCommands:
             agent=AgentExecutor(permissions),
             planner=planner,
             working_memory=WorkingMemoryStore(self.config.working_memory_file),
+            tool_approvals=PendingToolApprovalStore(self.config.pending_tool_approval_file),
+            repair_tool_calls=self.config.provider == "native",
         )
 
     def close(self) -> None:
@@ -140,6 +143,20 @@ class DesktopCommands:
                 elapsed_ms=round((time.monotonic() - started) * 1000),
                 reply_chars=len(reply),
             )
+            return {"ok": True, "command": command, "reply": reply}
+
+        if command == "approval.approve":
+            try:
+                reply = self._core().approve_pending_tool()
+            except (ToolProtocolError, LLMError) as exc:
+                raise DesktopCommandError(str(exc)) from exc
+            return {"ok": True, "command": command, "reply": reply}
+
+        if command == "approval.reject":
+            try:
+                reply = self._core().reject_pending_tool()
+            except ToolProtocolError as exc:
+                raise DesktopCommandError(str(exc)) from exc
             return {"ok": True, "command": command, "reply": reply}
 
         if command == "task.set":
