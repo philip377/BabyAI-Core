@@ -12,6 +12,7 @@ from .hypothesis import HypothesisStore
 from .identity import Identity
 from .learning_loop import LearningLoop
 from .permissions import Capability, PermissionStore
+from .tool_approval import PendingToolApprovalStore
 from .working_memory import WorkingMemoryStore
 
 
@@ -50,6 +51,7 @@ def build_desktop_snapshot(config: BabyAIConfig | None = None) -> DesktopSnapsho
     evidence = EvidenceStore(config.evidence_file).load()
     curiosity = CuriosityStore(config.curiosity_file).load()
     lesson = LessonCandidateStore(config.lesson_candidate_file).load()
+    tool_approval = PendingToolApprovalStore(config.pending_tool_approval_file).load()
     loop = LearningLoop.evaluate(task, hypothesis, evidence, curiosity, lesson)
 
     permissions_store = PermissionStore(config.permissions_file)
@@ -69,6 +71,11 @@ def build_desktop_snapshot(config: BabyAIConfig | None = None) -> DesktopSnapsho
         "evidence_verdict": None if evidence.assessment is None else evidence.assessment.verdict.value,
         "curiosity": None if curiosity is None else asdict(curiosity),
         "lesson": None if lesson is None else asdict(lesson),
+        "tool_approval": None if tool_approval is None else {
+            "tool": tool_approval.tool,
+            "arguments": tool_approval.arguments,
+            "capability": tool_approval.capability,
+        },
         "next_step": loop.next_step,
     }
 
