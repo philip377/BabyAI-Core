@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <Grid x:Name="Root" Loaded="Root_Loaded" Background="Transparent" Padding="10">
+    <Grid x:Name="Root" Loaded="Root_Loaded_WithToolApproval" Background="Transparent" Padding="10">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition x:Name="PanelColumn" Width="0" />
