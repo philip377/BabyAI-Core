@@ -29,6 +29,10 @@ class AgentExecutor:
         self.toolset = Toolset(self.permissions)
         self.observer = Observer(self.permissions)
 
+    @staticmethod
+    def tool_names() -> tuple[str, ...]:
+        return ("system.info", "filesystem.list", "filesystem.read", "process.list")
+
     def catalog(self) -> str:
         return (
             "Available tools:\n"
@@ -40,7 +44,7 @@ class AgentExecutor:
             "call the tool immediately. Do not discuss which tools exist, do not explain permission mechanics, "
             "and do not ask the user to grant permission yourself; the BabyAI host handles permission prompts. "
             "For the Windows desktop, use ~/Desktop when the user says 'desktop' or 'рабочий стол'. "
-            "To call a tool, output exactly one JSON object: "
+            "To call a tool, output exactly one JSON object as the entire response and put nothing before it: "
             '{"tool":"tool.name","arguments":{...}}. '
             "A fenced ```json block containing only that object is also accepted. "
             "If no tool is needed, answer normally."
@@ -62,6 +66,13 @@ class AgentExecutor:
             if not isinstance(arguments, dict):
                 raise ToolProtocolError("Tool arguments must be a JSON object")
             return ToolCall(name=name.strip(), arguments=arguments)
+        return None
+
+    def mentioned_tool(self, text: str) -> str | None:
+        lower = text.lower()
+        for name in self.tool_names():
+            if name.lower() in lower:
+                return name
         return None
 
     def required_capability(self, call: ToolCall) -> Capability:
