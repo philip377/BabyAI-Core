@@ -18,6 +18,7 @@ class Primus:
     planner: Planner | None = None
     working_memory: WorkingMemoryStore | None = None
     tool_approvals: PendingToolApprovalStore | None = None
+    repair_tool_calls: bool = False
     max_context_chars: int = 12_000
 
     def _base_prompt(self, user_input: str) -> str:
@@ -115,7 +116,7 @@ class Primus:
         return "Мне нужно ваше разрешение, чтобы выполнить это действие один раз."
 
     def _repair_tool_call(self, base: str, first: str) -> ToolCall | None:
-        if self.agent is None:
+        if not self.repair_tool_calls or self.agent is None:
             return None
         mentioned = self.agent.mentioned_tool(first)
         if mentioned is None:
@@ -138,7 +139,7 @@ class Primus:
         capability = self.agent.required_capability(call)
         if not self.agent.is_allowed(call):
             if self.tool_approvals is None:
-                return self._permission_prompt(call)
+                return self.agent.execute(call)
             self.tool_approvals.save(
                 PendingToolApproval(
                     user_input=user_input,
@@ -203,11 +204,11 @@ class Primus:
         if self.agent is not None and (plan is None or plan.action is PlanAction.TOOL):
             try:
                 call = self.agent.parse_tool_call(first)
-                if call is None:
+                if call is None and self.repair_tool_calls:
                     call = self._repair_tool_call(base, first)
                 if call is not None:
                     response = self._execute_or_request_approval(base, user_input, call)
-                elif self.agent.mentioned_tool(first) is not None:
+                elif self.repair_tool_calls and self.agent.mentioned_tool(first) is not None:
                     response = "Я понял, что для этого нужно локальное действие, но не смог безопасно подготовить его параметры."
             except (PermissionError, ToolProtocolError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
                 response = f"I could not use the requested tool: {exc}"
