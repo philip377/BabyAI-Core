@@ -1,10 +1,11 @@
 from dataclasses import dataclass
 
-from .agent import AgentExecutor, ToolProtocolError
+from .agent import AgentExecutor, ToolCall, ToolProtocolError
 from .identity import Identity
 from .llm import LLMProvider
 from .memory import MemoryKind, MemoryStore
 from .planner import PlanAction, Planner, PlannerProtocolError
+from .tool_approval import PendingToolApproval, PendingToolApprovalStore
 from .working_memory import WorkingMemoryStore
 
 
@@ -16,6 +17,7 @@ class Primus:
     agent: AgentExecutor | None = None
     planner: Planner | None = None
     working_memory: WorkingMemoryStore | None = None
+    tool_approvals: PendingToolApprovalStore | None = None
     max_context_chars: int = 12_000
 
     def _base_prompt(self, user_input: str) -> str:
@@ -90,6 +92,80 @@ class Primus:
         raw = self.llm.generate(planning_prompt)
         return self.planner.parse(raw)
 
+    @staticmethod
+    def _tool_followup(base: str, call: ToolCall, tool_result: str) -> str:
+        return (
+            base
+            + "\n\nThe tool call was executed successfully.\n"
+            + f"TOOL: {call.name}\nRESULT:\n{tool_result}\n\n"
+            + "Answer the user using only the relevant tool result. Do not emit another tool call. "
+            + "Do not mention internal tool names or permission mechanics unless the user asks."
+        )
+
+    @staticmethod
+    def _permission_prompt(call: ToolCall) -> str:
+        if call.name == "filesystem.list":
+            return "Мне нужно ваше разрешение, чтобы один раз посмотреть список файлов в указанной папке."
+        if call.name == "filesystem.read":
+            return "Мне нужно ваше разрешение, чтобы один раз прочитать указанный файл."
+        if call.name == "system.info":
+            return "Мне нужно ваше разрешение, чтобы один раз посмотреть сведения об этом компьютере."
+        if call.name == "process.list":
+            return "Мне нужно ваше разрешение, чтобы один раз посмотреть список запущенных процессов."
+        return "Мне нужно ваше разрешение, чтобы выполнить это действие один раз."
+
+    def _execute_or_request_approval(self, base: str, user_input: str, call: ToolCall) -> str:
+        if self.agent is None:
+            raise ToolProtocolError("Tool execution is unavailable")
+
+        capability = self.agent.required_capability(call)
+        if not self.agent.is_allowed(call):
+            if self.tool_approvals is None:
+                return self._permission_prompt(call)
+            self.tool_approvals.save(
+                PendingToolApproval(
+                    user_input=user_input,
+                    tool=call.name,
+                    arguments=call.arguments,
+                    capability=capability.value,
+                )
+            )
+            return self._permission_prompt(call)
+
+        tool_result = self.agent.execute(call)
+        return self.llm.generate(self._tool_followup(base, call, tool_result))
+
+    def approve_pending_tool(self) -> str:
+        if self.agent is None or self.tool_approvals is None:
+            raise ToolProtocolError("Tool approval is unavailable")
+        pending = self.tool_approvals.load()
+        if pending is None:
+            raise ToolProtocolError("No pending tool approval")
+
+        call = ToolCall(name=pending.tool, arguments=pending.arguments)
+        capability = self.agent.required_capability(call)
+        if capability.value != pending.capability:
+            self.tool_approvals.clear()
+            raise ToolProtocolError("Pending tool approval capability mismatch")
+
+        base = self._base_prompt(pending.user_input)
+        try:
+            tool_result = self.agent.execute_once(call)
+            response = self.llm.generate(self._tool_followup(base, call, tool_result))
+        finally:
+            self.tool_approvals.clear()
+
+        self.memory.add("babyai", response, kind=MemoryKind.EPISODIC)
+        return response
+
+    def reject_pending_tool(self) -> str:
+        if self.tool_approvals is None or self.tool_approvals.load() is None:
+            raise ToolProtocolError("No pending tool approval")
+        self.tool_approvals.clear()
+        response = "Доступ не предоставлен. Я не выполнял это действие."
+        self.memory.add("babyai", response, kind=MemoryKind.EPISODIC)
+        return response
+
     def think(self, user_input: str) -> str:
         try:
             plan = self._plan(user_input)
@@ -111,14 +187,7 @@ class Primus:
             try:
                 call = self.agent.parse_tool_call(first)
                 if call is not None:
-                    tool_result = self.agent.execute(call)
-                    followup = (
-                        base
-                        + "\n\nThe tool call was executed successfully.\n"
-                        + f"TOOL: {call.name}\nRESULT:\n{tool_result}\n\n"
-                        + "Answer the user using the tool result. Do not emit another tool call."
-                    )
-                    response = self.llm.generate(followup)
+                    response = self._execute_or_request_approval(base, user_input, call)
             except (PermissionError, ToolProtocolError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
                 response = f"I could not use the requested tool: {exc}"
 
