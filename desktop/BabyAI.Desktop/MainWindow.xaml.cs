@@ -173,8 +173,7 @@ public sealed partial class MainWindow : Window
         CoreStatusText.Text = "Core: connected";
         RuntimeText.Text = BuildRuntimeLabel();
         RetryButton.Visibility = Visibility.Collapsed;
-        ApproveButton.Visibility = status.RequiresApproval ? Visibility.Visible : Visibility.Collapsed;
-        RejectButton.Visibility = status.RequiresApproval ? Visibility.Visible : Visibility.Collapsed;
+        ApprovalCard.Visibility = status.RequiresApproval ? Visibility.Visible : Visibility.Collapsed;
         ApplyState(status.RequiresApproval ? OrbState.Approval : OrbState.Idle);
     }
 

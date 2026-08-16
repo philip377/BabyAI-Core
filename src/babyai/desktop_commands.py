@@ -100,6 +100,9 @@ class DesktopCommands:
             working_memory=WorkingMemoryStore(self.config.working_memory_file),
             tool_approvals=PendingToolApprovalStore(self.config.pending_tool_approval_file),
             repair_tool_calls=self.config.provider == "native",
+            # CPU-native chat benefits materially from a bounded prompt. The tool
+            # catalog and newest memories remain intact; only older memory is cut.
+            max_context_chars=6_000 if self.config.provider == "native" else 12_000,
         )
 
     def close(self) -> None:

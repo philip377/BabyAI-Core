@@ -114,6 +114,7 @@ def generate_greedy(
 
     output = bytearray()
     generated = 0
+    first_token_ms: int | None = None
 
     context_started = time.monotonic()
     trace("native.context.open.start", n_ctx=n_ctx, n_batch=n_batch, n_threads=n_threads)
@@ -133,66 +134,54 @@ def generate_greedy(
         )
         generation_started = time.monotonic()
 
+        def finish(reason: NativeGenerationStop, *, final_utf8: bool = False) -> NativeGenerationResult:
+            generation_ms = round((time.monotonic() - generation_started) * 1000)
+            trace(
+                "native.generation.done",
+                elapsed_ms=generation_ms,
+                first_token_ms=first_token_ms if first_token_ms is not None else "none",
+                generated_tokens=generated,
+                tokens_per_second=(round(generated * 1000 / generation_ms, 2) if generation_ms else 0),
+                stop_reason=reason,
+            )
+            return NativeGenerationResult(
+                text=_decode_complete_utf8(bytes(output), final=final_utf8),
+                generated_tokens=generated,
+                output_bytes=len(output),
+                stop_reason=reason,
+            )
+
         while generated < max_tokens:
             if cancel_check is not None and cancel_check():
-                return NativeGenerationResult(
-                    text=_decode_complete_utf8(bytes(output), final=False),
-                    generated_tokens=generated,
-                    output_bytes=len(output),
-                    stop_reason="cancelled",
-                )
+                return finish("cancelled")
 
             # Sampling a token that cannot be appended would leave no valid path to
             # refresh logits, so stop before sampling when the context is full.
             if context.token_count >= context.context_size:
-                return NativeGenerationResult(
-                    text=_decode_complete_utf8(bytes(output), final=False),
-                    generated_tokens=generated,
-                    output_bytes=len(output),
-                    stop_reason="context_limit",
-                )
+                return finish("context_limit")
 
             sample = context.sample_greedy()
             if sample.is_eog:
-                return NativeGenerationResult(
-                    text=_decode_complete_utf8(bytes(output), final=True),
-                    generated_tokens=generated,
-                    output_bytes=len(output),
-                    stop_reason="eog",
-                )
+                return finish("eog", final_utf8=True)
 
             piece = model.token_to_piece(sample.token_id, render_special=False)
             if len(output) + len(piece) > max_output_bytes:
-                return NativeGenerationResult(
-                    text=_decode_complete_utf8(bytes(output), final=False),
-                    generated_tokens=generated,
-                    output_bytes=len(output),
-                    stop_reason="output_limit",
-                )
+                return finish("output_limit")
 
             output.extend(piece)
             context.decode_sampled(sample.token_id)
             generated += 1
             if generated == 1:
+                first_token_ms = round((time.monotonic() - generation_started) * 1000)
                 trace(
                     "native.first_token",
-                    elapsed_ms=round((time.monotonic() - generation_started) * 1000),
+                    elapsed_ms=first_token_ms,
                     total_context_tokens=context.token_count,
                 )
 
             for stop in encoded_stops:
                 if output.endswith(stop):
                     del output[-len(stop) :]
-                    return NativeGenerationResult(
-                        text=_decode_complete_utf8(bytes(output), final=False),
-                        generated_tokens=generated,
-                        output_bytes=len(output),
-                        stop_reason="stop_sequence",
-                    )
+                    return finish("stop_sequence")
 
-    return NativeGenerationResult(
-        text=_decode_complete_utf8(bytes(output), final=False),
-        generated_tokens=generated,
-        output_bytes=len(output),
-        stop_reason="max_tokens",
-    )
+        return finish("max_tokens")
