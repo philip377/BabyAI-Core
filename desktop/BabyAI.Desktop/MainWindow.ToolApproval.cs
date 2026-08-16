@@ -8,6 +8,8 @@ public sealed partial class MainWindow
     {
         ApproveButton.Click -= ApproveButton_Click;
         RejectButton.Click -= RejectButton_Click;
+        ApproveButton.Click -= ApprovalApproveButton_Click;
+        RejectButton.Click -= ApprovalRejectButton_Click;
         ApproveButton.Click += ApprovalApproveButton_Click;
         RejectButton.Click += ApprovalRejectButton_Click;
         ApproveButton.Content = "Разрешить один раз";
