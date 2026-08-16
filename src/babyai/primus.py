@@ -114,6 +114,23 @@ class Primus:
             return "Мне нужно ваше разрешение, чтобы один раз посмотреть список запущенных процессов."
         return "Мне нужно ваше разрешение, чтобы выполнить это действие один раз."
 
+    def _repair_tool_call(self, base: str, first: str) -> ToolCall | None:
+        if self.agent is None:
+            return None
+        mentioned = self.agent.mentioned_tool(first)
+        if mentioned is None:
+            return None
+        repair_prompt = (
+            base
+            + "\n\nYour previous draft mentioned the local tool "
+            + mentioned
+            + " but did not return a valid tool call. Do not explain or reason. "
+            + "Return exactly one JSON object now with fields tool and arguments, and nothing else. "
+            + f"Use tool {mentioned}."
+        )
+        repaired = self.llm.generate(repair_prompt)
+        return self.agent.parse_tool_call(repaired)
+
     def _execute_or_request_approval(self, base: str, user_input: str, call: ToolCall) -> str:
         if self.agent is None:
             raise ToolProtocolError("Tool execution is unavailable")
@@ -186,8 +203,12 @@ class Primus:
         if self.agent is not None and (plan is None or plan.action is PlanAction.TOOL):
             try:
                 call = self.agent.parse_tool_call(first)
+                if call is None:
+                    call = self._repair_tool_call(base, first)
                 if call is not None:
                     response = self._execute_or_request_approval(base, user_input, call)
+                elif self.agent.mentioned_tool(first) is not None:
+                    response = "Я понял, что для этого нужно локальное действие, но не смог безопасно подготовить его параметры."
             except (PermissionError, ToolProtocolError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
                 response = f"I could not use the requested tool: {exc}"
 
