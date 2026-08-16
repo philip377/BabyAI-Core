@@ -185,6 +185,15 @@ class Primus:
         return response
 
     def think(self, user_input: str) -> str:
+        if self.repair_tool_calls and self.agent is not None:
+            direct_call = self.agent.infer_safe_local_intent(user_input)
+            if direct_call is not None:
+                base = self._base_prompt(user_input)
+                response = self._execute_or_request_approval(base, user_input, direct_call)
+                self.memory.add("user", user_input, kind=MemoryKind.EPISODIC)
+                self.memory.add("babyai", response, kind=MemoryKind.EPISODIC)
+                return response
+
         try:
             plan = self._plan(user_input)
         except PlannerProtocolError:

@@ -65,6 +65,7 @@ class DesktopCommands:
                     model_path=self.config.native_model_file,
                     runtime_path=route.runtime_path,
                     n_gpu_layers=route.n_gpu_layers,
+                    n_threads=min(os.cpu_count() or 1, 8),
                 )
             else:
                 provider = build_brain_provider(self.config)

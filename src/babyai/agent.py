@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -49,6 +50,34 @@ class AgentExecutor:
             "A fenced ```json block containing only that object is also accepted. "
             "If no tool is needed, answer normally."
         )
+
+    @staticmethod
+    def infer_safe_local_intent(user_input: str) -> ToolCall | None:
+        """Recognise only high-confidence read-only desktop-list requests.
+
+        This is deliberately narrow: it may create a pending approval, but can
+        never execute the tool or grant permission. Ambiguous requests still go
+        through the model.
+        """
+
+        text = re.sub(r"\s+", " ", user_input.casefold()).strip()
+        desktop = "рабоч" in text and "стол" in text or "desktop" in text
+        asks_for_entry = any(
+            marker in text
+            for marker in (
+                "имя файла",
+                "название файла",
+                "какой файл",
+                "какие файлы",
+                "файлы на",
+                "file name",
+                "files on",
+                "list files",
+            )
+        )
+        if desktop and asks_for_entry:
+            return ToolCall(name="filesystem.list", arguments={"path": "~/Desktop"})
+        return None
 
     def parse_tool_call(self, text: str) -> ToolCall | None:
         for data in self._tool_payload_candidates(text):

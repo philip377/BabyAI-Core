@@ -96,6 +96,36 @@ def test_tool_permission_pauses_then_executes_once(tmp_path) -> None:
     assert "example.txt" in provider.prompts[-1]
 
 
+def test_native_fast_path_requests_desktop_permission_without_model_pass(tmp_path) -> None:
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    approvals = PendingToolApprovalStore(tmp_path / "pending_tool_approval.json")
+    provider = ScriptedProvider([])
+    primus = Primus(
+        llm=provider,
+        memory=SQLiteMemoryStore(tmp_path / "memory.sqlite3"),
+        identity=Identity(),
+        agent=AgentExecutor(permissions),
+        tool_approvals=approvals,
+        repair_tool_calls=True,
+    )
+
+    reply = primus.think("Мог бы ты назвать любое имя файла на моём рабочем столе?")
+
+    assert "разреш" in reply.casefold()
+    assert provider.prompts == []
+    pending = approvals.load()
+    assert pending is not None
+    assert pending.tool == "filesystem.list"
+    assert pending.arguments == {"path": "~/Desktop"}
+    assert not permissions.is_granted(Capability.FILESYSTEM_LIST)
+
+
+def test_fast_path_stays_narrow_for_ambiguous_desktop_chat(tmp_path) -> None:
+    executor = AgentExecutor(PermissionStore(tmp_path / "permissions.json"))
+
+    assert executor.infer_safe_local_intent("Расскажи, что такое рабочий стол Windows") is None
+
+
 def test_reject_pending_tool_does_not_execute_or_grant(tmp_path) -> None:
     permissions = PermissionStore(tmp_path / "permissions.json")
     approvals = PendingToolApprovalStore(tmp_path / "pending_tool_approval.json")

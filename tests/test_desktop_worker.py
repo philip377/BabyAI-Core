@@ -49,6 +49,7 @@ def test_persistent_desktop_commands_reuses_one_native_provider(tmp_path, monkey
     assert created[0].kwargs["model_path"] == config.native_model_file
     assert created[0].kwargs["runtime_path"] == (tmp_path / "runtime.dll")
     assert created[0].kwargs["n_gpu_layers"] == -1
+    assert created[0].kwargs["n_threads"] >= 1
 
     commands.close()
     commands.close()
