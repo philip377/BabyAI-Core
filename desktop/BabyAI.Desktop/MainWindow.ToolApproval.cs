@@ -4,7 +4,7 @@ namespace BabyAI.Desktop;
 
 public sealed partial class MainWindow
 {
-    private void Root_Loaded(object sender, RoutedEventArgs e)
+    private void InitializeToolApprovalControls()
     {
         ApproveButton.Click -= ApproveButton_Click;
         RejectButton.Click -= RejectButton_Click;
