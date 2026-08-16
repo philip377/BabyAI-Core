@@ -46,6 +46,7 @@ def test_malformed_tool_discussion_gets_one_structured_repair(tmp_path) -> None:
         identity=Identity(),
         agent=AgentExecutor(permissions),
         tool_approvals=approvals,
+        repair_tool_calls=True,
     )
 
     reply = primus.think("Назови любой файл на моём рабочем столе")
@@ -134,6 +135,8 @@ def test_desktop_contract_surfaces_tool_approval_controls() -> None:
     assert 'ExecuteReplyCommandAsync("approval.approve")' in bridge
     assert 'command == "approval.approve"' in commands
     assert 'command == "approval.reject"' in commands
+    assert 'repair_tool_calls=self.config.provider == "native"' in commands
     assert '"tool_approval"' in snapshot
-    assert 'Loaded="Root_Loaded"' in xaml
+    assert 'Loaded="Root_Loaded_WithToolApproval"' in xaml
+    assert "Root_Loaded(sender, e);" in window
     assert 'ApproveButton.Content = "Разрешить один раз"' in window
