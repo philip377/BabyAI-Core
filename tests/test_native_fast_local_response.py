@@ -36,9 +36,9 @@ def test_desktop_listing_approval_finishes_without_second_llm_pass(tmp_path, mon
     assert provider.prompts == []
 
     monkeypatch.setattr(
-        primus.agent,
+        AgentExecutor,
         "execute_once",
-        lambda call: '["Folder/", "example.txt", "notes.md"]',
+        lambda self, call: '["Folder/", "example.txt", "notes.md"]',
     )
 
     final = primus.approve_pending_tool()
@@ -62,8 +62,8 @@ def test_empty_desktop_listing_finishes_without_llm_pass(tmp_path, monkeypatch) 
         repair_tool_calls=True,
     )
 
-    primus.think("Назови любой файл на рабочем столе")
-    monkeypatch.setattr(primus.agent, "execute_once", lambda call: '["OnlyFolder/"]')
+    primus.think("Мог бы ты назвать любое имя файла на моём рабочем столе?")
+    monkeypatch.setattr(AgentExecutor, "execute_once", lambda self, call: '["OnlyFolder/"]')
 
     final = primus.approve_pending_tool()
 
