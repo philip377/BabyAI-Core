@@ -15,6 +15,7 @@ from .llm import LLMError, LLMProvider
 from .memory import MemoryKind, SQLiteMemoryStore
 from .native_acceleration import select_native_runtime
 from .native_runtime import NativeRuntimeError
+from .native_threads import preferred_native_thread_count
 from .permissions import PermissionStore
 from .planner import Planner
 from .primus import Primus
@@ -53,11 +54,15 @@ class DesktopCommands:
                     self.config.native_runtime_file,
                     self.config.native_vulkan_runtime_file,
                 )
+                logical_cpu_count = os.cpu_count() or 1
+                native_threads = preferred_native_thread_count(logical_cpu_count=logical_cpu_count)
                 trace(
                     "provider.native.select.done",
                     mode=getattr(route, "mode", "unknown"),
                     runtime=route.runtime_path.name,
                     cpu_profile=os.getenv("BABYAI_NATIVE_CPU_PROFILE", "unknown"),
+                    logical_cpu_count=logical_cpu_count,
+                    native_threads=native_threads,
                     n_gpu_layers=route.n_gpu_layers,
                     elapsed_ms=round((time.monotonic() - started) * 1000),
                 )
@@ -65,7 +70,7 @@ class DesktopCommands:
                     model_path=self.config.native_model_file,
                     runtime_path=route.runtime_path,
                     n_gpu_layers=route.n_gpu_layers,
-                    n_threads=min(os.cpu_count() or 1, 8),
+                    n_threads=native_threads,
                 )
             else:
                 provider = build_brain_provider(self.config)
