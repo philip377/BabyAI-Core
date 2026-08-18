@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 
 from .agent import AgentExecutor, ToolCall, ToolProtocolError
@@ -104,6 +105,28 @@ class Primus:
         )
 
     @staticmethod
+    def _fast_local_tool_response(user_input: str, call: ToolCall, tool_result: str) -> str | None:
+        """Answer only deterministic high-confidence local reads without another LLM pass."""
+
+        inferred = AgentExecutor.infer_safe_local_intent(user_input)
+        if inferred is None or inferred.name != call.name or inferred.arguments != call.arguments:
+            return None
+        if call.name != "filesystem.list":
+            return None
+
+        try:
+            entries = json.loads(tool_result)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if not isinstance(entries, list) or not all(isinstance(item, str) for item in entries):
+            return None
+
+        files = [item for item in entries if item and not item.endswith("/")]
+        if files:
+            return f"Например: {files[0]}"
+        return "На рабочем столе я не нашёл файлов."
+
+    @staticmethod
     def _permission_prompt(call: ToolCall) -> str:
         if call.name == "filesystem.list":
             return "Мне нужно ваше разрешение, чтобы один раз посмотреть список файлов в указанной папке."
@@ -151,6 +174,9 @@ class Primus:
             return self._permission_prompt(call)
 
         tool_result = self.agent.execute(call)
+        fast_response = self._fast_local_tool_response(user_input, call, tool_result)
+        if fast_response is not None:
+            return fast_response
         return self.llm.generate(self._tool_followup(base, call, tool_result))
 
     def approve_pending_tool(self) -> str:
@@ -169,7 +195,9 @@ class Primus:
         base = self._base_prompt(pending.user_input)
         try:
             tool_result = self.agent.execute_once(call)
-            response = self.llm.generate(self._tool_followup(base, call, tool_result))
+            response = self._fast_local_tool_response(pending.user_input, call, tool_result)
+            if response is None:
+                response = self.llm.generate(self._tool_followup(base, call, tool_result))
         finally:
             self.tool_approvals.clear()
 
