@@ -295,7 +295,7 @@ int32_t babyai_native_model_token_to_piece(
             0,
             render_special != 0);
         if (probe == std::numeric_limits<int32_t>::min()) {
-            return fail(runtime, BABYAI_NATIVE_TOKEN_TO_PIECE_FAILED, "llama.cpp token piece size overflowed int32.");
+            return fail(runtime, BABYAI_NATIVE_TOKEN_TO_PIECE_FAILED, "Native token piece size overflowed int32.");
         }
 
         const int32_t required = probe < 0 ? -probe : probe;
@@ -348,9 +348,13 @@ int32_t babyai_native_context_create(
         }
         if (n_batch > 0) {
             params.n_batch = n_batch;
-            if (params.n_ubatch > params.n_batch) {
-                params.n_ubatch = params.n_batch;
-            }
+            // Keep the public logical batch generous, but give llama.cpp enough
+            // physical batch room for the typical BabyAI desktop prompt. The
+            // upstream default is conservative and can split a ~600-token prompt
+            // into multiple compute passes. 1024 covers that case without the
+            // memory jump of matching the full 4096-token logical batch.
+            constexpr uint32_t k_prefill_ubatch_cap = 1024;
+            params.n_ubatch = std::min(params.n_batch, k_prefill_ubatch_cap);
         }
         if (n_threads > 0) {
             params.n_threads = n_threads;
