@@ -5,7 +5,7 @@ from collections import deque
 from babyai.agent import AgentExecutor
 from babyai.identity import Identity
 from babyai.llm import LLMProvider
-from babyai.memory import SQLiteMemoryStore
+from babyai.memory import MemoryKind, SQLiteMemoryStore
 from babyai.permissions import Capability, PermissionStore
 from babyai.primus import Primus
 from babyai.tool_approval import PendingToolApprovalStore
@@ -175,6 +175,7 @@ def test_repeated_hallucinated_tool_json_uses_non_tool_fallback(tmp_path) -> Non
     provider = ScriptedProvider([
         '{"tool":"process.list","arguments":{}}',
         '{"tool":"process.list","arguments":{}}',
+        '{"tool":"process.list","arguments":{}}',
     ])
     primus = Primus(
         llm=provider,
@@ -186,10 +187,47 @@ def test_repeated_hallucinated_tool_json_uses_non_tool_fallback(tmp_path) -> Non
 
     reply = primus.think("Расскажи короткую шутку")
 
-    assert reply == "Я не буду выполнять неподходящее локальное действие. Чем ещё могу помочь?"
+    assert reply == "Я здесь. Давайте продолжим обычный разговор — что вы хотите узнать или сделать?"
     assert approvals.load() is None
     assert not permissions.is_granted(Capability.PROCESS_LIST)
     assert '"tool"' not in reply
+    assert len(provider.prompts) == 3
+    stored = [
+        item.content
+        for item in primus.memory.recent(limit=10, kind=MemoryKind.EPISODIC)
+    ]
+    assert reply not in stored
+
+
+def test_contaminated_tool_history_does_not_poison_later_conversation(tmp_path) -> None:
+    memory = SQLiteMemoryStore(tmp_path / "memory.sqlite3")
+    memory.add("babyai", '{"tool":"process.list","arguments":{}}', kind=MemoryKind.EPISODIC)
+    memory.add(
+        "babyai",
+        "Я не буду выполнять неподходящее локальное действие. Чем ещё могу помочь?",
+        kind=MemoryKind.EPISODIC,
+    )
+    provider = ScriptedProvider([
+        "Я здесь. Что именно вас заинтересовало?",
+        "Понимаю, прошлый ответ получился неудачным. Давайте попробуем снова.",
+    ])
+    approvals = PendingToolApprovalStore(tmp_path / "pending_tool_approval.json")
+    primus = Primus(
+        llm=provider,
+        memory=memory,
+        identity=Identity(),
+        agent=AgentExecutor(PermissionStore(tmp_path / "permissions.json")),
+        tool_approvals=approvals,
+    )
+
+    first = primus.think("чего")
+    second = primus.think("ужс, ты ужс")
+
+    assert first == "Я здесь. Что именно вас заинтересовало?"
+    assert second.startswith("Понимаю")
+    assert approvals.load() is None
+    assert all("process.list" not in prompt for prompt in provider.prompts)
+    assert all("не буду выполнять неподходящее" not in prompt for prompt in provider.prompts)
 
 
 def test_tool_call_must_match_the_users_local_intent(tmp_path) -> None:

@@ -23,6 +23,19 @@ class Primus:
     repair_tool_calls: bool = False
     max_context_chars: int = 12_000
 
+    def _safe_memory_content(self, content: str) -> bool:
+        """Keep tool protocol artifacts and old recovery messages out of prompts."""
+
+        recovery_markers = (
+            "Available tools:",
+            "Я не буду выполнять неподходящее локальное действие.",
+            "Я не смог безопасно сформировать ответ.",
+            "I could not use the requested tool:",
+        )
+        if any(marker in content for marker in recovery_markers):
+            return False
+        return not self._contains_internal_tool_output(content)
+
     def _base_prompt(self, user_input: str, *, include_tool_catalog: bool | None = None) -> str:
         if include_tool_catalog is None:
             include_tool_catalog = (
@@ -43,17 +56,26 @@ class Primus:
         sections = [
             (
                 "Known facts:",
-                [f"- {item.content}" for item in self.memory.recent(limit=20, kind=MemoryKind.FACT)],
+                [
+                    f"- {item.content}"
+                    for item in self.memory.recent(limit=20, kind=MemoryKind.FACT)
+                    if self._safe_memory_content(item.content)
+                ],
             ),
             (
                 "Relevant learned knowledge:",
-                [f"- {item.content}" for item in self.memory.recent(limit=16, kind=MemoryKind.KNOWLEDGE)],
+                [
+                    f"- {item.content}"
+                    for item in self.memory.recent(limit=16, kind=MemoryKind.KNOWLEDGE)
+                    if self._safe_memory_content(item.content)
+                ],
             ),
             (
                 "Recent episodic memory:",
                 [
                     f"{item.role.upper()}: {item.content}"
                     for item in self.memory.recent(limit=24, kind=MemoryKind.EPISODIC)
+                    if self._safe_memory_content(item.content)
                 ],
             ),
         ]
@@ -198,19 +220,32 @@ class Primus:
             return True
         return self.agent.mentioned_tool(text) is not None or "Available tools:" in text
 
-    def _answer_without_internal_tool_json(self, user_input: str) -> str:
-        prompt = self._base_prompt(user_input, include_tool_catalog=False)
-        prompt += (
-            "\n\nAnswer the user's question normally. Do not call, list, or discuss internal tools, "
-            "and do not output JSON."
+    def _answer_without_internal_tool_json(self, user_input: str) -> tuple[str, bool]:
+        # Recovery must be independent of working/episodic memory: either can contain
+        # the hallucinated tool call that caused this path in the first place.
+        prompt = (
+            self.identity.system_context()
+            + f"\n\nUSER: {user_input}"
+            + "\n\nAnswer the user's message as a normal conversation. Do not call, list, "
+            + "name, or discuss internal tools. Do not output JSON or technical protocol data."
         )
-        answer = self.llm.generate(prompt)
-        if self._contains_internal_tool_output(answer):
-            deterministic = self._conversational_fast_response(user_input)
-            if deterministic is not None:
-                return deterministic
-            return "Я не буду выполнять неподходящее локальное действие. Чем ещё могу помочь?"
-        return answer
+        for attempt in range(2):
+            retry_prompt = prompt
+            if attempt:
+                retry_prompt += "\nYour previous draft was invalid. Reply only in natural language."
+            answer = self.llm.generate(retry_prompt)
+            if not self._contains_internal_tool_output(answer):
+                return answer, True
+
+        deterministic = self._conversational_fast_response(user_input)
+        if deterministic is not None:
+            return deterministic, True
+        # Do not remember this last-resort reply. This prevents a transient model
+        # failure from becoming the repeated answer to every subsequent message.
+        return (
+            "Я здесь. Давайте продолжим обычный разговор — что вы хотите узнать или сделать?",
+            False,
+        )
 
     def _execute_or_request_approval(self, base: str, user_input: str, call: ToolCall) -> str:
         if self.agent is None:
@@ -301,6 +336,7 @@ class Primus:
 
         first = self.llm.generate(base)
         response = first
+        remember_response = True
 
         if self.agent is not None and (plan is None or plan.action is PlanAction.TOOL):
             try:
@@ -311,7 +347,7 @@ class Primus:
                     and call.name in self.agent.tool_names()
                     and not self.agent.tool_compatible_with_intent(user_input, call.name)
                 ):
-                    response = self._answer_without_internal_tool_json(user_input)
+                    response, remember_response = self._answer_without_internal_tool_json(user_input)
                     call = None
                     blocked_tool_call = True
                 elif call is None and self.repair_tool_calls:
@@ -335,5 +371,6 @@ class Primus:
                 response = f"I could not use the requested tool: {exc}"
 
         self.memory.add("user", user_input, kind=MemoryKind.EPISODIC)
-        self.memory.add("babyai", response, kind=MemoryKind.EPISODIC)
+        if remember_response:
+            self.memory.add("babyai", response, kind=MemoryKind.EPISODIC)
         return response
