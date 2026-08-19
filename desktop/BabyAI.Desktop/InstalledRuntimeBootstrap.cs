@@ -5,6 +5,13 @@ namespace BabyAI.Desktop;
 
 internal static class InstalledRuntimeBootstrap
 {
+    private static readonly HashSet<string> AccelerationModes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "auto",
+        "cpu",
+        "vulkan",
+        "hybrid",
+    };
     private sealed record LaunchSettings(string Provider, string Acceleration, string Model);
     private sealed record CpuRuntimeSelection(string Path, string Profile);
 
@@ -34,6 +41,40 @@ internal static class InstalledRuntimeBootstrap
         Environment.SetEnvironmentVariable(
             "BABYAI_NATIVE_MODEL",
             !string.IsNullOrWhiteSpace(launch.Model) && File.Exists(launch.Model) ? launch.Model : null);
+    }
+
+    public static void SaveAccelerationPreference(string acceleration)
+    {
+        acceleration = acceleration.Trim().ToLowerInvariant();
+        if (!AccelerationModes.Contains(acceleration))
+            throw new ArgumentOutOfRangeException(nameof(acceleration), acceleration, "Unknown acceleration mode.");
+
+        var path = ResolveLaunchSettingsPath();
+        var launch = ReadLaunchSettings(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var json = JsonSerializer.Serialize(
+            new
+            {
+                provider = launch.Provider,
+                acceleration,
+                model = launch.Model,
+            },
+            new JsonSerializerOptions { WriteIndented = true });
+        var temporaryPath = path + ".tmp";
+        File.WriteAllText(temporaryPath, json);
+        File.Move(temporaryPath, path, overwrite: true);
+        Environment.SetEnvironmentVariable("BABYAI_NATIVE_ACCELERATION", acceleration);
+    }
+
+    private static string ResolveLaunchSettingsPath()
+    {
+        if (TryResolveInstalledLayout(out var installRoot, out _))
+            return Path.Combine(installRoot, "launch.json");
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "BabyAI",
+            "launch.json");
     }
 
     private static CpuRuntimeSelection SelectCpuRuntime(

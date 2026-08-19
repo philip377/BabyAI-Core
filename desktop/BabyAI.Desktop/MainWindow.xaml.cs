@@ -359,6 +359,23 @@ public sealed partial class MainWindow : Window
         if (provider.Equals("echo", StringComparison.OrdinalIgnoreCase))
             return "Runtime: echo";
 
+        if (provider.Equals("native", StringComparison.OrdinalIgnoreCase))
+        {
+            var acceleration = Environment.GetEnvironmentVariable("BABYAI_NATIVE_ACCELERATION")?.ToLowerInvariant();
+            var accelerationLabel = acceleration switch
+            {
+                "cpu" => "CPU",
+                "vulkan" => "GPU",
+                "hybrid" => "GPU + CPU",
+                _ => "Auto",
+            };
+            var nativeModel = Environment.GetEnvironmentVariable("BABYAI_NATIVE_MODEL");
+            var modelName = string.IsNullOrWhiteSpace(nativeModel)
+                ? "GGUF"
+                : Path.GetFileName(nativeModel);
+            return $"Runtime: native · {accelerationLabel} · {modelName}";
+        }
+
         var model = Environment.GetEnvironmentVariable("BABYAI_MODEL");
         if (string.IsNullOrWhiteSpace(model))
             model = "qwen3:8b";

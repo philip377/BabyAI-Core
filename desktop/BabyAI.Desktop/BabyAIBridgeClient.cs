@@ -68,6 +68,15 @@ public sealed class BabyAIBridgeClient : IDisposable
 
     public Task<string> RejectToolAsync() => ExecuteReplyCommandAsync("approval.reject");
 
+    public void RestartWorker()
+    {
+        lock (_workerSync)
+        {
+            ThrowIfDisposed();
+            DisposeWorkerLocked();
+        }
+    }
+
     private async Task<string> ExecuteReplyCommandAsync(string command)
     {
         var json = await ExecuteAsync(command, "{}");

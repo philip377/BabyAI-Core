@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from babyai.native_acceleration import select_native_runtime
+from babyai.native_acceleration import HYBRID_GPU_LAYERS, select_native_runtime
 from babyai.native_runtime import NativeRuntimeError
 
 
@@ -47,6 +47,25 @@ def test_vulkan_uses_full_offload_when_probe_is_positive(tmp_path, monkeypatch):
     assert selected.mode == "vulkan"
     assert selected.runtime_path == vulkan.resolve()
     assert selected.n_gpu_layers == -1
+
+
+def test_hybrid_uses_partial_vulkan_offload_when_probe_is_positive(tmp_path, monkeypatch):
+    vulkan = tmp_path / "vulkan.dll"
+    vulkan.write_bytes(b"x")
+    monkeypatch.setattr(
+        "babyai.native_acceleration.inspect_native_acceleration",
+        lambda *args: SimpleNamespace(
+            backend=SimpleNamespace(build_backend="vulkan"),
+            gpu_probe_available=True,
+            gpu_available=True,
+        ),
+    )
+
+    selected = select_native_runtime("hybrid", tmp_path / "cpu.dll", vulkan)
+
+    assert selected.mode == "hybrid"
+    assert selected.runtime_path == vulkan.resolve()
+    assert selected.n_gpu_layers == HYBRID_GPU_LAYERS == 20
 
 
 def test_auto_falls_back_to_cpu_when_probe_is_negative(tmp_path, monkeypatch):

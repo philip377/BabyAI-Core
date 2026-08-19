@@ -163,19 +163,99 @@ public sealed partial class MainWindow
             "Производительность",
             "Режим вычислений локальной модели.");
 
+        if (!provider.Equals("native", StringComparison.OrdinalIgnoreCase))
+        {
+            panel.Children.Add(CreateSettingsInfo(
+                "Текущий режим",
+                "Управляется выбранным провайдером"));
+            panel.Children.Add(CreateSettingsNote(
+                "Переключатель CPU/GPU доступен для встроенного native GGUF runtime."));
+            return panel;
+        }
+
+        (string Mode, string Label)[] modes =
+        [
+            ("cpu", "Процессор (CPU)"),
+            ("vulkan", "Видеокарта (GPU · Vulkan)"),
+            ("hybrid", "GPU + CPU · сбалансированный"),
+            ("auto", "Автоматически · GPU, иначе CPU"),
+        ];
+        var selectedMode = ReadEnvironment("BABYAI_NATIVE_ACCELERATION", "auto").ToLowerInvariant();
+        if (!modes.Any(option => option.Mode == selectedMode))
+            selectedMode = "auto";
+
+        var selector = new ComboBox
+        {
+            Header = "Вычислительное устройство",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            IsEnabled = !_busy,
+            Margin = new Thickness(2, 1, 2, 1),
+        };
+        foreach (var option in modes)
+        {
+            selector.Items.Add(new ComboBoxItem
+            {
+                Content = option.Label,
+                Tag = option.Mode,
+            });
+        }
+        selector.SelectedIndex = Array.FindIndex(
+            modes,
+            option => option.Mode == selectedMode);
+
+        var status = new TextBlock
+        {
+            Text = PerformanceModeDescription(selectedMode)
+                + (_busy ? " Дождитесь завершения текущего ответа, чтобы сменить режим." : string.Empty),
+            FontSize = 11,
+            Opacity = 0.68,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(2, 5, 2, 1),
+        };
+        var control = new StackPanel { Spacing = 3 };
+        control.Children.Add(selector);
+        control.Children.Add(status);
+        panel.Children.Add(CreateSettingsCard(control));
+
+        selector.SelectionChanged += (_, _) =>
+        {
+            if (selector.SelectedItem is not ComboBoxItem item || item.Tag is not string mode)
+                return;
+
+            try
+            {
+                InstalledRuntimeBootstrap.SaveAccelerationPreference(mode);
+                _bridge.RestartWorker();
+                RuntimeText.Text = BuildRuntimeLabel();
+                status.Text = PerformanceModeDescription(mode)
+                    + " Новый режим применится к следующему запросу.";
+                StartupDiagnostics.Log($"Native acceleration changed from Settings: mode={mode}");
+            }
+            catch (Exception ex)
+            {
+                status.Text = $"Не удалось сохранить режим: {ex.Message}";
+                StartupDiagnostics.Log("Native acceleration change failed", ex);
+            }
+        };
+
         panel.Children.Add(CreateSettingsInfo(
-            "Текущий режим",
-            provider.Equals("native", StringComparison.OrdinalIgnoreCase)
-                ? "CPU · стабильный профиль"
-                : "Управляется выбранным провайдером"));
-        panel.Children.Add(CreateSettingsInfo(
-            "Аппаратное ускорение",
-            provider.Equals("native", StringComparison.OrdinalIgnoreCase)
-                ? "Настраивается отдельным профилем"
-                : "Не применяется"));
+            "Vulkan runtime",
+            ReadEnvironment("BABYAI_NATIVE_VULKAN_RUNTIME", "Не найден")));
         panel.Children.Add(CreateSettingsNote(
-            "Выбор режима ускорения будет подключён к Settings отдельным проверенным проходом."));
+            "GPU использует максимум доступных слоёв модели. GPU + CPU переносит 20 слоёв на видеокарту, "
+            + "а остальные оставляет процессору — этот режим полезен при ограниченной видеопамяти."));
         return panel;
+    }
+
+    private static string PerformanceModeDescription(string mode)
+    {
+        return mode switch
+        {
+            "cpu" => "Все слои модели обрабатываются процессором.",
+            "vulkan" => "Модель максимально переносится на совместимую Vulkan-видеокарту.",
+            "hybrid" => "Часть модели работает на GPU, оставшаяся часть — на CPU.",
+            _ => "BabyAI пробует GPU и безопасно возвращается на CPU, если Vulkan недоступен.",
+        };
     }
 
     private UIElement BuildInterfaceSettings()
