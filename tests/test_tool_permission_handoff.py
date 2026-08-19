@@ -129,10 +129,7 @@ def test_fast_path_stays_narrow_for_ambiguous_desktop_chat(tmp_path) -> None:
 def test_general_identity_question_hides_catalog_and_blocks_hallucinated_tool(tmp_path) -> None:
     permissions = PermissionStore(tmp_path / "permissions.json")
     approvals = PendingToolApprovalStore(tmp_path / "pending_tool_approval.json")
-    provider = ScriptedProvider([
-        'Available tools... {"tool":"process.list","arguments":{}}',
-        "Я BabyAI — локальный помощник. Могу отвечать на вопросы и помогать с задачами.",
-    ])
+    provider = ScriptedProvider([])
     primus = Primus(
         llm=provider,
         memory=SQLiteMemoryStore(tmp_path / "memory.sqlite3"),
@@ -145,8 +142,51 @@ def test_general_identity_question_hides_catalog_and_blocks_hallucinated_tool(tm
     reply = primus.think("Кто ты и чем можешь помочь?")
 
     assert reply.startswith("Я BabyAI")
-    assert "Available tools:" not in provider.prompts[0]
-    assert "Available tools:" not in provider.prompts[1]
+    assert "персональный ИИ-помощник" in reply
+    assert provider.prompts == []
+    assert approvals.load() is None
+    assert not permissions.is_granted(Capability.PROCESS_LIST)
+    assert '"tool"' not in reply
+
+
+def test_identity_and_safety_followup_never_enter_native_tool_loop(tmp_path) -> None:
+    provider = ScriptedProvider([])
+    primus = Primus(
+        llm=provider,
+        memory=SQLiteMemoryStore(tmp_path / "memory.sqlite3"),
+        identity=Identity(),
+        agent=AgentExecutor(PermissionStore(tmp_path / "permissions.json")),
+        repair_tool_calls=True,
+    )
+
+    first = primus.think("Кто ты и чем можешь помочь?")
+    second = primus.think('Что значит "безопасно"?')
+
+    assert "персональный ИИ-помощник" in first
+    assert "без скрытых действий" in second
+    assert "не смог безопасно сформировать" not in first + second
+    assert '"tool"' not in first + second
+    assert provider.prompts == []
+
+
+def test_repeated_hallucinated_tool_json_uses_non_tool_fallback(tmp_path) -> None:
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    approvals = PendingToolApprovalStore(tmp_path / "pending_tool_approval.json")
+    provider = ScriptedProvider([
+        '{"tool":"process.list","arguments":{}}',
+        '{"tool":"process.list","arguments":{}}',
+    ])
+    primus = Primus(
+        llm=provider,
+        memory=SQLiteMemoryStore(tmp_path / "memory.sqlite3"),
+        identity=Identity(),
+        agent=AgentExecutor(permissions),
+        tool_approvals=approvals,
+    )
+
+    reply = primus.think("Расскажи короткую шутку")
+
+    assert reply == "Я не буду выполнять неподходящее локальное действие. Чем ещё могу помочь?"
     assert approvals.load() is None
     assert not permissions.is_granted(Capability.PROCESS_LIST)
     assert '"tool"' not in reply

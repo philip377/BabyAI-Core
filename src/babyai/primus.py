@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 
 from .agent import AgentExecutor, ToolCall, ToolProtocolError
@@ -159,6 +160,44 @@ class Primus:
         repaired = self.llm.generate(repair_prompt)
         return self.agent.parse_tool_call(repaired)
 
+    def _conversational_fast_response(self, user_input: str) -> str | None:
+        """Answer a tiny set of identity/safety questions without native tool confusion."""
+
+        text = re.sub(r"\s+", " ", user_input.casefold()).strip()
+        plain_text = re.sub(r'["«»“”]', "", text)
+        identity_markers = (
+            "кто ты", "чем можешь помочь", "что ты умеешь",
+            "who are you", "what can you do", "how can you help",
+        )
+        if any(marker in plain_text for marker in identity_markers):
+            return (
+                f"Я {self.identity.name} — ваш персональный ИИ-помощник. "
+                "Могу отвечать на вопросы, объяснять сложное, помогать с текстами и планами, "
+                "а по вашему явному запросу — безопасно работать с доступными локальными данными."
+            )
+
+        safety_markers = (
+            "что значит безопасно", "что означает безопасно", "почему безопасно",
+            "what do you mean by safe", "what does safe mean",
+        )
+        if any(marker in plain_text for marker in safety_markers):
+            return (
+                "Безопасно — значит без скрытых действий: я использую локальные возможности "
+                "только когда это действительно нужно для вашего запроса и запрашиваю разрешение "
+                "перед доступом к защищённым данным."
+            )
+        return None
+
+    def _contains_internal_tool_output(self, text: str) -> bool:
+        if self.agent is None:
+            return False
+        try:
+            if self.agent.parse_tool_call(text) is not None:
+                return True
+        except ToolProtocolError:
+            return True
+        return self.agent.mentioned_tool(text) is not None or "Available tools:" in text
+
     def _answer_without_internal_tool_json(self, user_input: str) -> str:
         prompt = self._base_prompt(user_input, include_tool_catalog=False)
         prompt += (
@@ -166,10 +205,11 @@ class Primus:
             "and do not output JSON."
         )
         answer = self.llm.generate(prompt)
-        if self.agent is not None and (
-            self.agent.parse_tool_call(answer) is not None or self.agent.mentioned_tool(answer) is not None
-        ):
-            return "Я не смог безопасно сформировать ответ. Пожалуйста, повторите вопрос."
+        if self._contains_internal_tool_output(answer):
+            deterministic = self._conversational_fast_response(user_input)
+            if deterministic is not None:
+                return deterministic
+            return "Я не буду выполнять неподходящее локальное действие. Чем ещё могу помочь?"
         return answer
 
     def _execute_or_request_approval(self, base: str, user_input: str, call: ToolCall) -> str:
@@ -231,6 +271,12 @@ class Primus:
         return response
 
     def think(self, user_input: str) -> str:
+        conversational_response = self._conversational_fast_response(user_input)
+        if conversational_response is not None:
+            self.memory.add("user", user_input, kind=MemoryKind.EPISODIC)
+            self.memory.add("babyai", conversational_response, kind=MemoryKind.EPISODIC)
+            return conversational_response
+
         if self.repair_tool_calls and self.agent is not None:
             direct_call = self.agent.infer_safe_local_intent(user_input)
             if direct_call is not None:
