@@ -126,6 +126,74 @@ def test_fast_path_stays_narrow_for_ambiguous_desktop_chat(tmp_path) -> None:
     assert executor.infer_safe_local_intent("Расскажи, что такое рабочий стол Windows") is None
 
 
+def test_general_identity_question_hides_catalog_and_blocks_hallucinated_tool(tmp_path) -> None:
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    approvals = PendingToolApprovalStore(tmp_path / "pending_tool_approval.json")
+    provider = ScriptedProvider([
+        'Available tools... {"tool":"process.list","arguments":{}}',
+        "Я BabyAI — локальный помощник. Могу отвечать на вопросы и помогать с задачами.",
+    ])
+    primus = Primus(
+        llm=provider,
+        memory=SQLiteMemoryStore(tmp_path / "memory.sqlite3"),
+        identity=Identity(),
+        agent=AgentExecutor(permissions),
+        tool_approvals=approvals,
+        repair_tool_calls=True,
+    )
+
+    reply = primus.think("Кто ты и чем можешь помочь?")
+
+    assert reply.startswith("Я BabyAI")
+    assert "Available tools:" not in provider.prompts[0]
+    assert "Available tools:" not in provider.prompts[1]
+    assert approvals.load() is None
+    assert not permissions.is_granted(Capability.PROCESS_LIST)
+    assert '"tool"' not in reply
+
+
+def test_tool_call_must_match_the_users_local_intent(tmp_path) -> None:
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    approvals = PendingToolApprovalStore(tmp_path / "pending_tool_approval.json")
+    provider = ScriptedProvider([
+        '{"tool":"process.list","arguments":{}}',
+        "Не могу определить файлы без просмотра указанной папки.",
+    ])
+    primus = Primus(
+        llm=provider,
+        memory=SQLiteMemoryStore(tmp_path / "memory.sqlite3"),
+        identity=Identity(),
+        agent=AgentExecutor(permissions),
+        tool_approvals=approvals,
+    )
+
+    reply = primus.think("Какие файлы находятся в этой папке?")
+
+    assert "process.list" not in reply
+    assert approvals.load() is None
+    assert not permissions.is_granted(Capability.PROCESS_LIST)
+
+
+def test_tool_followup_does_not_repeat_catalog(tmp_path) -> None:
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    permissions.grant(Capability.SYSTEM_INFO)
+    provider = ScriptedProvider([
+        '{"tool":"system.info","arguments":{}}',
+        "На этом компьютере установлена Windows.",
+    ])
+    primus = Primus(
+        llm=provider,
+        memory=SQLiteMemoryStore(tmp_path / "memory.sqlite3"),
+        identity=Identity(),
+        agent=AgentExecutor(permissions),
+    )
+
+    primus.think("Покажи сведения о компьютере")
+
+    assert "Available tools:" in provider.prompts[0]
+    assert "Available tools:" not in provider.prompts[1]
+
+
 def test_reject_pending_tool_does_not_execute_or_grant(tmp_path) -> None:
     permissions = PermissionStore(tmp_path / "permissions.json")
     approvals = PendingToolApprovalStore(tmp_path / "pending_tool_approval.json")

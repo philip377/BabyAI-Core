@@ -79,6 +79,40 @@ class AgentExecutor:
             return ToolCall(name="filesystem.list", arguments={"path": "~/Desktop"})
         return None
 
+    @staticmethod
+    def tool_compatible_with_intent(user_input: str, tool_name: str) -> bool:
+        """Allow a model-selected tool only for an explicit matching local request."""
+
+        text = re.sub(r"\s+", " ", user_input.casefold()).strip()
+        markers = {
+            "system.info": (
+                "system info", "system information", "computer specs", "pc specs",
+                "what system", "inspect the system", "system is this", "system am i on",
+                "сведения о компьютере", "информация о компьютере", "характеристик",
+                "операционная система", "версия windows",
+            ),
+            "process.list": (
+                "running process", "running app", "process list", "task manager",
+                "запущенн", "процесс", "диспетчер задач",
+            ),
+            "filesystem.list": (
+                "list files", "files in", "files on", "file name", "folder contents",
+                "какие файлы", "список файлов", "файлы в", "файлы на", "имя файла",
+                "название файла", "файл в", "содержимое папки", "что в папке", "рабочем столе",
+                "посмотри рабочий стол", "покажи рабочий стол",
+            ),
+            "filesystem.read": (
+                "read file", "open file", "file contents", "what is in the file",
+                "read note", "open note",
+                "прочитай файл", "открой файл", "содержимое файла", "что в файле",
+            ),
+        }
+        return any(marker in text for marker in markers.get(tool_name, ()))
+
+    @classmethod
+    def requests_local_action(cls, user_input: str) -> bool:
+        return any(cls.tool_compatible_with_intent(user_input, name) for name in cls.tool_names())
+
     def parse_tool_call(self, text: str) -> ToolCall | None:
         for data in self._tool_payload_candidates(text):
             allowed_keys = {"tool", "arguments"}

@@ -22,12 +22,16 @@ class Primus:
     repair_tool_calls: bool = False
     max_context_chars: int = 12_000
 
-    def _base_prompt(self, user_input: str) -> str:
+    def _base_prompt(self, user_input: str, *, include_tool_catalog: bool | None = None) -> str:
+        if include_tool_catalog is None:
+            include_tool_catalog = (
+                self.agent is not None and self.agent.requests_local_action(user_input)
+            )
         prompt_parts = [self.identity.system_context()]
         task = self.working_memory.load() if self.working_memory is not None else None
         if task is not None:
             prompt_parts.append(task.as_context())
-        if self.agent is not None:
+        if self.agent is not None and include_tool_catalog:
             prompt_parts.append(self.agent.catalog())
         prompt_parts.append(f"USER: {user_input}")
 
@@ -65,7 +69,7 @@ class Primus:
         if task is not None:
             all_parts.append(task.as_context())
         all_parts.extend(memory_parts)
-        if self.agent is not None:
+        if self.agent is not None and include_tool_catalog:
             all_parts.append(self.agent.catalog())
         all_parts.append(f"USER: {user_input}")
         return "\n\n".join(all_parts)
@@ -155,6 +159,19 @@ class Primus:
         repaired = self.llm.generate(repair_prompt)
         return self.agent.parse_tool_call(repaired)
 
+    def _answer_without_internal_tool_json(self, user_input: str) -> str:
+        prompt = self._base_prompt(user_input, include_tool_catalog=False)
+        prompt += (
+            "\n\nAnswer the user's question normally. Do not call, list, or discuss internal tools, "
+            "and do not output JSON."
+        )
+        answer = self.llm.generate(prompt)
+        if self.agent is not None and (
+            self.agent.parse_tool_call(answer) is not None or self.agent.mentioned_tool(answer) is not None
+        ):
+            return "Я не смог безопасно сформировать ответ. Пожалуйста, повторите вопрос."
+        return answer
+
     def _execute_or_request_approval(self, base: str, user_input: str, call: ToolCall) -> str:
         if self.agent is None:
             raise ToolProtocolError("Tool execution is unavailable")
@@ -177,7 +194,8 @@ class Primus:
         fast_response = self._fast_local_tool_response(user_input, call, tool_result)
         if fast_response is not None:
             return fast_response
-        return self.llm.generate(self._tool_followup(base, call, tool_result))
+        followup_base = self._base_prompt(user_input, include_tool_catalog=False)
+        return self.llm.generate(self._tool_followup(followup_base, call, tool_result))
 
     def approve_pending_tool(self) -> str:
         if self.agent is None or self.tool_approvals is None:
@@ -192,7 +210,7 @@ class Primus:
             self.tool_approvals.clear()
             raise ToolProtocolError("Pending tool approval capability mismatch")
 
-        base = self._base_prompt(pending.user_input)
+        base = self._base_prompt(pending.user_input, include_tool_catalog=False)
         try:
             tool_result = self.agent.execute_once(call)
             response = self._fast_local_tool_response(pending.user_input, call, tool_result)
@@ -240,12 +258,32 @@ class Primus:
 
         if self.agent is not None and (plan is None or plan.action is PlanAction.TOOL):
             try:
+                blocked_tool_call = False
                 call = self.agent.parse_tool_call(first)
-                if call is None and self.repair_tool_calls:
+                if (
+                    call is not None
+                    and call.name in self.agent.tool_names()
+                    and not self.agent.tool_compatible_with_intent(user_input, call.name)
+                ):
+                    response = self._answer_without_internal_tool_json(user_input)
+                    call = None
+                    blocked_tool_call = True
+                elif call is None and self.repair_tool_calls:
                     call = self._repair_tool_call(base, first)
+                    if (
+                        call is not None
+                        and call.name in self.agent.tool_names()
+                        and not self.agent.tool_compatible_with_intent(user_input, call.name)
+                    ):
+                        call = None
+                        blocked_tool_call = True
                 if call is not None:
                     response = self._execute_or_request_approval(base, user_input, call)
-                elif self.repair_tool_calls and self.agent.mentioned_tool(first) is not None:
+                elif (
+                    not blocked_tool_call
+                    and self.repair_tool_calls
+                    and self.agent.mentioned_tool(first) is not None
+                ):
                     response = "Я понял, что для этого нужно локальное действие, но не смог безопасно подготовить его параметры."
             except (PermissionError, ToolProtocolError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
                 response = f"I could not use the requested tool: {exc}"
