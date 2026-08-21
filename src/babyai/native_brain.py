@@ -12,6 +12,14 @@ from .native_runtime import NativeRuntimeError, NativeRuntimeLoader
 
 _RESPONSE_BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
 _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+_INTERNAL_REASONING_TAIL = re.compile(
+    r"(?im)^(?:okay,\s*)?(?:"
+    r"the user (?:asked|said|wants|is asking|wrote)|"
+    r"(?:i|we) (?:should|need(?: to)?) (?:answer|respond|reply)|"
+    r"(?:let(?:'|’)s|let us) (?:craft|answer|respond|reply)"
+    r")\b"
+)
+_PARENTHESISED_ASCII_LINE = re.compile(r"^\([^()\n]*[A-Za-z][^()\n]*\)$")
 _NATIVE_STOP_SEQUENCES = ("\n\nUSER:", "\nUSER:", "\n\nBABYAI:", "\nBABYAI:")
 
 
@@ -26,9 +34,35 @@ def _prepare_native_prompt(prompt: str) -> str:
     return (
         prompt.rstrip()
         + "\n\n/no_think"
-        + "\nAnswer directly. Do not reveal reasoning. Do not wrap a normal answer in JSON."
+        + "\nAnswer directly in the user's language. Do not reveal reasoning. "
+        + "Do not add a translation unless the user requested one. "
+        + "Do not wrap a normal answer in JSON."
         + "\n\nBABYAI:"
     )
+
+
+def _strip_internal_reasoning_tail(text: str) -> str:
+    """Remove untagged scratchpad text emitted after an already complete answer."""
+
+    match = _INTERNAL_REASONING_TAIL.search(text)
+    if match is not None and text[: match.start()].strip():
+        text = text[: match.start()].rstrip()
+
+    lines = text.splitlines()
+    visible: list[str] = []
+    visible_text = ""
+    for line in lines:
+        stripped = line.strip()
+        if (
+            stripped
+            and _PARENTHESISED_ASCII_LINE.fullmatch(stripped)
+            and re.search(r"[А-Яа-яЁё]", visible_text)
+        ):
+            continue
+        visible.append(line)
+        if stripped:
+            visible_text += " " + stripped
+    return "\n".join(visible).strip()
 
 
 def _normalise_native_reply(text: str) -> str:
@@ -66,7 +100,7 @@ def _normalise_native_reply(text: str) -> str:
         if isinstance(payload.get("tool"), str) and isinstance(payload.get("arguments"), dict):
             return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
-    return cleaned
+    return _strip_internal_reasoning_tail(cleaned)
 
 
 @dataclass(slots=True)

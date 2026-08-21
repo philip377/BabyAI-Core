@@ -86,6 +86,7 @@ def test_native_provider_runs_bounded_generation_and_closes_native_lifetime(tmp_
     generate_call = next(call for call in calls if isinstance(call, tuple) and call[0] == "generate")
     assert generate_call[2].startswith("hello")
     assert "/no_think" in generate_call[2]
+    assert "Do not add a translation unless the user requested one." in generate_call[2]
     assert generate_call[2].endswith("BABYAI:")
     assert generate_call[3] == {
         "max_tokens": 77,
@@ -121,6 +122,26 @@ def test_native_reply_strips_think_block_and_preserves_tool_json():
     raw = '<think>private scratch</think>\n```json\n{"tool":"system.info","arguments":{}}\n```'
 
     assert _normalise_native_reply(raw) == '{"tool":"system.info","arguments":{}}'
+
+
+def test_native_reply_strips_untagged_reasoning_and_unrequested_translation():
+    raw = (
+        "Хорошо, благодарю за заботу! Чем могу помочь?\n"
+        "(Good, thank you for the care! How can I help?)\n\n"
+        'Okay, the user asked "как дела?" which is "how are you?" in Russian. '
+        "I should respond in a friendly manner, mention being okay, and ask how I can help. "
+        "Keep it simple and conversational.\n"
+        'Okay, the user asked "как дела?" which is "how are you?" in Russian. '
+        "I should respond in a friendly manner."
+    )
+
+    assert _normalise_native_reply(raw) == "Хорошо, благодарю за заботу! Чем могу помочь?"
+
+
+def test_native_reply_preserves_user_facing_parenthetical_text():
+    raw = "Откройте меню «Файл».\n(Оно находится в верхней части окна.)"
+
+    assert _normalise_native_reply(raw) == raw
 
 
 def test_native_provider_translates_native_runtime_error_to_llm_error(tmp_path, monkeypatch):
