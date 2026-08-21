@@ -25,6 +25,17 @@ def test_desktop_performance_settings_select_and_persist_native_acceleration() -
     assert "public void RestartWorker()" in bridge
 
 
+def test_launch_acceleration_repair_is_runtime_only_and_transparent() -> None:
+    root = Path(__file__).resolve().parents[1]
+    bootstrap = (
+        root / "desktop" / "BabyAI.Desktop" / "InstalledRuntimeBootstrap.cs"
+    ).read_text(encoding="utf-8")
+
+    assert "AccelerationModes.Contains(selectedAcceleration)" in bootstrap
+    assert "using auto without rewriting launch.json" in bootstrap
+    assert "Launch settings applied without rewriting launch.json" in bootstrap
+
+
 def test_runtime_label_exposes_selected_native_acceleration() -> None:
     root = Path(__file__).resolve().parents[1]
     window = (

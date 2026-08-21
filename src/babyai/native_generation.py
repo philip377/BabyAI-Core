@@ -11,6 +11,8 @@ from .runtime_trace import trace
 
 
 MAX_NATIVE_GENERATION_TOKENS = 4096
+_CONTEXT_FIT_GRANULARITY = 256
+_CONTEXT_FIT_MINIMUM = 512
 
 NativeGenerationStop = Literal[
     "eog",
@@ -50,6 +52,34 @@ def _encode_stop_sequences(stop_sequences: Sequence[str]) -> tuple[bytes, ...]:
     return tuple(encoded)
 
 
+def _fit_context_limits(
+    *,
+    prompt_tokens: int,
+    max_tokens: int,
+    n_ctx: int,
+    n_batch: int,
+) -> tuple[int, int]:
+    """Right-size per-response buffers without changing configured safety ceilings."""
+
+    def rounded(value: int) -> int:
+        return (
+            (value + _CONTEXT_FIT_GRANULARITY - 1)
+            // _CONTEXT_FIT_GRANULARITY
+            * _CONTEXT_FIT_GRANULARITY
+        )
+
+    effective_ctx = n_ctx
+    required_ctx = prompt_tokens + max_tokens
+    if n_ctx > 0 and required_ctx <= n_ctx:
+        effective_ctx = min(n_ctx, max(_CONTEXT_FIT_MINIMUM, rounded(required_ctx)))
+
+    effective_batch = n_batch
+    if n_batch > 0 and prompt_tokens <= n_batch:
+        effective_batch = min(n_batch, max(_CONTEXT_FIT_GRANULARITY, rounded(prompt_tokens)))
+
+    return effective_ctx, effective_batch
+
+
 def generate_greedy(
     model: NativeModelHandle,
     prompt: str,
@@ -61,6 +91,7 @@ def generate_greedy(
     n_threads: int = 0,
     cancel_check: Callable[[], bool] | None = None,
     stop_sequences: Sequence[str] = (),
+    fit_context_to_prompt: bool = False,
 ) -> NativeGenerationResult:
     """Generate bounded text through the native ABI v6 sample/decode state machine.
 
@@ -99,6 +130,8 @@ def generate_greedy(
         raise NativeRuntimeError("Native generation cancel_check must be callable.")
     if isinstance(stop_sequences, (str, bytes)) or not isinstance(stop_sequences, Sequence):
         raise NativeRuntimeError("Native generation stop_sequences must be a sequence of strings.")
+    if not isinstance(fit_context_to_prompt, bool):
+        raise NativeRuntimeError("Native generation fit_context_to_prompt must be a boolean.")
     encoded_stops = _encode_stop_sequences(stop_sequences)
 
     tokenize_started = time.monotonic()
@@ -112,13 +145,39 @@ def generate_greedy(
     if not prompt_tokens:
         raise NativeRuntimeError("Native generation prompt tokenized to an empty sequence.")
 
+    effective_n_ctx, effective_n_batch = n_ctx, n_batch
+    if fit_context_to_prompt:
+        effective_n_ctx, effective_n_batch = _fit_context_limits(
+            prompt_tokens=len(prompt_tokens),
+            max_tokens=max_tokens,
+            n_ctx=n_ctx,
+            n_batch=n_batch,
+        )
+        trace(
+            "native.context.fit",
+            configured_n_ctx=n_ctx,
+            effective_n_ctx=effective_n_ctx,
+            configured_n_batch=n_batch,
+            effective_n_batch=effective_n_batch,
+            reserved_output_tokens=max_tokens,
+        )
+
     output = bytearray()
     generated = 0
     first_token_ms: int | None = None
 
     context_started = time.monotonic()
-    trace("native.context.open.start", n_ctx=n_ctx, n_batch=n_batch, n_threads=n_threads)
-    with model.open_context(n_ctx=n_ctx, n_batch=n_batch, n_threads=n_threads) as context:
+    trace(
+        "native.context.open.start",
+        n_ctx=effective_n_ctx,
+        n_batch=effective_n_batch,
+        n_threads=n_threads,
+    )
+    with model.open_context(
+        n_ctx=effective_n_ctx,
+        n_batch=effective_n_batch,
+        n_threads=n_threads,
+    ) as context:
         trace(
             "native.context.open.done",
             context_size=context.context_size,

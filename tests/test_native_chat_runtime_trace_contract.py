@@ -18,6 +18,8 @@ def test_desktop_native_chat_emits_stage_diagnostics() -> None:
     assert '"native.model.open.start"' in resident
     assert '"native.model.open.done"' in resident
     assert '"native.prefill.start"' in generation
+    assert '"native.context.fit"' in generation
+    assert "fit_context_to_prompt=True" in resident
     assert '"native.prefill.done"' in generation
     assert '"native.first_token"' in generation
     assert '"native.generation.done"' in generation

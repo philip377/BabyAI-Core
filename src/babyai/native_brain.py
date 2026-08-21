@@ -20,7 +20,20 @@ _INTERNAL_REASONING_TAIL = re.compile(
     r")\b"
 )
 _PARENTHESISED_ASCII_LINE = re.compile(r"^\([^()\n]*[A-Za-z][^()\n]*\)$")
+_TRAILING_ASCII_PARENTHESIS = re.compile(
+    r"\s+\((?=[^()\n]*[A-Za-z])(?=(?:[^A-Za-z()\n]*[A-Za-z]+){4,})[^()\n]*\)\s*$"
+)
 _NATIVE_STOP_SEQUENCES = ("\n\nUSER:", "\nUSER:", "\n\nBABYAI:", "\nBABYAI:")
+_TRANSLATION_REQUEST_MARKERS = (
+    "translate",
+    "translation",
+    "bilingual",
+    "переведи",
+    "перевод",
+    "на английск",
+    "на русском",
+    "двух язы",
+)
 
 
 def _prepare_native_prompt(prompt: str) -> str:
@@ -41,7 +54,12 @@ def _prepare_native_prompt(prompt: str) -> str:
     )
 
 
-def _strip_internal_reasoning_tail(text: str) -> str:
+def _requests_translation(prompt: str) -> bool:
+    latest_user_message = prompt.rsplit("\n\nUSER:", 1)[-1].casefold()
+    return any(marker in latest_user_message for marker in _TRANSLATION_REQUEST_MARKERS)
+
+
+def _strip_internal_reasoning_tail(text: str, *, allow_translation: bool = False) -> str:
     """Remove untagged scratchpad text emitted after an already complete answer."""
 
     match = _INTERNAL_REASONING_TAIL.search(text)
@@ -54,18 +72,23 @@ def _strip_internal_reasoning_tail(text: str) -> str:
     for line in lines:
         stripped = line.strip()
         if (
-            stripped
+            not allow_translation
+            and stripped
             and _PARENTHESISED_ASCII_LINE.fullmatch(stripped)
             and re.search(r"[А-Яа-яЁё]", visible_text)
         ):
             continue
+        if not allow_translation and re.search(r"[А-Яа-яЁё]", stripped):
+            without_translation = _TRAILING_ASCII_PARENTHESIS.sub("", stripped).rstrip()
+            if without_translation != stripped:
+                line = without_translation
         visible.append(line)
         if stripped:
             visible_text += " " + stripped
     return "\n".join(visible).strip()
 
 
-def _normalise_native_reply(text: str) -> str:
+def _normalise_native_reply(text: str, *, allow_translation: bool = False) -> str:
     """Return the user-facing answer while preserving exact tool-call JSON."""
 
     cleaned = _THINK_BLOCK.sub("", text).strip()
@@ -100,7 +123,7 @@ def _normalise_native_reply(text: str) -> str:
         if isinstance(payload.get("tool"), str) and isinstance(payload.get("arguments"), dict):
             return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
-    return _strip_internal_reasoning_tail(cleaned)
+    return _strip_internal_reasoning_tail(cleaned, allow_translation=allow_translation)
 
 
 @dataclass(slots=True)
@@ -136,11 +159,15 @@ class NativeBrainProvider(LLMProvider):
                         n_batch=self.n_batch,
                         n_threads=self.n_threads,
                         stop_sequences=_NATIVE_STOP_SEQUENCES,
+                        fit_context_to_prompt=True,
                     )
         except NativeRuntimeError as exc:
             raise LLMError(f"Native brain inference failed: {exc}") from exc
 
-        text = _normalise_native_reply(result.text)
+        text = _normalise_native_reply(
+            result.text,
+            allow_translation=_requests_translation(prompt),
+        )
         if not text:
             raise LLMError(
                 "Native brain returned no text "

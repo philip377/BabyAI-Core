@@ -30,6 +30,8 @@ internal static class InstalledRuntimeBootstrap
 
         var cpu = SelectCpuRuntime(portableCpuRuntime, avxCpuRuntime, avx2CpuRuntime);
         var launch = ReadLaunchSettings(Path.Combine(installRoot, "launch.json"));
+        StartupDiagnostics.Log(
+            $"Launch settings applied without rewriting launch.json: provider={launch.Provider}; acceleration={launch.Acceleration}");
         Environment.SetEnvironmentVariable("BABYAI_PYTHON", python);
         Environment.SetEnvironmentVariable("BABYAI_PROVIDER", launch.Provider);
         Environment.SetEnvironmentVariable("BABYAI_NATIVE_ACCELERATION", launch.Acceleration);
@@ -139,9 +141,18 @@ internal static class InstalledRuntimeBootstrap
             var model = root.TryGetProperty("model", out var modelElement)
                 ? modelElement.GetString()
                 : null;
+            var selectedAcceleration = string.IsNullOrWhiteSpace(acceleration)
+                ? defaults.Acceleration
+                : acceleration.Trim().ToLowerInvariant();
+            if (!AccelerationModes.Contains(selectedAcceleration))
+            {
+                StartupDiagnostics.Log(
+                    $"Unsupported launch acceleration '{selectedAcceleration}' ignored; using auto without rewriting launch.json");
+                selectedAcceleration = defaults.Acceleration;
+            }
             return new LaunchSettings(
                 string.IsNullOrWhiteSpace(provider) ? defaults.Provider : provider,
-                string.IsNullOrWhiteSpace(acceleration) ? defaults.Acceleration : acceleration,
+                selectedAcceleration,
                 model ?? string.Empty);
         }
         catch
