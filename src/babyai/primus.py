@@ -155,14 +155,31 @@ class Primus:
 
     @staticmethod
     def _permission_prompt(call: ToolCall) -> str:
+        def shown(key: str, fallback: str) -> str:
+            value = str(call.arguments.get(key, fallback)).strip() or fallback
+            return value if len(value) <= 160 else value[:157] + "…"
+
         if call.name == "filesystem.list":
-            return "Мне нужно ваше разрешение, чтобы один раз посмотреть список файлов в указанной папке."
+            return f"Разрешить один раз посмотреть список файлов в папке: {shown('path', '.')}?"
         if call.name == "filesystem.read":
-            return "Мне нужно ваше разрешение, чтобы один раз прочитать указанный файл."
+            return f"Разрешить один раз прочитать файл: {shown('path', 'не указан')}?"
+        if call.name == "filesystem.write":
+            action = "перезаписать" if call.arguments.get("overwrite") is True else "создать"
+            return f"Разрешить один раз {action} файл: {shown('path', 'не указан')}?"
         if call.name == "system.info":
             return "Мне нужно ваше разрешение, чтобы один раз посмотреть сведения об этом компьютере."
         if call.name == "process.list":
             return "Мне нужно ваше разрешение, чтобы один раз посмотреть список запущенных процессов."
+        if call.name == "application.open":
+            return f"Разрешить один раз открыть приложение: {shown('name', 'не указано')}?"
+        if call.name == "command.run":
+            return f"Разрешить один раз выполнить диагностическую команду: {shown('command', 'не указана')}?"
+        if call.name == "window.list":
+            return "Разрешить один раз посмотреть список открытых окон?"
+        if call.name == "window.activate":
+            return f"Разрешить один раз активировать окно с идентификатором {shown('handle', 'не указан')}?"
+        if call.name == "system.lock":
+            return "Разрешить один раз заблокировать рабочую станцию Windows?"
         return "Мне нужно ваше разрешение, чтобы выполнить это действие один раз."
 
     def _repair_tool_call(self, base: str, first: str) -> ToolCall | None:

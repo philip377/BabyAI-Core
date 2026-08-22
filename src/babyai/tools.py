@@ -92,6 +92,34 @@ class Toolset:
             raise ValueError(f"Refusing to read {size} bytes; limit is {max_bytes} bytes")
         return target.read_text(encoding="utf-8", errors="replace")
 
+    def write_text(
+        self,
+        path: str | Path,
+        content: str,
+        *,
+        overwrite: bool = False,
+        max_bytes: int = 262_144,
+    ) -> str:
+        self.permissions.require(Capability.FILESYSTEM_WRITE)
+        if not isinstance(content, str):
+            raise ValueError("filesystem.write content must be text")
+        encoded = content.encode("utf-8")
+        if len(encoded) > max_bytes:
+            raise ValueError(f"Refusing to write {len(encoded)} bytes; limit is {max_bytes} bytes")
+        if not isinstance(overwrite, bool):
+            raise ValueError("filesystem.write overwrite must be true or false")
+        target = _resolve_local_path(path)
+        if not target.parent.is_dir():
+            raise FileNotFoundError(f"Parent directory does not exist: {target.parent}")
+        if target.exists() and not overwrite:
+            raise FileExistsError(f"Refusing to overwrite existing file: {target}")
+        if target.exists() and not target.is_file():
+            raise IsADirectoryError(str(target))
+        mode = "w" if overwrite else "x"
+        with target.open(mode, encoding="utf-8", newline="") as stream:
+            stream.write(content)
+        return f"Wrote {len(encoded)} bytes to {target}"
+
     def list_processes(self) -> list[str]:
         self.permissions.require(Capability.PROCESS_LIST)
         if _is_windows():

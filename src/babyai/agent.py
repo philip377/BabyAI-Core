@@ -8,6 +8,7 @@ from typing import Any, Callable
 from .observer import Observer
 from .permissions import Capability, PermissionStore
 from .tools import Toolset
+from .windows_actions import WindowsActions
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,14 +26,27 @@ class AgentExecutor:
     permissions: PermissionStore
     toolset: Toolset = field(init=False)
     observer: Observer = field(init=False)
+    windows: WindowsActions = field(init=False)
 
     def __post_init__(self) -> None:
         self.toolset = Toolset(self.permissions)
         self.observer = Observer(self.permissions)
+        self.windows = WindowsActions(self.permissions)
 
     @staticmethod
     def tool_names() -> tuple[str, ...]:
-        return ("system.info", "filesystem.list", "filesystem.read", "process.list")
+        return (
+            "system.info",
+            "filesystem.list",
+            "filesystem.read",
+            "filesystem.write",
+            "process.list",
+            "application.open",
+            "command.run",
+            "window.list",
+            "window.activate",
+            "system.lock",
+        )
 
     def catalog(self) -> str:
         return (
@@ -40,7 +54,13 @@ class AgentExecutor:
             "- system.info {}\n"
             "- filesystem.list {\"path\": \"...\"}\n"
             "- filesystem.read {\"path\": \"...\"}\n"
+            "- filesystem.write {\"path\": \"...\", \"content\": \"...\", \"overwrite\": false}\n"
             "- process.list {}\n"
+            "- application.open {\"name\": \"calculator|explorer|notepad|settings\"}\n"
+            "- command.run {\"command\": \"hostname|ipconfig|whoami\"}\n"
+            "- window.list {}\n"
+            "- window.activate {\"handle\": 123}\n"
+            "- system.lock {}\n"
             "If the user's request requires observing the local computer and one of these tools can answer it, "
             "call the tool immediately. Do not discuss which tools exist, do not explain permission mechanics, "
             "and do not ask the user to grant permission yourself; the BabyAI host handles permission prompts. "
@@ -106,6 +126,27 @@ class AgentExecutor:
                 "read note", "open note",
                 "прочитай файл", "открой файл", "содержимое файла", "что в файле",
             ),
+            "filesystem.write": (
+                "write file", "create file", "save file", "overwrite file",
+                "запиши файл", "создай файл", "сохрани файл", "перезапиши файл",
+            ),
+            "application.open": (
+                "open calculator", "open explorer", "open notepad", "open settings",
+                "открой калькулятор", "открой проводник", "открой блокнот", "открой настройки",
+            ),
+            "command.run": (
+                "run whoami", "run hostname", "run ipconfig",
+                "запусти whoami", "запусти hostname", "запусти ipconfig",
+            ),
+            "window.list": (
+                "list windows", "open windows", "какие окна", "список окон", "открытые окна",
+            ),
+            "window.activate": (
+                "activate window", "switch to window", "активируй окно", "переключись на окно",
+            ),
+            "system.lock": (
+                "lock workstation", "lock computer", "заблокируй компьютер", "заблокируй экран",
+            ),
         }
         return any(marker in text for marker in markers.get(tool_name, ()))
 
@@ -143,7 +184,13 @@ class AgentExecutor:
             "system.info": Capability.SYSTEM_INFO,
             "filesystem.list": Capability.FILESYSTEM_LIST,
             "filesystem.read": Capability.FILESYSTEM_READ,
+            "filesystem.write": Capability.FILESYSTEM_WRITE,
             "process.list": Capability.PROCESS_LIST,
+            "application.open": Capability.APPLICATION_OPEN,
+            "command.run": Capability.COMMAND_RUN,
+            "window.list": Capability.WINDOW_LIST,
+            "window.activate": Capability.WINDOW_ACTIVATE,
+            "system.lock": Capability.SYSTEM_LOCK,
         }
         capability = capabilities.get(call.name)
         if capability is None:
@@ -162,10 +209,18 @@ class AgentExecutor:
 
     def execute(self, call: ToolCall) -> str:
         handlers: dict[str, Callable[[dict[str, Any]], object]] = {
-            "system.info": lambda _: self.observer.system_snapshot().as_context(),
+            "system.info": lambda args: self._no_arguments(
+                args, self.observer.system_snapshot().as_context
+            ),
             "filesystem.list": lambda args: self.toolset.list_directory(args.get("path", ".")),
             "filesystem.read": lambda args: self.toolset.read_text(self._required_path(args)),
-            "process.list": lambda _: self.toolset.list_processes(),
+            "filesystem.write": self._write_text,
+            "process.list": lambda args: self._no_arguments(args, self.toolset.list_processes),
+            "application.open": self._open_application,
+            "command.run": self._run_diagnostic,
+            "window.list": lambda args: self._no_arguments(args, self.windows.list_windows),
+            "window.activate": self._activate_window,
+            "system.lock": lambda args: self._no_arguments(args, self.windows.lock_workstation),
         }
         handler = handlers.get(call.name)
         if handler is None:
@@ -220,3 +275,75 @@ class AgentExecutor:
         if not isinstance(path, str) or not path.strip():
             raise ToolProtocolError("filesystem.read requires a non-empty path")
         return path
+
+    def _write_text(self, arguments: dict[str, Any]) -> str:
+        allowed = {"path", "content", "overwrite"}
+        self._reject_argument_keys(arguments, allowed, "filesystem.write")
+        return self.toolset.write_text(
+            self._required_string(arguments, "path", "filesystem.write"),
+            self._required_string(arguments, "content", "filesystem.write", allow_empty=True),
+            overwrite=self._optional_bool(arguments, "overwrite", False, "filesystem.write"),
+        )
+
+    def _open_application(self, arguments: dict[str, Any]) -> str:
+        self._reject_argument_keys(arguments, {"name"}, "application.open")
+        return self.windows.open_application(
+            self._required_string(arguments, "name", "application.open")
+        )
+
+    def _run_diagnostic(self, arguments: dict[str, Any]) -> str:
+        self._reject_argument_keys(arguments, {"command"}, "command.run")
+        return self.windows.run_diagnostic(
+            self._required_string(arguments, "command", "command.run")
+        )
+
+    def _activate_window(self, arguments: dict[str, Any]) -> str:
+        self._reject_argument_keys(arguments, {"handle"}, "window.activate")
+        return self.windows.activate_window(
+            self._required_int(arguments, "handle", "window.activate")
+        )
+
+    @staticmethod
+    def _required_string(
+        arguments: dict[str, Any],
+        key: str,
+        tool: str,
+        *,
+        allow_empty: bool = False,
+    ) -> str:
+        value = arguments.get(key)
+        if not isinstance(value, str) or (not allow_empty and not value.strip()):
+            raise ToolProtocolError(f"{tool} requires a valid {key}")
+        return value if allow_empty else value.strip()
+
+    @staticmethod
+    def _required_int(arguments: dict[str, Any], key: str, tool: str) -> int:
+        value = arguments.get(key)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ToolProtocolError(f"{tool} requires an integer {key}")
+        return value
+
+    @staticmethod
+    def _optional_bool(
+        arguments: dict[str, Any],
+        key: str,
+        default: bool,
+        tool: str,
+    ) -> bool:
+        value = arguments.get(key, default)
+        if not isinstance(value, bool):
+            raise ToolProtocolError(f"{tool} {key} must be true or false")
+        return value
+
+    @staticmethod
+    def _reject_argument_keys(arguments: dict[str, Any], allowed: set[str], tool: str) -> None:
+        unexpected = set(arguments) - allowed
+        if unexpected:
+            raise ToolProtocolError(
+                f"{tool} received unexpected arguments: {', '.join(sorted(unexpected))}"
+            )
+
+    @staticmethod
+    def _no_arguments(arguments: dict[str, Any], action: Callable[[], object]) -> object:
+        AgentExecutor._reject_argument_keys(arguments, set(), "tool")
+        return action()

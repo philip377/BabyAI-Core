@@ -12,7 +12,13 @@ class Capability(StrEnum):
     SYSTEM_INFO = "system.info"
     FILESYSTEM_LIST = "filesystem.list"
     FILESYSTEM_READ = "filesystem.read"
+    FILESYSTEM_WRITE = "filesystem.write"
     PROCESS_LIST = "process.list"
+    APPLICATION_OPEN = "application.open"
+    COMMAND_RUN = "command.run"
+    WINDOW_LIST = "window.list"
+    WINDOW_ACTIVATE = "window.activate"
+    SYSTEM_LOCK = "system.lock"
 
 
 @dataclass(slots=True)
