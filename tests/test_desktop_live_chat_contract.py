@@ -15,7 +15,7 @@ def test_desktop_live_chat_exposes_transcript_runtime_and_stop_controls() -> Non
     assert "CancellationTokenSource? _chatCancellation" in window
     assert '_bridge.ChatAsync(message, _chatCancellation.Token)' in window
     assert "_chatCancellation.Cancel()" in window
-    assert 'AppendConversation("You", message)' in window
+    assert 'AppendConversation("Вы", message)' in window
     assert 'AppendConversation("BabyAI", reply)' in window
 
     assert "CancellationToken cancellationToken = default" in bridge

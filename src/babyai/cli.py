@@ -7,7 +7,7 @@ from .config import BabyAIConfig
 from .hypothesis import Hypothesis, HypothesisProtocolError, HypothesisStore
 from .identity import Identity, IdentityStore
 from .llm import LLMError, LLMProvider
-from .memory import MemoryKind, SQLiteMemoryStore
+from .memory import DURABLE_MEMORY_KINDS, MemoryKind, MemoryRecord, SessionMemoryStore, SQLiteMemoryStore
 from .observer import Observer
 from .permissions import Capability, PermissionStore
 from .planner import Planner
@@ -19,9 +19,11 @@ app = typer.Typer(help="BabyAI Core Engine")
 permissions_app = typer.Typer(help="Manage BabyAI capabilities")
 task_app = typer.Typer(help="Manage BabyAI working task state")
 hypothesis_app = typer.Typer(help="Manage explicit testable hypotheses")
+memory_app = typer.Typer(help="View and manage explicit durable memory")
 app.add_typer(permissions_app, name="permissions")
 app.add_typer(task_app, name="task")
 app.add_typer(hypothesis_app, name="hypothesis")
+app.add_typer(memory_app, name="memory")
 
 
 def build_provider(config: BabyAIConfig) -> LLMProvider:
@@ -64,6 +66,7 @@ def build_core(owner: str | None = None) -> Primus:
         agent=AgentExecutor(permissions),
         planner=Planner(),
         working_memory=WorkingMemoryStore(config.working_memory_file),
+        session_memory=SessionMemoryStore(max_records=48),
     )
 
 
@@ -166,8 +169,11 @@ def task_set(
     goal: str,
     status: str = typer.Option("active"),
     context: str = typer.Option(""),
+    project: str = typer.Option(""),
 ) -> None:
-    task = working_memory_store().save(TaskState(goal=goal, status=status, context=context))
+    task = working_memory_store().save(
+        TaskState(goal=goal, status=status, context=context, project=project)
+    )
     task_proposal_store().clear()
     typer.echo(task.as_context())
 
@@ -277,24 +283,96 @@ def read_file(path: str) -> None:
         raise typer.Exit(code=3) from exc
 
 
-@app.command()
-def remember(text: str, kind: MemoryKind = typer.Option(MemoryKind.FACT)) -> None:
+def _memory_scope(kind: MemoryKind, project: str) -> str:
+    if kind not in DURABLE_MEMORY_KINDS:
+        raise typer.BadParameter("Durable memory kind must be preference, fact, knowledge, or project")
+    project = project.strip()
+    if kind is MemoryKind.PROJECT and not project:
+        raise typer.BadParameter("--project is required for project memory")
+    return project if kind is MemoryKind.PROJECT else "global"
+
+
+def _print_memory(record: MemoryRecord) -> None:
+    typer.echo(
+        f"#{record.id} [{record.kind.value}:{record.scope}] "
+        f"{record.role}: {record.content}"
+    )
+
+
+@memory_app.command("add")
+def memory_add(
+    text: str,
+    kind: MemoryKind = typer.Option(MemoryKind.FACT),
+    project: str = typer.Option(""),
+) -> None:
     config = BabyAIConfig.default()
-    record = SQLiteMemoryStore(config.memory_db).add("owner", text, kind=kind)
-    typer.echo(f"remembered #{record.id} [{record.kind.value}]")
+    record = SQLiteMemoryStore(config.memory_db).add(
+        "owner",
+        text,
+        kind=kind,
+        scope=_memory_scope(kind, project),
+    )
+    _print_memory(record)
+
+
+@memory_app.command("list")
+def memory_list(
+    query: str | None = typer.Argument(default=None),
+    kind: MemoryKind | None = typer.Option(None),
+    project: str = typer.Option(""),
+    limit: int = typer.Option(20, min=1, max=200),
+) -> None:
+    config = BabyAIConfig.default()
+    memory = SQLiteMemoryStore(config.memory_db)
+    scope = project.strip() or None
+    records = (
+        memory.search(query, limit=limit, kind=kind, scope=scope)
+        if query
+        else memory.recent(limit=limit, kind=kind, scope=scope)
+    )
+    for item in records:
+        _print_memory(item)
+
+
+@memory_app.command("update")
+def memory_update(memory_id: int, text: str) -> None:
+    try:
+        record = SQLiteMemoryStore(BabyAIConfig.default().memory_db).update(memory_id, text)
+    except KeyError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=6) from exc
+    _print_memory(record)
+
+
+@memory_app.command("delete")
+def memory_delete(memory_id: int) -> None:
+    if not SQLiteMemoryStore(BabyAIConfig.default().memory_db).delete(memory_id):
+        typer.echo(f"Memory #{memory_id} does not exist", err=True)
+        raise typer.Exit(code=6)
+    typer.echo(f"deleted #{memory_id}")
+
+
+@app.command()
+def remember(
+    text: str,
+    kind: MemoryKind = typer.Option(MemoryKind.FACT),
+    project: str = typer.Option(""),
+) -> None:
+    """Compatibility alias for `babyai memory add`."""
+
+    memory_add(text=text, kind=kind, project=project)
 
 
 @app.command()
 def memories(
     query: str | None = typer.Argument(default=None),
     kind: MemoryKind | None = typer.Option(None),
+    project: str = typer.Option(""),
     limit: int = typer.Option(20, min=1, max=200),
 ) -> None:
-    config = BabyAIConfig.default()
-    memory = SQLiteMemoryStore(config.memory_db)
-    records = memory.search(query, limit=limit, kind=kind) if query else memory.recent(limit=limit, kind=kind)
-    for item in records:
-        typer.echo(f"#{item.id} [{item.kind.value}] {item.role}: {item.content}")
+    """Compatibility alias for `babyai memory list`."""
+
+    memory_list(query=query, kind=kind, project=project, limit=limit)
 
 
 @app.command()

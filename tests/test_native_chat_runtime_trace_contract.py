@@ -18,8 +18,19 @@ def test_desktop_native_chat_emits_stage_diagnostics() -> None:
     assert '"native.model.open.start"' in resident
     assert '"native.model.open.done"' in resident
     assert '"native.prefill.start"' in generation
+    assert '"native.context.fit"' in generation
+    assert "fit_context_to_prompt=True" in resident
     assert '"native.prefill.done"' in generation
     assert '"native.first_token"' in generation
+    assert '"native.generation.done"' in generation
+    assert "tokens_per_second" in generation
+
+
+def test_native_desktop_prompt_budget_is_cpu_bounded() -> None:
+    root = Path(__file__).resolve().parents[1]
+    commands = (root / "src" / "babyai" / "desktop_commands.py").read_text(encoding="utf-8")
+
+    assert 'max_context_chars=6_000 if self.config.provider == "native" else 12_000' in commands
 
 
 def test_native_timeout_guidance_does_not_tell_native_users_to_start_ollama() -> None:

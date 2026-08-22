@@ -20,6 +20,13 @@ Genesis is the first MVP milestone. It includes:
 - capability permissions with deny-by-default behavior
 - setup diagnostics and end-to-end cognitive smoke coverage
 - native Windows Orb desktop shell with chat, approval controls, tray lifecycle, drag persistence and animated states
+- capability-gated Windows actions without unrestricted shell access
+- bounded session context plus explicit preference, fact and project memory controls
+- permissioned screen capture boundary with controlled follow-up approvals
+- opt-in local chat history and explicit assistant activity states
+
+Milestone 2 readiness and the next architecture boundary are tracked in
+`docs/MILESTONE_2_READINESS.md` and `docs/MILESTONE_3_COMPANION_WORKSPACE_PLAN.md`.
 
 ## First Windows MVP run
 

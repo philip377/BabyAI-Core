@@ -9,9 +9,12 @@ from .config import BabyAIConfig
 from .curiosa import CuriosityStore
 from .evidence import EvidenceStore
 from .hypothesis import HypothesisStore
+from .history import ChatHistoryStore
 from .identity import Identity
 from .learning_loop import LearningLoop
 from .permissions import Capability, PermissionStore
+from .agent import ToolCall
+from .primus import Primus
 from .tool_approval import PendingToolApprovalStore
 from .working_memory import WorkingMemoryStore
 
@@ -23,6 +26,7 @@ class DesktopSnapshot:
     learning: dict[str, object]
     permissions: dict[str, bool]
     runtime: dict[str, object]
+    history: dict[str, object]
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -32,6 +36,7 @@ class DesktopSnapshot:
             "learning": self.learning,
             "permissions": self.permissions,
             "runtime": self.runtime,
+            "history": self.history,
         }
 
 
@@ -59,6 +64,8 @@ def build_desktop_snapshot(config: BabyAIConfig | None = None) -> DesktopSnapsho
         capability.value: permissions_store.is_granted(capability)
         for capability in Capability
     }
+    history_store = ChatHistoryStore(config.history_db, config.history_settings_file)
+    history_messages = history_store.list(limit=500)
 
     learning = {
         "hypothesis": None if hypothesis is None else {
@@ -75,6 +82,9 @@ def build_desktop_snapshot(config: BabyAIConfig | None = None) -> DesktopSnapsho
             "tool": tool_approval.tool,
             "arguments": tool_approval.arguments,
             "capability": tool_approval.capability,
+            "prompt": Primus._permission_prompt(
+                ToolCall(tool_approval.tool, tool_approval.arguments)
+            ),
         },
         "next_step": loop.next_step,
     }
@@ -90,4 +100,9 @@ def build_desktop_snapshot(config: BabyAIConfig | None = None) -> DesktopSnapsho
         learning=learning,
         permissions=permissions,
         runtime=probe_brain_runtime(config).as_dict(),
+        history={
+            "enabled": history_store.is_enabled(),
+            "message_count": len(history_messages),
+            "projects": sorted({item.project for item in history_messages if item.project}),
+        },
     )

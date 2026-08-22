@@ -214,3 +214,46 @@ def test_generation_rejects_empty_prompt_tokenization():
 
     with pytest.raises(NativeRuntimeError, match="empty sequence"):
         generate_greedy(model, "")
+
+
+def test_generation_can_right_size_context_and_batch_to_the_prompt():
+    model = _FakeModel(
+        [NativeSample(99, True)],
+        {},
+        prompt_tokens=range(1405),
+        context_size=1792,
+    )
+
+    result = generate_greedy(
+        model,
+        "representative prompt",
+        max_tokens=128,
+        n_ctx=4096,
+        n_batch=4096,
+        n_threads=4,
+        fit_context_to_prompt=True,
+    )
+
+    assert result.stop_reason == "eog"
+    assert model.context_args == (1536, 1536, 4)
+
+
+def test_generation_keeps_configured_limits_when_prompt_does_not_fit():
+    model = _FakeModel(
+        [NativeSample(99, True)],
+        {},
+        prompt_tokens=range(4000),
+        context_size=4096,
+    )
+
+    result = generate_greedy(
+        model,
+        "oversized prompt",
+        max_tokens=128,
+        n_ctx=4096,
+        n_batch=2048,
+        fit_context_to_prompt=True,
+    )
+
+    assert result.stop_reason == "eog"
+    assert model.context_args == (4096, 2048, 0)

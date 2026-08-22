@@ -14,7 +14,7 @@ public static class ConversationTranscriptBehavior
     private const string CodeFence = "```";
 
     private static readonly Regex MessagePattern = new(
-        @"(?:\A|\r?\n\r?\n)(You|BabyAI|System): (.*?)(?=(?:\r?\n\r?\n)(?:You|BabyAI|System): |\z)",
+        @"(?:\A|\r?\n\r?\n)(You|Вы|BabyAI|System|Система): (.*?)(?=(?:\r?\n\r?\n)(?:You|Вы|BabyAI|System|Система): |\z)",
         RegexOptions.Compiled | RegexOptions.Singleline);
 
     private static readonly Regex LanguagePattern = new(
@@ -128,8 +128,10 @@ public static class ConversationTranscriptBehavior
 
     private static UIElement CreateMessageCard(string speaker, string text)
     {
-        var isUser = speaker.Equals("You", StringComparison.OrdinalIgnoreCase);
-        var isSystem = speaker.Equals("System", StringComparison.OrdinalIgnoreCase);
+        var isUser = speaker.Equals("You", StringComparison.OrdinalIgnoreCase)
+            || speaker.Equals("Вы", StringComparison.OrdinalIgnoreCase);
+        var isSystem = speaker.Equals("System", StringComparison.OrdinalIgnoreCase)
+            || speaker.Equals("Система", StringComparison.OrdinalIgnoreCase);
         var alignment = isSystem
             ? HorizontalAlignment.Center
             : isUser ? HorizontalAlignment.Right : HorizontalAlignment.Left;

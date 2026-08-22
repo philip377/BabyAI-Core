@@ -270,24 +270,48 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="4" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Button x:Name="ApproveButton"
-                            Grid.Column="0"
-                            Content="Сохранить"
-                            CornerRadius="12"
-                            Click="ApproveButton_Click"
-                            Visibility="Collapsed" />
-                    <Button x:Name="RejectButton"
-                            Grid.Column="1"
-                            Content="Отклонить"
-                            CornerRadius="12"
-                            Click="RejectButton_Click"
-                            Visibility="Collapsed" />
-                </Grid>
+                <Border x:Name="ApprovalCard"
+                        Grid.Row="4"
+                        Background="#1EFFB94A"
+                        BorderBrush="#55FFC66D"
+                        BorderThickness="1"
+                        CornerRadius="16"
+                        Padding="11,9"
+                        Visibility="Collapsed">
+                    <Grid RowSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="ТРЕБУЕТСЯ РАЗРЕШЕНИЕ"
+                                       FontSize="9"
+                                       CharacterSpacing="90"
+                                       Foreground="#FFFFD89A" />
+                            <TextBlock x:Name="ApprovalDescriptionText"
+                                       Text="BabyAI приостановил локальное действие до вашего решения."
+                                       FontSize="11"
+                                       TextWrapping="Wrap"
+                                       Foreground="#DFFFFFFF" />
+                        </StackPanel>
+                        <Grid Grid.Row="1" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="ApproveButton"
+                                    Grid.Column="0"
+                                    Content="Разрешить один раз"
+                                    CornerRadius="12"
+                                    Click="ApproveButton_Click" />
+                            <Button x:Name="RejectButton"
+                                    Grid.Column="1"
+                                    Content="Отклонить"
+                                    CornerRadius="12"
+                                    Click="RejectButton_Click" />
+                        </Grid>
+                    </Grid>
+                </Border>
 
                 <TextBlock x:Name="ConversationText"
                            Text="Чат готов. Напиши первое сообщение ниже."
