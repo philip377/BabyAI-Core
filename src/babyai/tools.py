@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-import os
 import ctypes
+import csv
+import io
+import locale
+import os
+import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +49,28 @@ def _resolve_local_path(path: str | Path) -> Path:
     return Path(path).expanduser().resolve()
 
 
+def _windows_process_list() -> list[str]:
+    """Read a bounded process snapshot through Windows' fixed tasklist command."""
+
+    completed = subprocess.run(
+        ["tasklist.exe", "/fo", "csv", "/nh"],
+        check=True,
+        capture_output=True,
+        timeout=5,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    encoding = locale.getpreferredencoding(False) or "utf-8"
+    output = completed.stdout.decode(encoding, errors="replace")
+    results: list[str] = []
+    for row in csv.reader(io.StringIO(output)):
+        if len(row) < 2 or not row[1].strip().isdigit():
+            continue
+        results.append(f"{row[1].strip()}: {row[0].strip()}")
+        if len(results) >= 200:
+            break
+    return results
+
+
 @dataclass(slots=True)
 class Toolset:
     permissions: PermissionStore
@@ -68,6 +94,8 @@ class Toolset:
 
     def list_processes(self) -> list[str]:
         self.permissions.require(Capability.PROCESS_LIST)
+        if _is_windows():
+            return _windows_process_list()
         proc = Path("/proc")
         if os.name != "posix" or not proc.exists():
             return ["Process listing is not implemented for this operating system yet."]

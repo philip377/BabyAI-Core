@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Iterator
 
 
 class Capability(StrEnum):
@@ -16,6 +18,7 @@ class Capability(StrEnum):
 @dataclass(slots=True)
 class PermissionStore:
     path: Path
+    _temporary: dict[Capability, int] = field(default_factory=dict, init=False, repr=False)
 
     def _load(self) -> set[Capability]:
         if not self.path.exists():
@@ -39,7 +42,7 @@ class PermissionStore:
         return sorted(self._load(), key=lambda item: item.value)
 
     def is_granted(self, capability: Capability) -> bool:
-        return capability in self._load()
+        return self._temporary.get(capability, 0) > 0 or capability in self._load()
 
     def grant(self, capability: Capability) -> None:
         granted = self._load()
@@ -57,3 +60,17 @@ class PermissionStore:
                 f"Capability '{capability.value}' is not granted. "
                 f"Use: babyai permissions grant {capability.value}"
             )
+
+    @contextmanager
+    def temporary_grant(self, capability: Capability) -> Iterator[None]:
+        """Grant one capability to this executor only, without persisting it."""
+
+        self._temporary[capability] = self._temporary.get(capability, 0) + 1
+        try:
+            yield
+        finally:
+            remaining = self._temporary.get(capability, 0) - 1
+            if remaining > 0:
+                self._temporary[capability] = remaining
+            else:
+                self._temporary.pop(capability, None)

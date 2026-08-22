@@ -20,7 +20,7 @@ from .permissions import PermissionStore
 from .planner import Planner
 from .primus import Primus
 from .resident_native_brain import ResidentNativeBrainProvider
-from .runtime_trace import trace
+from .runtime_trace import process_memory_metrics, trace
 from .tool_approval import PendingToolApprovalStore
 from .working_memory import TaskState, WorkingMemoryStore
 
@@ -65,6 +65,7 @@ class DesktopCommands:
                     native_threads=native_threads,
                     n_gpu_layers=route.n_gpu_layers,
                     elapsed_ms=round((time.monotonic() - started) * 1000),
+                    **process_memory_metrics(),
                 )
                 provider: LLMProvider = ResidentNativeBrainProvider(
                     model_path=self.config.native_model_file,
@@ -85,6 +86,7 @@ class DesktopCommands:
             "provider.ready",
             provider=self.config.provider,
             elapsed_ms=round((time.monotonic() - started) * 1000),
+            **process_memory_metrics(),
         )
         return provider
 
@@ -137,6 +139,7 @@ class DesktopCommands:
                 "chat.core.start",
                 provider=self.config.provider,
                 message_chars=len(message),
+                **process_memory_metrics(),
             )
             try:
                 reply = self._core().think(message)
@@ -151,6 +154,7 @@ class DesktopCommands:
                 "chat.core.done",
                 elapsed_ms=round((time.monotonic() - started) * 1000),
                 reply_chars=len(reply),
+                **process_memory_metrics(),
             )
             return {"ok": True, "command": command, "reply": reply}
 

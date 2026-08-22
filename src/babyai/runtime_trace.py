@@ -3,7 +3,50 @@ from __future__ import annotations
 import os
 import sys
 import time
+import ctypes
 from pathlib import Path
+
+
+def process_memory_metrics() -> dict[str, float]:
+    """Return best-effort process memory counters without adding a dependency."""
+
+    try:
+        if os.name == "nt":
+            size_t = ctypes.c_size_t
+
+            class ProcessMemoryCountersEx(ctypes.Structure):
+                _fields_ = [
+                    ("cb", ctypes.c_ulong),
+                    ("page_fault_count", ctypes.c_ulong),
+                    ("peak_working_set_size", size_t),
+                    ("working_set_size", size_t),
+                    ("quota_peak_paged_pool_usage", size_t),
+                    ("quota_paged_pool_usage", size_t),
+                    ("quota_peak_non_paged_pool_usage", size_t),
+                    ("quota_non_paged_pool_usage", size_t),
+                    ("pagefile_usage", size_t),
+                    ("peak_pagefile_usage", size_t),
+                    ("private_usage", size_t),
+                ]
+
+            counters = ProcessMemoryCountersEx()
+            counters.cb = ctypes.sizeof(counters)
+            handle = ctypes.windll.kernel32.GetCurrentProcess()
+            ok = ctypes.windll.psapi.GetProcessMemoryInfo(
+                handle,
+                ctypes.byref(counters),
+                counters.cb,
+            )
+            if ok:
+                mib = 1024 * 1024
+                return {
+                    "working_set_mb": round(counters.working_set_size / mib, 1),
+                    "private_mb": round(counters.private_usage / mib, 1),
+                    "peak_working_set_mb": round(counters.peak_working_set_size / mib, 1),
+                }
+    except Exception:
+        pass
+    return {}
 
 
 def trace(stage: str, **fields: object) -> None:

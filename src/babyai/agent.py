@@ -155,14 +155,10 @@ class AgentExecutor:
 
     def execute_once(self, call: ToolCall) -> str:
         capability = self.required_capability(call)
-        already_granted = self.permissions.is_granted(capability)
-        if not already_granted:
-            self.permissions.grant(capability)
-        try:
+        if self.permissions.is_granted(capability):
             return self.execute(call)
-        finally:
-            if not already_granted:
-                self.permissions.revoke(capability)
+        with self.permissions.temporary_grant(capability):
+            return self.execute(call)
 
     def execute(self, call: ToolCall) -> str:
         handlers: dict[str, Callable[[dict[str, Any]], object]] = {
