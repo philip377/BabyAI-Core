@@ -192,6 +192,20 @@ class Primus:
         return "На рабочем столе я не нашёл файлов."
 
     @staticmethod
+    def _completed_action_response(call: ToolCall) -> str | None:
+        messages = {
+            "application.open": "Приложение открыто.",
+            "filesystem.write": "Файл записан.",
+            "window.activate": "Окно активировано.",
+            "system.lock": "Рабочая станция заблокирована.",
+            "screen.capture": (
+                "Снимок сохранён локально. Текущая текстовая модель не анализирует пиксели; "
+                "дальнейшее действие можно только предложить отдельно и подтвердить ещё раз."
+            ),
+        }
+        return messages.get(call.name)
+
+    @staticmethod
     def _permission_prompt(call: ToolCall) -> str:
         def shown(key: str, fallback: str) -> str:
             value = str(call.arguments.get(key, fallback)).strip() or fallback
@@ -218,6 +232,10 @@ class Primus:
             return f"Разрешить один раз активировать окно с идентификатором {shown('handle', 'не указан')}?"
         if call.name == "system.lock":
             return "Разрешить один раз заблокировать рабочую станцию Windows?"
+        if call.name == "screen.capture":
+            mode = shown("mode", "active_window")
+            target = "активного окна" if mode == "active_window" else "основного экрана"
+            return f"Разрешить один раз сделать снимок {target}? На снимке могут быть личные данные."
         return "Мне нужно ваше разрешение, чтобы выполнить это действие один раз."
 
     def _repair_tool_call(self, base: str, first: str) -> ToolCall | None:
@@ -322,6 +340,8 @@ class Primus:
 
         tool_result = self.agent.execute(call)
         fast_response = self._fast_local_tool_response(user_input, call, tool_result)
+        if fast_response is None:
+            fast_response = self._completed_action_response(call)
         if fast_response is not None:
             return fast_response
         followup_base = self._base_prompt(user_input, include_tool_catalog=False)
@@ -344,6 +364,8 @@ class Primus:
         try:
             tool_result = self.agent.execute_once(call)
             response = self._fast_local_tool_response(pending.user_input, call, tool_result)
+            if response is None:
+                response = self._completed_action_response(call)
             if response is None:
                 response = self.llm.generate(self._tool_followup(base, call, tool_result))
         finally:

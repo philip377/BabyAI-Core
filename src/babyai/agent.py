@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
 
 from .observer import Observer
 from .permissions import Capability, PermissionStore
+from .screen_vision import ScreenCaptureStore
 from .tools import Toolset
 from .windows_actions import WindowsActions
 
@@ -24,6 +25,7 @@ class ToolProtocolError(ValueError):
 @dataclass(slots=True)
 class AgentExecutor:
     permissions: PermissionStore
+    capture_store: ScreenCaptureStore | None = None
     toolset: Toolset = field(init=False)
     observer: Observer = field(init=False)
     windows: WindowsActions = field(init=False)
@@ -32,6 +34,11 @@ class AgentExecutor:
         self.toolset = Toolset(self.permissions)
         self.observer = Observer(self.permissions)
         self.windows = WindowsActions(self.permissions)
+        if self.capture_store is None:
+            self.capture_store = ScreenCaptureStore(
+                self.permissions.path.parent / "screen_captures",
+                self.permissions,
+            )
 
     @staticmethod
     def tool_names() -> tuple[str, ...]:
@@ -46,6 +53,7 @@ class AgentExecutor:
             "window.list",
             "window.activate",
             "system.lock",
+            "screen.capture",
         )
 
     def catalog(self) -> str:
@@ -61,6 +69,7 @@ class AgentExecutor:
             "- window.list {}\n"
             "- window.activate {\"handle\": 123}\n"
             "- system.lock {}\n"
+            "- screen.capture {\"mode\": \"active_window|primary_screen\"}\n"
             "If the user's request requires observing the local computer and one of these tools can answer it, "
             "call the tool immediately. Do not discuss which tools exist, do not explain permission mechanics, "
             "and do not ask the user to grant permission yourself; the BabyAI host handles permission prompts. "
@@ -147,6 +156,11 @@ class AgentExecutor:
             "system.lock": (
                 "lock workstation", "lock computer", "заблокируй компьютер", "заблокируй экран",
             ),
+            "screen.capture": (
+                "capture screen", "take screenshot", "see my screen", "active window screenshot",
+                "сделай скриншот", "сними экран", "посмотри на экран", "увидь экран",
+                "скриншот активного окна", "снимок активного окна",
+            ),
         }
         return any(marker in text for marker in markers.get(tool_name, ()))
 
@@ -191,6 +205,7 @@ class AgentExecutor:
             "window.list": Capability.WINDOW_LIST,
             "window.activate": Capability.WINDOW_ACTIVATE,
             "system.lock": Capability.SYSTEM_LOCK,
+            "screen.capture": Capability.SCREEN_CAPTURE,
         }
         capability = capabilities.get(call.name)
         if capability is None:
@@ -221,6 +236,7 @@ class AgentExecutor:
             "window.list": lambda args: self._no_arguments(args, self.windows.list_windows),
             "window.activate": self._activate_window,
             "system.lock": lambda args: self._no_arguments(args, self.windows.lock_workstation),
+            "screen.capture": self._capture_screen,
         }
         handler = handlers.get(call.name)
         if handler is None:
@@ -302,6 +318,14 @@ class AgentExecutor:
         return self.windows.activate_window(
             self._required_int(arguments, "handle", "window.activate")
         )
+
+    def _capture_screen(self, arguments: dict[str, Any]) -> dict[str, object]:
+        self._reject_argument_keys(arguments, {"mode"}, "screen.capture")
+        assert self.capture_store is not None
+        observation = self.capture_store.capture(
+            self._required_string(arguments, "mode", "screen.capture")
+        )
+        return asdict(observation)
 
     @staticmethod
     def _required_string(

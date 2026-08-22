@@ -78,6 +78,10 @@ class BabyAIConfig:
         return self.data_dir / "pending_tool_approval.json"
 
     @property
+    def screen_captures_dir(self) -> Path:
+        return self.data_dir / "screen_captures"
+
+    @property
     def working_memory_file(self) -> Path:
         return self.data_dir / "working_memory.json"
 

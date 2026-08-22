@@ -24,6 +24,7 @@ BabyAI uses capability-based access. New installations start with zero system ca
 - `window.list`
 - `window.activate`
 - `system.lock`
+- `screen.capture`
 
 One-shot grants are kept in the active executor only and are never persisted to
 `permissions.json`. Windows process listing invokes `tasklist.exe` with fixed arguments,

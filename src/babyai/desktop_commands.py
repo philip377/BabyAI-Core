@@ -4,7 +4,7 @@ import os
 import time
 from dataclasses import asdict
 
-from .agent import AgentExecutor, ToolProtocolError
+from .agent import AgentExecutor, ToolCall, ToolProtocolError
 from .autodidact import LessonCandidateStore
 from .brain import BrainProviderError, build_brain_provider
 from .config import BabyAIConfig
@@ -21,7 +21,9 @@ from .planner import Planner
 from .primus import Primus
 from .resident_native_brain import ResidentNativeBrainProvider
 from .runtime_trace import process_memory_metrics, trace
-from .tool_approval import PendingToolApprovalStore
+from .screen_vision import ScreenCaptureStore
+from .tool_approval import PendingToolApproval, PendingToolApprovalStore
+from .windows_actions import APPLICATIONS
 from .working_memory import TaskState, WorkingMemoryStore
 
 
@@ -241,6 +243,73 @@ class DesktopCommands:
         if command == "memory.session.clear":
             self._session_memory.clear()
             return {"ok": True, "command": command}
+
+        if command == "vision.observations.list":
+            store = ScreenCaptureStore(
+                self.config.screen_captures_dir,
+                PermissionStore(self.config.permissions_file),
+            )
+            return {
+                "ok": True,
+                "command": command,
+                "observations": [asdict(item) for item in store.list()],
+            }
+
+        if command == "vision.observations.delete":
+            observation_id = str(payload.get("id", "")).strip()
+            if not observation_id:
+                raise DesktopCommandError("vision.observations.delete.id is required")
+            store = ScreenCaptureStore(
+                self.config.screen_captures_dir,
+                PermissionStore(self.config.permissions_file),
+            )
+            if not store.delete(observation_id):
+                raise DesktopCommandError(f"Screen observation {observation_id} does not exist")
+            return {"ok": True, "command": command, "observation_id": observation_id}
+
+        if command == "vision.action.propose":
+            observation_id = str(payload.get("observation_id", "")).strip()
+            store = ScreenCaptureStore(
+                self.config.screen_captures_dir,
+                PermissionStore(self.config.permissions_file),
+            )
+            if not observation_id or store.get(observation_id) is None:
+                raise DesktopCommandError("vision.action.propose requires an existing observation_id")
+            tool = str(payload.get("tool", "")).strip()
+            arguments = payload.get("arguments", {})
+            if not isinstance(arguments, dict):
+                raise DesktopCommandError("vision.action.propose.arguments must be an object")
+            if tool == "application.open":
+                name = arguments.get("name")
+                if not isinstance(name, str) or name.strip().casefold() not in APPLICATIONS:
+                    raise DesktopCommandError("vision action application must be allowlisted")
+                arguments = {"name": name.strip().casefold()}
+            elif tool == "window.activate":
+                handle = arguments.get("handle")
+                if isinstance(handle, bool) or not isinstance(handle, int) or handle <= 0:
+                    raise DesktopCommandError("vision action window handle must be a positive integer")
+                arguments = {"handle": handle}
+            else:
+                raise DesktopCommandError(
+                    "vision action must be application.open or window.activate"
+                )
+            executor = AgentExecutor(PermissionStore(self.config.permissions_file))
+            call = ToolCall(tool, arguments)
+            capability = executor.required_capability(call)
+            PendingToolApprovalStore(self.config.pending_tool_approval_file).save(
+                PendingToolApproval(
+                    user_input=f"Предложенное действие после снимка {observation_id}: {tool}",
+                    tool=tool,
+                    arguments=arguments,
+                    capability=capability.value,
+                )
+            )
+            return {
+                "ok": True,
+                "command": command,
+                "reply": Primus._permission_prompt(call),
+                "observation_id": observation_id,
+            }
 
         if command == "task.set":
             goal = str(payload.get("goal", "")).strip()

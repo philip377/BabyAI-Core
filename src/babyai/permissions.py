@@ -19,6 +19,7 @@ class Capability(StrEnum):
     WINDOW_LIST = "window.list"
     WINDOW_ACTIVATE = "window.activate"
     SYSTEM_LOCK = "system.lock"
+    SCREEN_CAPTURE = "screen.capture"
 
 
 @dataclass(slots=True)
