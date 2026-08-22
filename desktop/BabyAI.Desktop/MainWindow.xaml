@@ -288,7 +288,8 @@
                                        FontSize="9"
                                        CharacterSpacing="90"
                                        Foreground="#FFFFD89A" />
-                            <TextBlock Text="BabyAI приостановил локальное действие до вашего решения."
+                            <TextBlock x:Name="ApprovalDescriptionText"
+                                       Text="BabyAI приостановил локальное действие до вашего решения."
                                        FontSize="11"
                                        TextWrapping="Wrap"
                                        Foreground="#DFFFFFFF" />

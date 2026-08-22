@@ -10,6 +10,7 @@ from .brain import BrainProviderError, build_brain_provider
 from .config import BabyAIConfig
 from .desktop_bridge import build_desktop_snapshot
 from .hypothesis import HypothesisStore
+from .history import ChatHistoryStore
 from .identity import Identity, IdentityStore
 from .llm import LLMError, LLMProvider
 from .memory import DURABLE_MEMORY_KINDS, MemoryKind, MemoryRecord, SessionMemoryStore, SQLiteMemoryStore
@@ -160,6 +161,14 @@ class DesktopCommands:
                 reply_chars=len(reply),
                 **process_memory_metrics(),
             )
+            history = ChatHistoryStore(
+                self.config.history_db,
+                self.config.history_settings_file,
+            )
+            task = WorkingMemoryStore(self.config.working_memory_file).load()
+            project = "" if task is None else task.project
+            history.add("user", message, project=project)
+            history.add("babyai", reply, project=project)
             return {"ok": True, "command": command, "reply": reply}
 
         if command == "approval.approve":
@@ -167,6 +176,7 @@ class DesktopCommands:
                 reply = self._core().approve_pending_tool()
             except (ToolProtocolError, LLMError) as exc:
                 raise DesktopCommandError(str(exc)) from exc
+            self._history().add("babyai", reply, project=self._active_project())
             return {"ok": True, "command": command, "reply": reply}
 
         if command == "approval.reject":
@@ -174,7 +184,34 @@ class DesktopCommands:
                 reply = self._core().reject_pending_tool()
             except ToolProtocolError as exc:
                 raise DesktopCommandError(str(exc)) from exc
+            self._history().add("babyai", reply, project=self._active_project())
             return {"ok": True, "command": command, "reply": reply}
+
+        if command == "history.set_enabled":
+            enabled = payload.get("enabled")
+            if not isinstance(enabled, bool):
+                raise DesktopCommandError("history.set_enabled.enabled must be true or false")
+            self._history().set_enabled(enabled)
+            return {"ok": True, "command": command, "enabled": enabled}
+
+        if command == "history.list":
+            project_value = payload.get("project")
+            project = None if project_value is None else str(project_value).strip()
+            limit = payload.get("limit", 100)
+            if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 500:
+                raise DesktopCommandError("history.list.limit must be between 1 and 500")
+            return {
+                "ok": True,
+                "command": command,
+                "enabled": self._history().is_enabled(),
+                "messages": [asdict(item) for item in self._history().list(project=project, limit=limit)],
+            }
+
+        if command == "history.clear":
+            project_value = payload.get("project")
+            project = None if project_value is None else str(project_value).strip()
+            deleted = self._history().clear(project=project)
+            return {"ok": True, "command": command, "deleted": deleted}
 
         if command == "memory.save":
             content = str(payload.get("content", "")).strip()
@@ -381,3 +418,10 @@ class DesktopCommands:
             "content": record.content,
             "created_at": record.created_at.isoformat(),
         }
+
+    def _history(self) -> ChatHistoryStore:
+        return ChatHistoryStore(self.config.history_db, self.config.history_settings_file)
+
+    def _active_project(self) -> str:
+        task = WorkingMemoryStore(self.config.working_memory_file).load()
+        return "" if task is None else task.project

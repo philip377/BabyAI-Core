@@ -51,6 +51,7 @@ public static class ReplyActivityBehavior
             || value.Contains("checking")
             || value.Contains("stopping")
             || value.Contains("дума")
+            || value.Contains("выполня")
             || value.Contains("провер")
             || value.Contains("останав");
 

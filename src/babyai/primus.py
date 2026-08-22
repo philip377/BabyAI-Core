@@ -360,16 +360,16 @@ class Primus:
             self.tool_approvals.clear()
             raise ToolProtocolError("Pending tool approval capability mismatch")
 
+        # Consume before execution. If the Desktop cancels by terminating the worker,
+        # the same approval cannot be replayed after restart.
+        self.tool_approvals.clear()
         base = self._base_prompt(pending.user_input, include_tool_catalog=False)
-        try:
-            tool_result = self.agent.execute_once(call)
-            response = self._fast_local_tool_response(pending.user_input, call, tool_result)
-            if response is None:
-                response = self._completed_action_response(call)
-            if response is None:
-                response = self.llm.generate(self._tool_followup(base, call, tool_result))
-        finally:
-            self.tool_approvals.clear()
+        tool_result = self.agent.execute_once(call)
+        response = self._fast_local_tool_response(pending.user_input, call, tool_result)
+        if response is None:
+            response = self._completed_action_response(call)
+        if response is None:
+            response = self.llm.generate(self._tool_followup(base, call, tool_result))
 
         self._remember_episode("babyai", response)
         return response

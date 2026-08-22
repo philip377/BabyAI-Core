@@ -27,6 +27,8 @@ public sealed partial class MainWindow : Window
     private bool _dragMoved;
     private bool _exitRequested;
     private bool _busy;
+    private bool _historyEnabled;
+    private int _historyMessageCount;
     private Point _dragOrigin;
     private PointInt32 _windowOrigin;
 
@@ -169,11 +171,20 @@ public sealed partial class MainWindow : Window
     {
         var status = await _bridge.StatusAsync();
         IdentityText.Text = status.Name;
-        TaskText.Text = string.IsNullOrWhiteSpace(status.TaskGoal) ? "No active task" : status.TaskGoal;
-        CoreStatusText.Text = "Core: connected";
+        TaskText.Text = string.IsNullOrWhiteSpace(status.TaskGoal)
+            ? "Нет активной задачи"
+            : string.IsNullOrWhiteSpace(status.TaskProject)
+                ? status.TaskGoal
+                : $"{status.TaskProject} · {status.TaskGoal}";
+        CoreStatusText.Text = "Core: подключён";
         RuntimeText.Text = BuildRuntimeLabel();
         RetryButton.Visibility = Visibility.Collapsed;
         ApprovalCard.Visibility = status.RequiresApproval ? Visibility.Visible : Visibility.Collapsed;
+        ApprovalDescriptionText.Text = string.IsNullOrWhiteSpace(status.ApprovalPrompt)
+            ? "BabyAI приостановил локальное действие до вашего решения."
+            : status.ApprovalPrompt;
+        _historyEnabled = status.HistoryEnabled;
+        _historyMessageCount = status.HistoryCount;
         ApplyState(status.RequiresApproval ? OrbState.Approval : OrbState.Idle);
     }
 
@@ -201,26 +212,28 @@ public sealed partial class MainWindow : Window
 
         _chatCancellation?.Dispose();
         _chatCancellation = new CancellationTokenSource();
-        AppendConversation("You", message);
+        AppendConversation("Вы", message);
         MessageBox.Text = string.Empty;
 
         try
         {
             SetBusy(true, canStop: true);
             ApplyState(OrbState.Thinking);
-            CoreStatusText.Text = "Core: thinking";
+            CoreStatusText.Text = "Core: думаю";
             RetryButton.Visibility = Visibility.Collapsed;
-            ReplyText.Text = "Thinking…";
+            ReplyText.Text = "Думаю…";
             var reply = await _bridge.ChatAsync(message, _chatCancellation.Token);
-            ReplyText.Text = "Response complete.";
+            ReplyText.Text = "Готово.";
             AppendConversation("BabyAI", reply);
             await RefreshStatusAsync();
+            if (ApprovalCard.Visibility != Visibility.Visible)
+                ApplyState(OrbState.Done);
         }
         catch (OperationCanceledException)
         {
-            CoreStatusText.Text = "Core: connected";
-            ReplyText.Text = "Generation stopped.";
-            AppendConversation("System", "Generation stopped by user.");
+            CoreStatusText.Text = "Core: подключён";
+            ReplyText.Text = "Действие отменено.";
+            AppendConversation("Система", "Остановлено пользователем.");
             ApplyState(OrbState.Idle);
         }
         catch (Exception ex)
@@ -242,8 +255,8 @@ public sealed partial class MainWindow : Window
         if (_chatCancellation is null || _chatCancellation.IsCancellationRequested)
             return;
 
-        CoreStatusText.Text = "Core: stopping";
-        ReplyText.Text = "Stopping generation…";
+        CoreStatusText.Text = "Core: останавливаю";
+        ReplyText.Text = "Останавливаю…";
         StopButton.IsEnabled = false;
         _chatCancellation.Cancel();
     }
@@ -257,11 +270,11 @@ public sealed partial class MainWindow : Window
         {
             SetBusy(true);
             ApplyState(OrbState.Thinking);
-            CoreStatusText.Text = "Core: checking";
-            ReplyText.Text = "Checking BabyAI Core…";
+            CoreStatusText.Text = "Core: проверяю";
+            ReplyText.Text = "Проверяю BabyAI Core…";
             RetryButton.Visibility = Visibility.Collapsed;
             await RefreshStatusAsync();
-            ReplyText.Text = "Core connection restored.";
+            ReplyText.Text = "Соединение с Core восстановлено.";
         }
         catch (Exception ex)
         {
@@ -467,7 +480,9 @@ public sealed partial class MainWindow : Window
             OrbState.Idle => "•",
             OrbState.Listening => "≈",
             OrbState.Thinking => "✦",
+            OrbState.Executing => "›",
             OrbState.Approval => "!",
+            OrbState.Done => "✓",
             OrbState.Error => "×",
             _ => "•"
         };
@@ -477,7 +492,9 @@ public sealed partial class MainWindow : Window
             OrbState.Idle => new OrbVisual(1.035, 0.26, 2600, Color.FromArgb(255, 124, 141, 255), Color.FromArgb(255, 184, 200, 255), Color.FromArgb(255, 109, 124, 255)),
             OrbState.Listening => new OrbVisual(1.09, 0.48, 850, Color.FromArgb(255, 99, 220, 255), Color.FromArgb(255, 126, 220, 255), Color.FromArgb(255, 65, 151, 255)),
             OrbState.Thinking => new OrbVisual(1.075, 0.58, 650, Color.FromArgb(255, 174, 122, 255), Color.FromArgb(255, 163, 132, 255), Color.FromArgb(255, 111, 90, 255)),
+            OrbState.Executing => new OrbVisual(1.07, 0.55, 720, Color.FromArgb(255, 83, 205, 214), Color.FromArgb(255, 111, 218, 224), Color.FromArgb(255, 45, 156, 171)),
             OrbState.Approval => new OrbVisual(1.055, 0.62, 1100, Color.FromArgb(255, 255, 190, 86), Color.FromArgb(255, 255, 204, 118), Color.FromArgb(255, 227, 148, 44)),
+            OrbState.Done => new OrbVisual(1.045, 0.42, 1800, Color.FromArgb(255, 76, 212, 145), Color.FromArgb(255, 108, 236, 173), Color.FromArgb(255, 49, 165, 112)),
             OrbState.Error => new OrbVisual(1.045, 0.64, 420, Color.FromArgb(255, 255, 96, 113), Color.FromArgb(255, 255, 132, 145), Color.FromArgb(255, 208, 62, 84)),
             _ => new OrbVisual(1.035, 0.26, 2600, Color.FromArgb(255, 124, 141, 255), Color.FromArgb(255, 184, 200, 255), Color.FromArgb(255, 109, 124, 255)),
         };
@@ -527,6 +544,8 @@ public enum OrbState
     Idle,
     Listening,
     Thinking,
+    Executing,
     Approval,
+    Done,
     Error
 }

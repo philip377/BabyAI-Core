@@ -73,6 +73,7 @@ public sealed partial class MainWindow
         AddSection("Обновления", BuildUpdateSettings);
         AddSection("Мозг", BuildBrainSettings);
         AddSection("Производительность", BuildPerformanceSettings);
+        AddSection("История и проекты", BuildHistorySettings);
         AddSection("Интерфейс", BuildInterfaceSettings);
         AddSection("Диагностика", BuildDiagnosticsSettings);
 
@@ -285,6 +286,86 @@ public sealed partial class MainWindow
             "Адаптивный · BabyAI автоматически помещает панель в рабочую область текущего монитора."));
         panel.Children.Add(CreateSettingsNote(
             "Настройка «Всегда поверх окон» сохраняется локально в %LOCALAPPDATA%\\BabyAI\\ui.json."));
+        return panel;
+    }
+
+    private UIElement BuildHistorySettings()
+    {
+        var panel = CreateSettingsPage(
+            "История и проекты",
+            "История выключена по умолчанию и не является долговременной памятью BabyAI.");
+        var status = new TextBlock
+        {
+            Text = $"Сохранено сообщений: {_historyMessageCount}",
+            FontSize = 11,
+            Opacity = 0.68,
+        };
+        var historyToggle = new ToggleSwitch
+        {
+            Header = "Сохранять локальную историю чата",
+            IsOn = _historyEnabled,
+            OnContent = "Включено",
+            OffContent = "Выключено",
+            Margin = new Thickness(2, 2, 2, 4),
+        };
+        var updatingHistoryToggle = false;
+        historyToggle.Toggled += async (_, _) =>
+        {
+            if (updatingHistoryToggle)
+                return;
+            try
+            {
+                historyToggle.IsEnabled = false;
+                await _bridge.SetHistoryEnabledAsync(historyToggle.IsOn);
+                _historyEnabled = historyToggle.IsOn;
+                status.Text = _historyEnabled
+                    ? $"История включена · сохранено сообщений: {_historyMessageCount}"
+                    : $"История выключена · сохранено сообщений: {_historyMessageCount}";
+            }
+            catch (Exception ex)
+            {
+                updatingHistoryToggle = true;
+                historyToggle.IsOn = _historyEnabled;
+                updatingHistoryToggle = false;
+                status.Text = $"Не удалось изменить настройку: {ex.Message}";
+            }
+            finally
+            {
+                historyToggle.IsEnabled = true;
+            }
+        };
+        var historyCard = new StackPanel { Spacing = 6 };
+        historyCard.Children.Add(historyToggle);
+        historyCard.Children.Add(status);
+        panel.Children.Add(CreateSettingsCard(historyCard));
+
+        var clearButton = new Button
+        {
+            Content = "Удалить всю историю",
+            HorizontalAlignment = HorizontalAlignment.Left,
+            CornerRadius = new CornerRadius(10),
+        };
+        clearButton.Click += async (_, _) =>
+        {
+            var confirmation = new ContentDialog
+            {
+                XamlRoot = Root.XamlRoot,
+                Title = "Удалить локальную историю?",
+                Content = "Долговременные факты и память проектов не будут удалены.",
+                PrimaryButtonText = "Удалить",
+                CloseButtonText = "Отмена",
+                DefaultButton = ContentDialogButton.Close,
+            };
+            if (await confirmation.ShowAsync() != ContentDialogResult.Primary)
+                return;
+            await _bridge.ClearHistoryAsync();
+            _historyMessageCount = 0;
+            status.Text = "История очищена.";
+        };
+        panel.Children.Add(CreateSettingsCard(clearButton));
+        panel.Children.Add(CreateSettingsNote(
+            "Сообщения привязываются к активному проекту задачи. Факты, предпочтения и память проекта "
+            + "управляются отдельно и не удаляются вместе с историей."));
         return panel;
     }
 

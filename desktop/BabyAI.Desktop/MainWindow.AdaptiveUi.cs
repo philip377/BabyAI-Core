@@ -122,8 +122,10 @@ public sealed partial class MainWindow
             return;
 
         var transcript = ConversationText.Text ?? string.Empty;
-        var hasMessages = transcript.Contains("You: ", StringComparison.Ordinal)
+        var hasMessages = transcript.Contains("Вы: ", StringComparison.Ordinal)
+            || transcript.Contains("You: ", StringComparison.Ordinal)
             || transcript.Contains("BabyAI: ", StringComparison.Ordinal)
+            || transcript.Contains("Система: ", StringComparison.Ordinal)
             || transcript.Contains("System: ", StringComparison.Ordinal);
         _quickPromptLayer.Visibility = hasMessages ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -146,7 +148,9 @@ public sealed partial class MainWindow
         {
             "≈" => "BabyAI · слушаю",
             "✦" => "BabyAI · думаю",
+            "›" => "BabyAI · выполняю",
             "!" => "BabyAI · ждёт решения",
+            "✓" => "BabyAI · готово",
             "×" => "BabyAI · ошибка",
             _ => "BabyAI · готов",
         };

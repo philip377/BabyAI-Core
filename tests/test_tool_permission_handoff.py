@@ -324,7 +324,7 @@ def test_desktop_contract_surfaces_tool_approval_controls() -> None:
     assert 'TryGetProperty("tool_approval"' in bridge
     assert "ApproveToolAsync" in bridge
     assert "RejectToolAsync" in bridge
-    assert 'ExecuteReplyCommandAsync("approval.approve")' in bridge
+    assert 'ExecuteReplyCommandAsync("approval.approve", cancellationToken)' in bridge
     assert 'command == "approval.approve"' in commands
     assert 'command == "approval.reject"' in commands
     assert 'repair_tool_calls=self.config.provider == "native"' in commands
