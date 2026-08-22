@@ -12,7 +12,7 @@ from .desktop_bridge import build_desktop_snapshot
 from .hypothesis import HypothesisStore
 from .identity import Identity, IdentityStore
 from .llm import LLMError, LLMProvider
-from .memory import MemoryKind, SQLiteMemoryStore
+from .memory import DURABLE_MEMORY_KINDS, MemoryKind, MemoryRecord, SessionMemoryStore, SQLiteMemoryStore
 from .native_acceleration import select_native_runtime
 from .native_runtime import NativeRuntimeError
 from .native_threads import preferred_native_thread_count
@@ -36,6 +36,7 @@ class DesktopCommands:
         self.config = config or BabyAIConfig.default()
         self.persistent = persistent
         self._provider_instance: LLMProvider | None = None
+        self._session_memory = SessionMemoryStore(max_records=48)
 
     def _provider(self) -> LLMProvider:
         if self.persistent and self._provider_instance is not None:
@@ -111,6 +112,7 @@ class DesktopCommands:
             # CPU-native chat benefits materially from a bounded prompt. The tool
             # catalog and newest memories remain intact; only older memory is cut.
             max_context_chars=6_000 if self.config.provider == "native" else 12_000,
+            session_memory=self._session_memory,
         )
 
     def close(self) -> None:
@@ -172,6 +174,74 @@ class DesktopCommands:
                 raise DesktopCommandError(str(exc)) from exc
             return {"ok": True, "command": command, "reply": reply}
 
+        if command == "memory.save":
+            content = str(payload.get("content", "")).strip()
+            if not content:
+                raise DesktopCommandError("memory.save.content is required")
+            kind = self._memory_kind(payload.get("kind", MemoryKind.FACT.value))
+            if kind not in DURABLE_MEMORY_KINDS:
+                raise DesktopCommandError("Only preference, fact, knowledge, and project memory are durable")
+            project = str(payload.get("project", "")).strip()
+            if kind is MemoryKind.PROJECT and not project:
+                raise DesktopCommandError("memory.save.project is required for project memory")
+            scope = project if kind is MemoryKind.PROJECT else "global"
+            record = SQLiteMemoryStore(self.config.memory_db).add(
+                "owner",
+                content,
+                kind=kind,
+                scope=scope,
+            )
+            return {
+                "ok": True,
+                "command": command,
+                "memory": self._memory_payload(record),
+            }
+
+        if command == "memory.list":
+            raw_kind = payload.get("kind")
+            kind = None if raw_kind is None or str(raw_kind).strip() == "" else self._memory_kind(raw_kind)
+            project = str(payload.get("project", "")).strip()
+            scope = project or None
+            raw_limit = payload.get("limit", 50)
+            if isinstance(raw_limit, bool) or not isinstance(raw_limit, int) or not 1 <= raw_limit <= 200:
+                raise DesktopCommandError("memory.list.limit must be between 1 and 200")
+            records = SQLiteMemoryStore(self.config.memory_db).recent(
+                limit=raw_limit,
+                kind=kind,
+                scope=scope,
+            )
+            return {
+                "ok": True,
+                "command": command,
+                "memories": [self._memory_payload(record) for record in records],
+            }
+
+        if command == "memory.update":
+            memory_id = self._memory_id(payload, command)
+            content = str(payload.get("content", "")).strip()
+            if not content:
+                raise DesktopCommandError("memory.update.content is required")
+            try:
+                record = SQLiteMemoryStore(self.config.memory_db).update(memory_id, content)
+            except KeyError as exc:
+                raise DesktopCommandError(str(exc)) from exc
+            return {
+                "ok": True,
+                "command": command,
+                "memory": self._memory_payload(record),
+            }
+
+        if command == "memory.delete":
+            memory_id = self._memory_id(payload, command)
+            deleted = SQLiteMemoryStore(self.config.memory_db).delete(memory_id)
+            if not deleted:
+                raise DesktopCommandError(f"Memory #{memory_id} does not exist")
+            return {"ok": True, "command": command, "memory_id": memory_id}
+
+        if command == "memory.session.clear":
+            self._session_memory.clear()
+            return {"ok": True, "command": command}
+
         if command == "task.set":
             goal = str(payload.get("goal", "")).strip()
             if not goal:
@@ -181,6 +251,7 @@ class DesktopCommands:
                     goal=goal,
                     status=str(payload.get("status", "active")).strip() or "active",
                     context=str(payload.get("context", "")).strip(),
+                    project=str(payload.get("project", "")).strip(),
                 )
             )
             return {"ok": True, "command": command, "task": asdict(task)}
@@ -216,3 +287,28 @@ class DesktopCommands:
             return {"ok": True, "command": command, "snapshot": build_desktop_snapshot(self.config).as_dict()}
 
         raise DesktopCommandError(f"Unsupported desktop command: {command}")
+
+    @staticmethod
+    def _memory_kind(value: object) -> MemoryKind:
+        try:
+            return MemoryKind(str(value).strip().lower())
+        except ValueError as exc:
+            raise DesktopCommandError(f"Unknown memory kind: {value}") from exc
+
+    @staticmethod
+    def _memory_id(payload: dict[str, object], command: str) -> int:
+        value = payload.get("id")
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise DesktopCommandError(f"{command}.id must be a positive integer")
+        return value
+
+    @staticmethod
+    def _memory_payload(record: MemoryRecord) -> dict[str, object]:
+        return {
+            "id": record.id,
+            "kind": record.kind.value,
+            "scope": record.scope,
+            "role": record.role,
+            "content": record.content,
+            "created_at": record.created_at.isoformat(),
+        }

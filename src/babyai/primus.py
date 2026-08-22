@@ -22,6 +22,7 @@ class Primus:
     tool_approvals: PendingToolApprovalStore | None = None
     repair_tool_calls: bool = False
     max_context_chars: int = 12_000
+    session_memory: MemoryStore | None = None
 
     def _safe_memory_content(self, content: str) -> bool:
         """Keep tool protocol artifacts and old recovery messages out of prompts."""
@@ -55,10 +56,26 @@ class Primus:
         memory_parts: list[str] = []
         sections = [
             (
+                "User preferences:",
+                [
+                    f"- {item.content}"
+                    for item in self.memory.recent(
+                        limit=20,
+                        kind=MemoryKind.PREFERENCE,
+                        scope="global",
+                    )
+                    if self._safe_memory_content(item.content)
+                ],
+            ),
+            (
                 "Known facts:",
                 [
                     f"- {item.content}"
-                    for item in self.memory.recent(limit=20, kind=MemoryKind.FACT)
+                    for item in self.memory.recent(
+                        limit=20,
+                        kind=MemoryKind.FACT,
+                        scope="global",
+                    )
                     if self._safe_memory_content(item.content)
                 ],
             ),
@@ -66,7 +83,25 @@ class Primus:
                 "Relevant learned knowledge:",
                 [
                     f"- {item.content}"
-                    for item in self.memory.recent(limit=16, kind=MemoryKind.KNOWLEDGE)
+                    for item in self.memory.recent(
+                        limit=16,
+                        kind=MemoryKind.KNOWLEDGE,
+                        scope="global",
+                    )
+                    if self._safe_memory_content(item.content)
+                ],
+            ),
+            (
+                "Project memory:",
+                []
+                if task is None or not task.project
+                else [
+                    f"- {item.content}"
+                    for item in self.memory.recent(
+                        limit=20,
+                        kind=MemoryKind.PROJECT,
+                        scope=task.project,
+                    )
                     if self._safe_memory_content(item.content)
                 ],
             ),
@@ -74,7 +109,10 @@ class Primus:
                 "Recent episodic memory:",
                 [
                     f"{item.role.upper()}: {item.content}"
-                    for item in self.memory.recent(limit=24, kind=MemoryKind.EPISODIC)
+                    for item in (self.session_memory or self.memory).recent(
+                        limit=24,
+                        kind=MemoryKind.EPISODIC,
+                    )
                     if self._safe_memory_content(item.content)
                 ],
             ),
@@ -311,7 +349,7 @@ class Primus:
         finally:
             self.tool_approvals.clear()
 
-        self.memory.add("babyai", response, kind=MemoryKind.EPISODIC)
+        self._remember_episode("babyai", response)
         return response
 
     def reject_pending_tool(self) -> str:
@@ -319,14 +357,14 @@ class Primus:
             raise ToolProtocolError("No pending tool approval")
         self.tool_approvals.clear()
         response = "Доступ не предоставлен. Я не выполнял это действие."
-        self.memory.add("babyai", response, kind=MemoryKind.EPISODIC)
+        self._remember_episode("babyai", response)
         return response
 
     def think(self, user_input: str) -> str:
         conversational_response = self._conversational_fast_response(user_input)
         if conversational_response is not None:
-            self.memory.add("user", user_input, kind=MemoryKind.EPISODIC)
-            self.memory.add("babyai", conversational_response, kind=MemoryKind.EPISODIC)
+            self._remember_episode("user", user_input)
+            self._remember_episode("babyai", conversational_response)
             return conversational_response
 
         if self.repair_tool_calls and self.agent is not None:
@@ -334,8 +372,8 @@ class Primus:
             if direct_call is not None:
                 base = self._base_prompt(user_input)
                 response = self._execute_or_request_approval(base, user_input, direct_call)
-                self.memory.add("user", user_input, kind=MemoryKind.EPISODIC)
-                self.memory.add("babyai", response, kind=MemoryKind.EPISODIC)
+                self._remember_episode("user", user_input)
+                self._remember_episode("babyai", response)
                 return response
 
         try:
@@ -387,7 +425,10 @@ class Primus:
             except (PermissionError, ToolProtocolError, FileNotFoundError, NotADirectoryError, ValueError) as exc:
                 response = f"I could not use the requested tool: {exc}"
 
-        self.memory.add("user", user_input, kind=MemoryKind.EPISODIC)
+        self._remember_episode("user", user_input)
         if remember_response:
-            self.memory.add("babyai", response, kind=MemoryKind.EPISODIC)
+            self._remember_episode("babyai", response)
         return response
+
+    def _remember_episode(self, role: str, content: str) -> None:
+        (self.session_memory or self.memory).add(role, content, kind=MemoryKind.EPISODIC)
