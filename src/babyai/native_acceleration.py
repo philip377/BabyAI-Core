@@ -7,7 +7,8 @@ from .native_backend import inspect_native_acceleration
 from .native_runtime import NativeRuntimeError
 
 
-MODES = frozenset({"cpu", "vulkan", "auto"})
+MODES = frozenset({"cpu", "vulkan", "hybrid", "auto"})
+HYBRID_GPU_LAYERS = 20
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +29,8 @@ def select_native_runtime(mode: str, cpu_path: Path, vulkan_path: Path) -> Nativ
         return NativeRuntimeSelection("cpu", cpu_path, 0)
     if mode == "vulkan":
         return _vulkan(vulkan_path)
+    if mode == "hybrid":
+        return _vulkan(vulkan_path, n_gpu_layers=HYBRID_GPU_LAYERS, mode="hybrid")
 
     if vulkan_path.is_file():
         try:
@@ -37,7 +40,12 @@ def select_native_runtime(mode: str, cpu_path: Path, vulkan_path: Path) -> Nativ
     return NativeRuntimeSelection("cpu", cpu_path, 0)
 
 
-def _vulkan(path: Path) -> NativeRuntimeSelection:
+def _vulkan(
+    path: Path,
+    *,
+    n_gpu_layers: int = -1,
+    mode: str = "vulkan",
+) -> NativeRuntimeSelection:
     if not path.is_file():
         raise NativeRuntimeError(f"Vulkan native runtime not found: {path}")
     info = inspect_native_acceleration(path)
@@ -45,4 +53,4 @@ def _vulkan(path: Path) -> NativeRuntimeSelection:
         raise NativeRuntimeError("Configured Vulkan runtime is not a Vulkan build.")
     if not info.gpu_probe_available or not info.gpu_available:
         raise NativeRuntimeError("No usable Vulkan acceleration device detected.")
-    return NativeRuntimeSelection("vulkan", path, -1)
+    return NativeRuntimeSelection(mode, path, n_gpu_layers)

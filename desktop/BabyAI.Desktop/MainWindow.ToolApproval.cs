@@ -29,10 +29,14 @@ public sealed partial class MainWindow
 
         try
         {
-            SetBusy(true);
+            _chatCancellation?.Dispose();
+            _chatCancellation = new CancellationTokenSource();
+            SetBusy(true, canStop: true);
+            ApplyState(OrbState.Executing);
+            ReplyText.Text = "Выполняю разрешённое действие…";
             try
             {
-                var reply = await _bridge.ApproveToolAsync();
+                var reply = await _bridge.ApproveToolAsync(_chatCancellation.Token);
                 ReplyText.Text = "Действие выполнено.";
                 if (!string.IsNullOrWhiteSpace(reply))
                     AppendConversation("BabyAI", reply);
@@ -43,6 +47,13 @@ public sealed partial class MainWindow
                 ReplyText.Text = "Урок подтверждён и сохранён.";
             }
             await RefreshStatusAsync();
+            ApplyState(OrbState.Done);
+        }
+        catch (OperationCanceledException)
+        {
+            ReplyText.Text = "Действие отменено.";
+            AppendConversation("Система", "Остановлено пользователем.");
+            ApplyState(OrbState.Idle);
         }
         catch (Exception ex)
         {
@@ -50,6 +61,8 @@ public sealed partial class MainWindow
         }
         finally
         {
+            _chatCancellation?.Dispose();
+            _chatCancellation = null;
             SetBusy(false);
             if (_expanded)
                 MessageBox.Focus(FocusState.Programmatic);
@@ -64,6 +77,7 @@ public sealed partial class MainWindow
         try
         {
             SetBusy(true);
+            ApplyState(OrbState.Executing);
             try
             {
                 var reply = await _bridge.RejectToolAsync();
@@ -77,6 +91,7 @@ public sealed partial class MainWindow
                 ReplyText.Text = "Урок отклонён.";
             }
             await RefreshStatusAsync();
+            ApplyState(OrbState.Done);
         }
         catch (Exception ex)
         {

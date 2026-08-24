@@ -105,7 +105,12 @@ def serve(
                     "error": f"{type(exc).__name__}: {exc}",
                 }
 
-            output_stream.write(json.dumps(response, ensure_ascii=False) + "\n")
+            # The desktop protocol crosses Windows pipes whose inherited code page
+            # is not guaranteed to be UTF-8. Keep the JSONL wire format ASCII-only;
+            # json.loads/JsonDocument restore the original Unicode for the UI.
+            # A non-ASCII model reply must never terminate the worker after the
+            # command has already completed.
+            output_stream.write(json.dumps(response, ensure_ascii=True) + "\n")
             output_stream.flush()
             if should_stop:
                 break

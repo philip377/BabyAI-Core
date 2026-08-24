@@ -5,7 +5,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .llm import LLMError, LLMProvider
-from .native_brain import _NATIVE_STOP_SEQUENCES, _normalise_native_reply, _prepare_native_prompt
+from .native_brain import (
+    _NATIVE_STOP_SEQUENCES,
+    _normalise_native_reply,
+    _prepare_native_prompt,
+    _requests_translation,
+)
 from .native_generation import generate_greedy
 from .native_runtime import NativeModelHandle, NativeRuntimeError, NativeRuntimeLoader, NativeRuntimeSession
 from .runtime_trace import trace
@@ -58,6 +63,7 @@ class ResidentNativeBrainProvider(LLMProvider):
                 n_batch=self.n_batch,
                 n_threads=self.n_threads,
                 stop_sequences=_NATIVE_STOP_SEQUENCES,
+                fit_context_to_prompt=True,
             )
             trace(
                 "native.generate.done",
@@ -76,7 +82,10 @@ class ResidentNativeBrainProvider(LLMProvider):
             self.close()
             raise LLMError(f"Native brain inference failed: {exc}") from exc
 
-        text = _normalise_native_reply(result.text)
+        text = _normalise_native_reply(
+            result.text,
+            allow_translation=_requests_translation(prompt),
+        )
         if not text:
             raise LLMError(
                 "Native brain returned no text "

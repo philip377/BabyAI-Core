@@ -30,6 +30,7 @@ public static class ReplyElapsedBehavior
                 || status.Contains("checking")
                 || status.Contains("stopping")
                 || status.Contains("дума")
+                || status.Contains("выполня")
                 || status.Contains("провер")
                 || status.Contains("останав");
 

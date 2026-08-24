@@ -103,11 +103,22 @@ def probe_brain_runtime(config: BabyAIConfig) -> BrainRuntimeStatus:
                 detail=f"Native GGUF model not found at: {model_path}",
             )
 
-        runtime_path = (
-            config.native_vulkan_runtime_file
-            if config.native_acceleration == "vulkan"
-            else config.native_runtime_file
-        )
+        try:
+            selection = select_native_runtime(
+                config.native_acceleration,
+                config.native_runtime_file,
+                config.native_vulkan_runtime_file,
+            )
+        except NativeRuntimeError as exc:
+            return BrainRuntimeStatus(
+                provider="native",
+                model=config.model,
+                state="native_runtime_unavailable",
+                ready=False,
+                detail=str(exc),
+            )
+
+        runtime_path = selection.runtime_path
         if not runtime_path.is_file():
             return BrainRuntimeStatus(
                 provider="native",
@@ -123,6 +134,7 @@ def probe_brain_runtime(config: BabyAIConfig) -> BrainRuntimeStatus:
             state="ready",
             ready=True,
             detail=(
+                f"Selected native route: {selection.mode}. "
                 "Native GGUF model and BabyAI runtime library are configured. "
                 "The runtime ABI and model are validated when generation is explicitly requested."
             ),

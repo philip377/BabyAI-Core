@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from babyai.brain import probe_brain_runtime
 from babyai.config import BabyAIConfig
 from babyai.llm import LLMError
-from babyai.native_brain import NativeBrainProvider, _normalise_native_reply
+from babyai.native_brain import NativeBrainProvider, _normalise_native_reply, _requests_translation
 from babyai.native_generation import NativeGenerationResult
 from babyai.native_runtime import NativeRuntimeError
 
@@ -86,6 +88,7 @@ def test_native_provider_runs_bounded_generation_and_closes_native_lifetime(tmp_
     generate_call = next(call for call in calls if isinstance(call, tuple) and call[0] == "generate")
     assert generate_call[2].startswith("hello")
     assert "/no_think" in generate_call[2]
+    assert "Do not add a translation unless the user requested one." in generate_call[2]
     assert generate_call[2].endswith("BABYAI:")
     assert generate_call[3] == {
         "max_tokens": 77,
@@ -94,6 +97,7 @@ def test_native_provider_runs_bounded_generation_and_closes_native_lifetime(tmp_
         "n_batch": 1024,
         "n_threads": 6,
         "stop_sequences": ("\n\nUSER:", "\nUSER:", "\n\nBABYAI:", "\nBABYAI:"),
+        "fit_context_to_prompt": True,
     }
     assert calls[-2:] == ["model_exit", "runtime_exit"]
 
@@ -121,6 +125,45 @@ def test_native_reply_strips_think_block_and_preserves_tool_json():
     raw = '<think>private scratch</think>\n```json\n{"tool":"system.info","arguments":{}}\n```'
 
     assert _normalise_native_reply(raw) == '{"tool":"system.info","arguments":{}}'
+
+
+def test_native_reply_strips_untagged_reasoning_and_unrequested_translation():
+    raw = (
+        "Хорошо, благодарю за заботу! Чем могу помочь?\n"
+        "(Good, thank you for the care! How can I help?)\n\n"
+        'Okay, the user asked "как дела?" which is "how are you?" in Russian. '
+        "I should respond in a friendly manner, mention being okay, and ask how I can help. "
+        "Keep it simple and conversational.\n"
+        'Okay, the user asked "как дела?" which is "how are you?" in Russian. '
+        "I should respond in a friendly manner."
+    )
+
+    assert _normalise_native_reply(raw) == "Хорошо, благодарю за заботу! Чем могу помочь?"
+
+
+def test_native_reply_strips_same_line_unrequested_translation():
+    raw = "Я могу рассказывать на разные темы. (I can talk about various topics.)"
+
+    assert _normalise_native_reply(raw) == "Я могу рассказывать на разные темы."
+
+
+def test_native_reply_preserves_explicitly_requested_translation():
+    raw = "Я могу рассказывать на разные темы. (I can talk about various topics.)"
+
+    assert _normalise_native_reply(raw, allow_translation=True) == raw
+
+
+def test_translation_request_detection_uses_only_the_latest_user_message():
+    policy = "Do not add a translation unless the user requested one."
+
+    assert _requests_translation(policy + "\n\nUSER: Расскажи о себе") is False
+    assert _requests_translation(policy + "\n\nUSER: Переведи ответ на английский") is True
+
+
+def test_native_reply_preserves_user_facing_parenthetical_text():
+    raw = "Откройте меню «Файл».\n(Оно находится в верхней части окна.)"
+
+    assert _normalise_native_reply(raw) == raw
 
 
 def test_native_provider_translates_native_runtime_error_to_llm_error(tmp_path, monkeypatch):
@@ -180,3 +223,29 @@ def test_native_readiness_allows_chat_when_model_and_runtime_files_are_present(t
     assert status.state == "ready"
     assert status.ready is True
     assert "validated when generation is explicitly requested" in status.detail
+
+
+def test_native_readiness_reports_the_auto_selected_vulkan_route(tmp_path, monkeypatch):
+    model_path = tmp_path / "brain.gguf"
+    cpu_runtime = tmp_path / "cpu.dll"
+    vulkan_runtime = tmp_path / "vulkan.dll"
+    model_path.write_bytes(b"gguf-placeholder")
+    cpu_runtime.write_bytes(b"cpu-placeholder")
+    vulkan_runtime.write_bytes(b"vulkan-placeholder")
+    monkeypatch.setattr(
+        "babyai.brain.select_native_runtime",
+        lambda *args: SimpleNamespace(mode="vulkan", runtime_path=vulkan_runtime),
+    )
+    config = BabyAIConfig(
+        data_dir=tmp_path,
+        provider="native",
+        native_model_path=model_path,
+        native_runtime_path=cpu_runtime,
+        native_vulkan_runtime_path=vulkan_runtime,
+        native_acceleration="auto",
+    )
+
+    status = probe_brain_runtime(config)
+
+    assert status.ready is True
+    assert "Selected native route: vulkan." in status.detail

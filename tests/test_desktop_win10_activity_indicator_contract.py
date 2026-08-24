@@ -25,3 +25,15 @@ def test_desktop_avoids_progress_ring_on_win10() -> None:
     assert "ConditionalWeakTable<FrameworkElement, Subscription>" in behavior
     assert "indicator.Visibility = active ? Visibility.Visible : Visibility.Collapsed" in behavior
     assert ".IsActive" not in behavior
+
+
+def test_desktop_permission_is_a_single_cohesive_card() -> None:
+    root = Path(__file__).resolve().parents[1]
+    xaml = (root / "desktop" / "BabyAI.Desktop" / "MainWindow.xaml").read_text(encoding="utf-8")
+    window = (root / "desktop" / "BabyAI.Desktop" / "MainWindow.xaml.cs").read_text(encoding="utf-8")
+
+    assert 'x:Name="ApprovalCard"' in xaml
+    assert 'Text="ТРЕБУЕТСЯ РАЗРЕШЕНИЕ"' in xaml
+    assert 'Content="Разрешить один раз"' in xaml
+    assert "ApprovalCard.Visibility = status.RequiresApproval" in window
+    assert "<ProgressRing" not in xaml
