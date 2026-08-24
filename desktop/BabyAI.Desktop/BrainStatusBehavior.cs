@@ -12,7 +12,6 @@ public static class BrainStatusBehavior
         typeof(BrainStatusBehavior),
         new PropertyMetadata(false, OnEnabledChanged));
 
-    private static readonly BabyAIBridgeClient Bridge = new();
     private static readonly DispatcherTimer RecoveryTimer = CreateRecoveryTimer();
     private static WeakReference<TextBlock>? _indicator;
     private static bool _refreshing;
@@ -95,7 +94,9 @@ public static class BrainStatusBehavior
 
         try
         {
-            var status = await Bridge.StatusAsync();
+            var window = (Application.Current as App)?.MainWindow
+                ?? throw new InvalidOperationException("BabyAI main window is unavailable.");
+            var status = await window.ReadDesktopStatusForIndicatorAsync();
             text.Text = Format(status.Brain);
             ToolTipService.SetToolTip(text, BuildTooltip(status.Brain));
             (Application.Current as App)?.MainWindow?.ApplyBrainReadinessFromIndicator(status.Brain);

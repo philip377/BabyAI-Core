@@ -153,3 +153,25 @@ def test_worker_survives_unexpected_command_error():
     assert responses[1]["id"] == 2
     assert responses[1]["ok"] is True
     assert responses[1]["command"] == "status"
+
+
+class UnicodeCommands:
+    def execute(self, command, payload):
+        return {"ok": True, "command": command, "reply": "Привет 👋 — готово"}
+
+    def close(self):
+        pass
+
+
+def test_worker_protocol_is_ascii_safe_for_unicode_model_replies():
+    commands = UnicodeCommands()
+    source = io.StringIO(json.dumps({"id": 1, "command": "chat", "payload": {}}) + "\n")
+    raw_output = io.BytesIO()
+    output = io.TextIOWrapper(raw_output, encoding="ascii", newline="\n")
+
+    assert serve(commands, stdin=source, stdout=output) == 0
+
+    encoded = raw_output.getvalue()
+    assert encoded.isascii()
+    response = json.loads(encoded.decode("ascii"))
+    assert response["reply"] == "Привет 👋 — готово"

@@ -15,7 +15,8 @@ def test_desktop_brain_indicator_uses_core_readiness_snapshot() -> None:
     assert 'TryAttachBehavior(\n            "BrainStatusBehavior"' in runtime_behaviors
     assert "internal MainWindow? MainWindow" in app
 
-    assert "Bridge.StatusAsync()" in behavior
+    assert "new BabyAIBridgeClient" not in behavior
+    assert "window.ReadDesktopStatusForIndicatorAsync()" in behavior
     assert "status.Brain" in behavior
     assert '"model_missing"' in behavior
     assert '"unavailable"' in behavior

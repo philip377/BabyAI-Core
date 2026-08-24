@@ -88,9 +88,12 @@ public sealed partial class MainWindow : Window
     {
         _exitRequested = true;
         _chatCancellation?.Cancel();
+        _bridge.Dispose();
         _tray.Dispose();
         Close();
     }
+
+    internal Task<DesktopStatus> ReadDesktopStatusForIndicatorAsync() => _bridge.StatusAsync();
 
     private async void OrbButton_Click(object sender, RoutedEventArgs e)
     {
@@ -417,6 +420,9 @@ public sealed partial class MainWindow : Window
 
         if (lower.Contains("could not start") && lower.Contains("python"))
             return "Python не удалось запустить. Проверь Python 3.11+ и снова запусти scripts\\windows\\start.ps1.";
+
+        if (lower.Contains("desktop worker exited unexpectedly"))
+            return "Локальный AI-процесс неожиданно завершился. Нажми «Повторить»; подробности сохранены в журналах BabyAI.";
 
         if (lower.Contains("ollama") || lower.Contains("11434") || lower.Contains("connection refused") || lower.Contains("actively refused"))
             return "Ollama недоступна. Запусти Ollama либо стартуй BabyAI с -Provider echo, затем нажми Retry Core.";
