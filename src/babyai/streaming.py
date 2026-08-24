@@ -1,0 +1,251 @@
+from __future__ import annotations
+
+import re
+import secrets
+from dataclasses import dataclass
+
+
+_LEADING_HIDDEN_TAGS = ("think", "analysis", "reasoning")
+_INTERNAL_MARKERS = (
+    "```",
+    "<think",
+    "</think",
+    "<analysis",
+    "</analysis",
+    "<reasoning",
+    "</reasoning",
+    "<babyai-visible-",
+    '"tool"',
+    '"arguments"',
+    '"response"',
+    "available tools:",
+    "tool:",
+    "result:",
+    "/no_think",
+    "\nuser:",
+    "\nbabyai:",
+)
+_INTERNAL_REASONING = re.compile(
+    r"(?im)^(?:okay,\s*)?(?:"
+    r"the user (?:asked|said|wants|is asking|wrote)|"
+    r"(?:i|we) (?:should|need(?: to)?) (?:answer|respond|reply)|"
+    r"(?:let(?:'|’)s|let us) (?:craft|answer|respond|reply)"
+    r")\b"
+)
+_UNSOLICITED_TRANSLATION_START = re.compile(r"\s+\((?=[^()\n]*[A-Za-z])")
+_VISIBLE_MARKER_PREFIX = "<babyai-visible-"
+
+
+class StreamingSafetyError(ValueError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class StreamMetrics:
+    native_first_token_ms: int | None = None
+    generation_ms: int | None = None
+    generated_tokens: int | None = None
+    stop_reason: str | None = None
+    model_calls: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class StreamReply:
+    reply: str
+    metrics: StreamMetrics = StreamMetrics()
+
+
+def new_visible_marker() -> str:
+    return f"<babyai-visible-{secrets.token_hex(16)}>"
+
+
+def with_visible_marker_contract(prompt: str, marker: str) -> str:
+    return (
+        prompt
+        + "\n\nStreaming display contract: if and only if this generation is the final "
+        + "natural-language answer for the user, begin the answer with exactly "
+        + marker
+        + ". The marker must be the first output after any optional <think> block. "
+        + "Never put the marker before JSON, a tool call, reasoning, protocol data, or a code fence. "
+        + "Do not explain or repeat this contract."
+    )
+
+
+class VisibleTextGate:
+    """Publish only a conservative, monotonic prefix of an untrusted model draft.
+
+    The canonical completed PRIMUS reply remains authoritative. Suspicious output is
+    quarantined and safely degrades to a completed response rather than being exposed.
+    """
+
+    _HOLD_BACK = 64
+
+    def __init__(self, *, marker: str | None = None, tool_names: tuple[str, ...] = ()) -> None:
+        self._raw = ""
+        self._visible = ""
+        self._emitted = ""
+        self._blocked = False
+        self._opened = False
+        self._invalid = False
+        self._marker = marker
+        self._tool_names = tuple(name.casefold() for name in tool_names)
+
+    @property
+    def emitted(self) -> str:
+        return self._emitted
+
+    @property
+    def opened(self) -> bool:
+        return self._opened
+
+    @property
+    def invalid(self) -> bool:
+        return self._invalid
+
+    def feed(self, chunk: str) -> str:
+        if not isinstance(chunk, str):
+            raise TypeError("Streaming candidate chunks must be strings")
+        if not chunk or self._blocked:
+            return ""
+
+        self._raw += chunk
+        if not self._opened:
+            if self._marker is None:
+                return ""
+            prefix = self._after_hidden_prefix(self._raw)
+            if prefix is None or self._marker.startswith(prefix):
+                return ""
+            if not prefix.startswith(self._marker):
+                self._blocked = True
+                return ""
+            self._opened = True
+            self._visible = prefix[len(self._marker) :].lstrip()
+        else:
+            self._visible += chunk
+
+        candidate = self._candidate(self._visible)
+        if candidate is None:
+            return ""
+        if not candidate.startswith(self._emitted):
+            self._invalid = True
+            self._blocked = True
+            return ""
+        commit_end = max(len(self._emitted), len(candidate) - self._HOLD_BACK)
+        boundary = max(
+            candidate.rfind(" ", len(self._emitted), commit_end + 1),
+            candidate.rfind("\n", len(self._emitted), commit_end + 1),
+        )
+        if boundary < len(self._emitted):
+            return ""
+        delta = candidate[len(self._emitted) : boundary + 1]
+        self._emitted += delta
+        return delta
+
+    def strip_marker(self, canonical: str) -> str:
+        if self._marker is None:
+            return canonical
+        text = self._after_hidden_prefix(canonical)
+        if text is not None and text.startswith(self._marker):
+            body = text[len(self._marker) :].lstrip()
+            if (
+                canonical.casefold().count(_VISIBLE_MARKER_PREFIX) != 1
+                or _VISIBLE_MARKER_PREFIX in body.casefold()
+            ):
+                raise StreamingSafetyError("Streaming response marker validation failed")
+            return body
+        if _VISIBLE_MARKER_PREFIX in canonical.casefold():
+            raise StreamingSafetyError("Streaming response marker validation failed")
+        return canonical
+
+    def validated_open_body(self, canonical: str) -> str | None:
+        """Return a safe canonical body only when it retains this gate's nonce."""
+
+        if not self._opened or self._invalid or self._marker is None:
+            return None
+        text = self._after_hidden_prefix(canonical)
+        if text is None or not text.startswith(self._marker):
+            return None
+        body = text[len(self._marker) :].lstrip()
+        probe = VisibleTextGate(tool_names=tuple(self._tool_names))
+        safe = probe._candidate(body)
+        if safe is None or probe._blocked or safe.strip() != body.strip():
+            return None
+        return body
+
+    def finish(self, canonical: str) -> str:
+        """Emit only the unseen suffix of an already validated canonical reply."""
+
+        if not isinstance(canonical, str) or not canonical.startswith(self._emitted):
+            return ""
+        probe = VisibleTextGate(tool_names=tuple(self._tool_names))
+        safe = probe._candidate(canonical)
+        if safe is None or probe._blocked or safe.strip() != canonical.strip():
+            return ""
+        delta = canonical[len(self._emitted) :]
+        self._emitted += delta
+        return delta
+
+    @staticmethod
+    def _after_hidden_prefix(value: str) -> str | None:
+        text = value.lstrip()
+        lower = text.casefold()
+
+        while text:
+            removed = False
+            for tag in _LEADING_HIDDEN_TAGS:
+                opening = f"<{tag}>"
+                closing = f"</{tag}>"
+                if opening.startswith(lower):
+                    return None
+                if lower.startswith(opening):
+                    end = lower.find(closing, len(opening))
+                    if end < 0:
+                        return None
+                    text = text[end + len(closing) :].lstrip()
+                    lower = text.casefold()
+                    removed = True
+                    break
+            if not removed:
+                break
+
+        return text
+
+    def _candidate(self, value: str) -> str | None:
+        text = value
+        lower = text.casefold()
+
+        if not text:
+            return ""
+        if lower.startswith("babyai:"):
+            text = text[len("babyai:") :].lstrip()
+            lower = text.casefold()
+
+        if text[:1] in "{[" or lower.startswith("```"):
+            self._blocked = True
+            self._invalid = self._opened
+            return None
+
+        unsafe_positions: list[int] = []
+        for marker in _INTERNAL_MARKERS + self._tool_names:
+            position = lower.find(marker)
+            if position >= 0:
+                unsafe_positions.append(position)
+        for char in ("{", "["):
+            position = text.find(char)
+            if position >= 0:
+                unsafe_positions.append(position)
+        reasoning = _INTERNAL_REASONING.search(text)
+        if reasoning is not None:
+            unsafe_positions.append(reasoning.start())
+        if re.search(r"[А-Яа-яЁё]", text):
+            translation = _UNSOLICITED_TRANSLATION_START.search(text)
+            if translation is not None:
+                unsafe_positions.append(translation.start())
+
+        if unsafe_positions:
+            self._blocked = True
+            if self._opened:
+                self._invalid = True
+                return None
+            text = text[: min(unsafe_positions)].rstrip()
+        return text

@@ -13,12 +13,16 @@ def test_desktop_live_chat_exposes_transcript_runtime_and_stop_controls() -> Non
     assert 'x:Name="StopButton"' in xaml
 
     assert "CancellationTokenSource? _chatCancellation" in window
-    assert '_bridge.ChatAsync(message, _chatCancellation.Token)' in window
+    assert "_bridge.ChatStreamAsync(" in window
+    assert "chatCancellation.Token" in window
     assert "_chatCancellation.Cancel()" in window
+    assert "Interlocked.Increment(ref _chatGeneration)" in window
     assert 'AppendConversation("Вы", message)' in window
-    assert 'AppendConversation("BabyAI", reply)' in window
+    assert 'CreateConversationTurn("BabyAI", text)' in window
+    assert "ReplaceConversationTurn" in window
 
     assert "CancellationToken cancellationToken = default" in bridge
+    assert "Func<DesktopChatEvent, ValueTask> onEvent" in bridge
     assert "CancellationTokenSource.CreateLinkedTokenSource" in bridge
     assert "process.Kill(entireProcessTree: true)" in bridge
     assert "BabyAI response timed out after 3 minutes." in bridge

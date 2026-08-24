@@ -6,7 +6,7 @@ public sealed partial class MainWindow
     {
         StartupText.Text = FormatStartupReadiness(brain);
 
-        if (_state is OrbState.Thinking or OrbState.Executing or OrbState.Listening or OrbState.Approval)
+        if (_state is OrbState.Thinking or OrbState.Answering or OrbState.Executing or OrbState.Listening or OrbState.Approval)
             return;
 
         ApplyState(brain.Ready ? OrbState.Idle : OrbState.Error);

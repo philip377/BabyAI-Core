@@ -28,8 +28,10 @@ public static class ReplyElapsedBehavior
             var status = statusText.Text.Trim().ToLowerInvariant();
             var active = status.Contains("thinking")
                 || status.Contains("checking")
+                || status.Contains("answering")
                 || status.Contains("stopping")
                 || status.Contains("дума")
+                || status.Contains("отвеч")
                 || status.Contains("выполня")
                 || status.Contains("провер")
                 || status.Contains("останав");

@@ -27,6 +27,8 @@ Genesis is the first MVP milestone. It includes:
 
 Milestone 2 readiness and the next architecture boundary are tracked in
 `docs/MILESTONE_2_READINESS.md` and `docs/MILESTONE_3_COMPANION_WORKSPACE_PLAN.md`.
+The backward-compatible Desktop streaming contract is documented in
+`docs/STREAMING_PROTOCOL_V2.md`.
 
 ## First Windows MVP run
 

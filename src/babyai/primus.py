@@ -1,12 +1,21 @@
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .agent import AgentExecutor, ToolCall, ToolProtocolError
 from .identity import Identity
-from .llm import LLMProvider
+from .llm import LLMError, LLMProvider
 from .memory import MemoryKind, MemoryStore
 from .planner import PlanAction, Planner, PlannerProtocolError
+from .streaming import (
+    StreamMetrics,
+    StreamReply,
+    StreamingSafetyError,
+    VisibleTextGate,
+    new_visible_marker,
+    with_visible_marker_contract,
+)
 from .tool_approval import PendingToolApproval, PendingToolApprovalStore
 from .working_memory import WorkingMemoryStore
 
@@ -320,13 +329,22 @@ class Primus:
             False,
         )
 
-    def _execute_or_request_approval(self, base: str, user_input: str, call: ToolCall) -> str:
+    def _execute_or_request_approval(
+        self,
+        base: str,
+        user_input: str,
+        call: ToolCall,
+        *,
+        on_state: Callable[[str], None] | None = None,
+    ) -> str:
         if self.agent is None:
             raise ToolProtocolError("Tool execution is unavailable")
 
         capability = self.agent.required_capability(call)
         if not self.agent.is_allowed(call):
             if self.tool_approvals is None:
+                if on_state is not None:
+                    on_state("executing")
                 return self.agent.execute(call)
             self.tool_approvals.save(
                 PendingToolApproval(
@@ -338,6 +356,8 @@ class Primus:
             )
             return self._permission_prompt(call)
 
+        if on_state is not None:
+            on_state("executing")
         tool_result = self.agent.execute(call)
         fast_response = self._fast_local_tool_response(user_input, call, tool_result)
         if fast_response is None:
@@ -383,20 +403,55 @@ class Primus:
         return response
 
     def think(self, user_input: str) -> str:
+        return self._think(user_input).reply
+
+    def think_stream(
+        self,
+        user_input: str,
+        on_delta: Callable[[str], None],
+        on_state: Callable[[str], None] | None = None,
+    ) -> StreamReply:
+        return self._think(user_input, on_delta=on_delta, on_state=on_state)
+
+    def _think(
+        self,
+        user_input: str,
+        *,
+        on_delta: Callable[[str], None] | None = None,
+        on_state: Callable[[str], None] | None = None,
+    ) -> StreamReply:
+        metrics = StreamMetrics()
+
+        def finish(reply: str, *, gate: VisibleTextGate | None = None) -> StreamReply:
+            if on_delta is not None:
+                if gate is None:
+                    if reply:
+                        on_delta(reply)
+                else:
+                    delta = gate.finish(reply)
+                    if delta:
+                        on_delta(delta)
+            return StreamReply(reply=reply, metrics=metrics)
+
         conversational_response = self._conversational_fast_response(user_input)
         if conversational_response is not None:
             self._remember_episode("user", user_input)
             self._remember_episode("babyai", conversational_response)
-            return conversational_response
+            return finish(conversational_response)
 
         if self.repair_tool_calls and self.agent is not None:
             direct_call = self.agent.infer_safe_local_intent(user_input)
             if direct_call is not None:
                 base = self._base_prompt(user_input)
-                response = self._execute_or_request_approval(base, user_input, direct_call)
+                response = self._execute_or_request_approval(
+                    base,
+                    user_input,
+                    direct_call,
+                    on_state=on_state,
+                )
                 self._remember_episode("user", user_input)
                 self._remember_episode("babyai", response)
-                return response
+                return finish(response)
 
         try:
             plan = self._plan(user_input)
@@ -411,11 +466,60 @@ class Primus:
             else:
                 base += "\nUse at most one available tool if needed."
 
-        first = self.llm.generate(base)
+        gate: VisibleTextGate | None = None
+        stream_authorized = False
+        can_stream_answer = (
+            on_delta is not None
+            and (self.agent is None or not self.agent.requests_local_action(user_input))
+            and (plan is None or plan.action is PlanAction.ANSWER)
+        )
+        generate_stream = getattr(self.llm, "generate_stream", None)
+        if can_stream_answer and callable(generate_stream):
+            visible_marker = new_visible_marker()
+            gate = VisibleTextGate(
+                marker=visible_marker,
+                tool_names=() if self.agent is None else self.agent.tool_names()
+            )
+
+            def accept_candidate(candidate: str) -> None:
+                assert gate is not None
+                delta = gate.feed(candidate)
+                if delta:
+                    on_delta(delta)
+
+            generation = generate_stream(
+                with_visible_marker_contract(base, visible_marker),
+                accept_candidate,
+            )
+            if gate.opened:
+                body = gate.validated_open_body(generation.text)
+                if body is None:
+                    raise LLMError("Streaming response failed safety validation.")
+                first = body
+                stream_authorized = True
+            else:
+                try:
+                    first = gate.strip_marker(generation.text)
+                except StreamingSafetyError as exc:
+                    raise LLMError("Streaming response failed safety validation.") from exc
+            metrics = StreamMetrics(
+                native_first_token_ms=getattr(generation, "first_token_ms", None),
+                generation_ms=getattr(generation, "generation_ms", None),
+                generated_tokens=getattr(generation, "generated_tokens", None),
+                stop_reason=str(getattr(generation, "stop_reason", "completed")),
+                model_calls=1,
+            )
+        else:
+            first = self.llm.generate(base)
+            metrics = StreamMetrics(model_calls=1, stop_reason="completed")
         response = first
         remember_response = True
 
-        if self.agent is not None and (plan is None or plan.action is PlanAction.TOOL):
+        if (
+            not stream_authorized
+            and self.agent is not None
+            and (plan is None or plan.action is PlanAction.TOOL)
+        ):
             try:
                 blocked_tool_call = False
                 call = self.agent.parse_tool_call(first)
@@ -437,7 +541,12 @@ class Primus:
                         call = None
                         blocked_tool_call = True
                 if call is not None:
-                    response = self._execute_or_request_approval(base, user_input, call)
+                    response = self._execute_or_request_approval(
+                        base,
+                        user_input,
+                        call,
+                        on_state=on_state,
+                    )
                 elif (
                     not blocked_tool_call
                     and self.repair_tool_calls
@@ -450,7 +559,7 @@ class Primus:
         self._remember_episode("user", user_input)
         if remember_response:
             self._remember_episode("babyai", response)
-        return response
+        return finish(response, gate=gate if response == first else None)
 
     def _remember_episode(self, role: str, content: str) -> None:
         (self.session_memory or self.memory).add(role, content, kind=MemoryKind.EPISODIC)

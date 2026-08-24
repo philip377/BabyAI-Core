@@ -148,6 +148,7 @@ public sealed partial class MainWindow
         {
             "≈" => "BabyAI · слушаю",
             "✦" => "BabyAI · думаю",
+            "…" => "BabyAI · отвечаю",
             "›" => "BabyAI · выполняю",
             "!" => "BabyAI · ждёт решения",
             "✓" => "BabyAI · готово",

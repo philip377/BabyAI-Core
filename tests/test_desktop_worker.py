@@ -175,3 +175,90 @@ def test_worker_protocol_is_ascii_safe_for_unicode_model_replies():
     assert encoded.isascii()
     response = json.loads(encoded.decode("ascii"))
     assert response["reply"] == "Привет 👋 — готово"
+
+
+class StreamingCommands:
+    def __init__(self, *, fail: bool = False):
+        self.fail = fail
+        self.calls = 0
+
+    def stream_chat(self, payload, emit):
+        self.calls += 1
+        emit({"event": "state", "state": "thinking"})
+        if self.fail and self.calls == 1:
+            raise ValueError("stream failed")
+        emit({"event": "state", "state": "answering"})
+        emit({"event": "delta", "text": "Привет 👋"})
+        return {
+            "reply": "Привет 👋",
+            "metrics": {
+                "visible_ttft_ms": 1,
+                "native_first_token_ms": 2,
+                "generation_ms": 2,
+                "total_ms": 3,
+                "generated_tokens": 4,
+                "delta_count": 1,
+                "model_calls": 1,
+                "stop_reason": "eog",
+            },
+        }
+
+    def execute(self, command, payload):
+        return {"ok": True, "command": command}
+
+    def close(self):
+        pass
+
+
+def test_worker_v2_emits_ascii_safe_ordered_events_and_one_done():
+    source = io.StringIO(
+        json.dumps(
+            {"id": 9, "protocol": 2, "command": "chat", "payload": {"message": "Привет"}}
+        )
+        + "\n"
+    )
+    raw_output = io.BytesIO()
+    output = io.TextIOWrapper(raw_output, encoding="ascii", newline="\n")
+
+    assert serve(StreamingCommands(), stdin=source, stdout=output) == 0
+
+    encoded = raw_output.getvalue()
+    assert encoded.isascii()
+    events = [json.loads(line) for line in encoded.decode("ascii").splitlines()]
+    assert [event["seq"] for event in events] == [0, 1, 2, 3]
+    assert [event["event"] for event in events] == ["state", "state", "delta", "done"]
+    assert all(event["id"] == 9 and event["protocol"] == 2 for event in events)
+    assert events[2]["text"] == "Привет 👋"
+    assert events[3]["reply"] == "Привет 👋"
+    assert sum(event["event"] in {"done", "error"} for event in events) == 1
+
+
+def test_worker_v2_resets_sequence_for_each_request():
+    request = lambda request_id: json.dumps(
+        {"id": request_id, "protocol": 2, "command": "chat", "payload": {"message": "hi"}}
+    )
+    source = io.StringIO(request(1) + "\n" + request(2) + "\n")
+    output = io.StringIO()
+
+    assert serve(StreamingCommands(), stdin=source, stdout=output) == 0
+
+    events = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert [event["seq"] for event in events if event["id"] == 1] == [0, 1, 2, 3]
+    assert [event["seq"] for event in events if event["id"] == 2] == [0, 1, 2, 3]
+
+
+def test_worker_v2_error_is_terminal_and_worker_serves_next_request():
+    request = lambda request_id: json.dumps(
+        {"id": request_id, "protocol": 2, "command": "chat", "payload": {"message": "hi"}}
+    )
+    source = io.StringIO(request(1) + "\n" + request(2) + "\n")
+    output = io.StringIO()
+
+    assert serve(StreamingCommands(fail=True), stdin=source, stdout=output) == 0
+
+    events = [json.loads(line) for line in output.getvalue().splitlines()]
+    first = [event for event in events if event["id"] == 1]
+    second = [event for event in events if event["id"] == 2]
+    assert [event["event"] for event in first] == ["state", "error"]
+    assert [event["seq"] for event in first] == [0, 1]
+    assert second[-1]["event"] == "done"

@@ -30,6 +30,8 @@ class NativeGenerationResult:
     generated_tokens: int
     output_bytes: int
     stop_reason: NativeGenerationStop
+    first_token_ms: int | None = None
+    generation_ms: int = 0
 
 
 def _decode_complete_utf8(raw: bytes, *, final: bool) -> str:
@@ -50,6 +52,35 @@ def _encode_stop_sequences(stop_sequences: Sequence[str]) -> tuple[bytes, ...]:
             encoded.append(raw)
     encoded.sort(key=len, reverse=True)
     return tuple(encoded)
+
+
+def _pending_stop_prefix_length(output: bytearray, stop_sequences: tuple[bytes, ...]) -> int:
+    """Return bytes that could still grow into a managed stop delimiter."""
+
+    pending = 0
+    for stop in stop_sequences:
+        maximum = min(len(output), len(stop) - 1)
+        for length in range(maximum, 0, -1):
+            if output.endswith(stop[:length]):
+                pending = max(pending, length)
+                break
+    return pending
+
+
+def _first_stop_offset(
+    output: bytearray,
+    stop_sequences: tuple[bytes, ...],
+    *,
+    search_start: int,
+) -> int | None:
+    """Find the earliest complete delimiter newly reachable in the output."""
+
+    earliest: int | None = None
+    for stop in stop_sequences:
+        offset = output.find(stop, search_start)
+        if offset >= 0 and (earliest is None or offset < earliest):
+            earliest = offset
+    return earliest
 
 
 def _fit_context_limits(
@@ -90,6 +121,7 @@ def generate_greedy(
     n_batch: int = 0,
     n_threads: int = 0,
     cancel_check: Callable[[], bool] | None = None,
+    on_candidate: Callable[[str], None] | None = None,
     stop_sequences: Sequence[str] = (),
     fit_context_to_prompt: bool = False,
 ) -> NativeGenerationResult:
@@ -104,6 +136,11 @@ def generate_greedy(
     the sampled token is committed. A matching delimiter is removed from returned text.
     This lets managed chat policy stop a model before it starts inventing the next turn
     without extending BabyAI's native ABI.
+
+    ``on_candidate`` receives incrementally decoded model text. It is an untrusted raw
+    candidate, not display-safe assistant text: callers must still apply the provider's
+    normalization and tool-call policy. Candidate delivery withholds both incomplete
+    UTF-8 code points and any suffix that may still become a managed stop delimiter.
     """
 
     if not isinstance(prompt, str):
@@ -128,11 +165,14 @@ def generate_greedy(
             raise NativeRuntimeError(f"Native generation {name} must be a non-negative integer.")
     if cancel_check is not None and not callable(cancel_check):
         raise NativeRuntimeError("Native generation cancel_check must be callable.")
+    if on_candidate is not None and not callable(on_candidate):
+        raise NativeRuntimeError("Native generation on_candidate must be callable.")
     if isinstance(stop_sequences, (str, bytes)) or not isinstance(stop_sequences, Sequence):
         raise NativeRuntimeError("Native generation stop_sequences must be a sequence of strings.")
     if not isinstance(fit_context_to_prompt, bool):
         raise NativeRuntimeError("Native generation fit_context_to_prompt must be a boolean.")
     encoded_stops = _encode_stop_sequences(stop_sequences)
+    longest_encoded_stop = max((len(stop) for stop in encoded_stops), default=0)
 
     tokenize_started = time.monotonic()
     trace("native.tokenize.start", prompt_chars=len(prompt))
@@ -165,6 +205,12 @@ def generate_greedy(
     output = bytearray()
     generated = 0
     first_token_ms: int | None = None
+    candidate_offset = 0
+    candidate_decoder = (
+        codecs.getincrementaldecoder("utf-8")("strict")
+        if on_candidate is not None
+        else None
+    )
 
     context_started = time.monotonic()
     trace(
@@ -193,8 +239,29 @@ def generate_greedy(
         )
         generation_started = time.monotonic()
 
+        def emit_candidate(*, final_utf8: bool, hold_stop_prefix: bool) -> None:
+            nonlocal candidate_offset
+            if on_candidate is None or candidate_decoder is None:
+                return
+
+            safe_end = len(output)
+            if hold_stop_prefix:
+                safe_end -= _pending_stop_prefix_length(output, encoded_stops)
+            raw = bytes(output[candidate_offset:safe_end])
+            candidate_offset = safe_end
+            try:
+                candidate = candidate_decoder.decode(raw, final=final_utf8)
+            except UnicodeDecodeError as exc:
+                raise NativeRuntimeError(
+                    "Native generation produced invalid UTF-8 output bytes."
+                ) from exc
+            if candidate:
+                on_candidate(candidate)
+
         def finish(reason: NativeGenerationStop, *, final_utf8: bool = False) -> NativeGenerationResult:
             generation_ms = round((time.monotonic() - generation_started) * 1000)
+            text = _decode_complete_utf8(bytes(output), final=final_utf8)
+            emit_candidate(final_utf8=final_utf8, hold_stop_prefix=False)
             trace(
                 "native.generation.done",
                 elapsed_ms=generation_ms,
@@ -204,10 +271,12 @@ def generate_greedy(
                 stop_reason=reason,
             )
             return NativeGenerationResult(
-                text=_decode_complete_utf8(bytes(output), final=final_utf8),
+                text=text,
                 generated_tokens=generated,
                 output_bytes=len(output),
                 stop_reason=reason,
+                first_token_ms=first_token_ms,
+                generation_ms=generation_ms,
             )
 
         while generated < max_tokens:
@@ -227,6 +296,7 @@ def generate_greedy(
             if len(output) + len(piece) > max_output_bytes:
                 return finish("output_limit")
 
+            previous_output_bytes = len(output)
             output.extend(piece)
             context.decode_sampled(sample.token_id)
             generated += 1
@@ -238,9 +308,17 @@ def generate_greedy(
                     total_context_tokens=context.token_count,
                 )
 
-            for stop in encoded_stops:
-                if output.endswith(stop):
-                    del output[-len(stop) :]
+            if longest_encoded_stop:
+                search_start = max(0, previous_output_bytes - longest_encoded_stop + 1)
+                stop_offset = _first_stop_offset(
+                    output,
+                    encoded_stops,
+                    search_start=search_start,
+                )
+                if stop_offset is not None:
+                    del output[stop_offset:]
                     return finish("stop_sequence")
+
+            emit_candidate(final_utf8=False, hold_stop_prefix=True)
 
         return finish("max_tokens")
