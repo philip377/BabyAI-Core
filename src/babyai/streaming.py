@@ -32,6 +32,9 @@ _INTERNAL_REASONING = re.compile(
     r"(?:let(?:'|’)s|let us) (?:craft|answer|respond|reply)"
     r")\b"
 )
+_SYNTHETIC_ROLE_CONTINUATION = re.compile(
+    r"(?:^|[\r\n\t ])(?:USER|User|BABYAI|BabyAI)\s*:"
+)
 _UNSOLICITED_TRANSLATION_START = re.compile(r"\s+\((?=[^()\n]*[A-Za-z])")
 _VISIBLE_MARKER_PREFIX = "<babyai-visible-"
 
@@ -67,6 +70,7 @@ def with_visible_marker_contract(prompt: str, marker: str) -> str:
         + marker
         + ". The marker must be the first output after any optional <think> block. "
         + "Never put the marker before JSON, a tool call, reasoning, protocol data, or a code fence. "
+        + "Emit exactly one assistant turn; never continue with USER: or BABYAI: role labels. "
         + "Do not explain or repeat this contract."
     )
 
@@ -237,6 +241,9 @@ class VisibleTextGate:
         reasoning = _INTERNAL_REASONING.search(text)
         if reasoning is not None:
             unsafe_positions.append(reasoning.start())
+        role_continuation = _SYNTHETIC_ROLE_CONTINUATION.search(text)
+        if role_continuation is not None:
+            unsafe_positions.append(role_continuation.start())
         if re.search(r"[А-Яа-яЁё]", text):
             translation = _UNSOLICITED_TRANSLATION_START.search(text)
             if translation is not None:

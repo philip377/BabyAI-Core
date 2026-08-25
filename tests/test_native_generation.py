@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from babyai.native_brain import _NATIVE_STOP_SEQUENCES
 from babyai.native_generation import MAX_NATIVE_GENERATION_TOKENS, generate_greedy
 from babyai.native_runtime import NativeRuntimeError, NativeSample
 
@@ -172,6 +173,27 @@ def test_generation_uses_earliest_of_multiple_stops_inside_one_piece():
     assert result.stop_reason == "stop_sequence"
     assert candidates == ["answer"]
     assert model.context.decoded == [10]
+
+
+def test_generation_stops_on_inline_synthetic_role_continuation():
+    candidates = []
+    model = _FakeModel(
+        [NativeSample(10, False), NativeSample(11, False), NativeSample(12, False)],
+        {10: b"Hello!", 11: b" USER:", 12: b"should-not-run"},
+    )
+
+    result = generate_greedy(
+        model,
+        "prompt",
+        stop_sequences=_NATIVE_STOP_SEQUENCES,
+        on_candidate=candidates.append,
+    )
+
+    assert result.text == "Hello!"
+    assert result.stop_reason == "stop_sequence"
+    assert candidates == ["Hello!"]
+    assert model.context.decoded == [10, 11]
+    assert model.samples == [NativeSample(12, False)]
 
 
 def test_generation_releases_a_held_stop_prefix_after_a_near_miss():

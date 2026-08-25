@@ -129,6 +129,21 @@ def test_visible_gate_requires_unpredictable_marker_before_streaming() -> None:
     assert "Безопасный ответ" in delta
 
 
+def test_visible_gate_blocks_inline_synthetic_role_continuation() -> None:
+    marker = new_visible_marker()
+    gate = VisibleTextGate(marker=marker)
+    visible = "Hello! How can I assist you today? " * 6
+
+    first = gate.feed(marker + visible)
+    assert first
+    assert "USER:" not in gate.emitted
+
+    assert gate.feed(" USER: Hello, BabyAI. BABYAI: This must stay hidden.") == ""
+    assert gate.invalid is True
+    assert "USER:" not in gate.emitted
+    assert "BABYAI:" not in gate.emitted
+
+
 def test_answer_only_stream_uses_safe_canonical_reply(tmp_path) -> None:
     provider = StreamingProvider(
         "Привет! Чем помочь?",

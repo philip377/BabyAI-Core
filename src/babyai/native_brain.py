@@ -23,7 +23,26 @@ _PARENTHESISED_ASCII_LINE = re.compile(r"^\([^()\n]*[A-Za-z][^()\n]*\)$")
 _TRAILING_ASCII_PARENTHESIS = re.compile(
     r"\s+\((?=[^()\n]*[A-Za-z])(?=(?:[^A-Za-z()\n]*[A-Za-z]+){4,})[^()\n]*\)\s*$"
 )
-_NATIVE_STOP_SEQUENCES = ("\n\nUSER:", "\nUSER:", "\n\nBABYAI:", "\nBABYAI:")
+_NATIVE_STOP_SEQUENCES = (
+    "\n\nUSER:",
+    "\nUSER:",
+    " USER:",
+    "\n\nUser:",
+    "\nUser:",
+    " User:",
+    "\n\nuser:",
+    "\nuser:",
+    " user:",
+    "\n\nBABYAI:",
+    "\nBABYAI:",
+    " BABYAI:",
+    "\n\nBabyAI:",
+    "\nBabyAI:",
+    " BabyAI:",
+    "\n\nbabyai:",
+    "\nbabyai:",
+    " babyai:",
+)
 _TRANSLATION_REQUEST_MARKERS = (
     "translate",
     "translation",
@@ -49,7 +68,9 @@ def _prepare_native_prompt(prompt: str) -> str:
         + "\n\n/no_think"
         + "\nAnswer directly in the user's language. Do not reveal reasoning. "
         + "Do not add a translation unless the user requested one. "
-        + "Do not wrap a normal answer in JSON."
+        + "Do not wrap a normal answer in JSON. "
+        + "Return exactly one assistant turn and stop after that answer. "
+        + "Never continue the transcript by writing USER:, User:, BABYAI:, or BabyAI:."
         + "\n\nBABYAI:"
     )
 

@@ -75,6 +75,15 @@ def test_desktop_stream_ui_owns_one_turn_and_rejects_ghost_deltas() -> None:
     assert 'AppendConversation("Система", "Остановлено пользователем.")' in window
     assert "if (_busy)" in window
 
+    assert "void RollbackAssistantTurn()" in window
+    assert "RemoveConversationTurn(index)" in window
+    assert "private void RemoveConversationTurn(int index)" in window
+    send_start = window.index("private async void SendButton_Click")
+    cancel_catch = window.index("catch (OperationCanceledException)", send_start)
+    error_catch = window.index("catch (Exception ex)", cancel_catch)
+    assert window.index("RollbackAssistantTurn();", cancel_catch) < error_catch
+    assert window.index("RollbackAssistantTurn();", error_catch) < window.index("finally", error_catch)
+
     assert "OrbState.Answering" in window
     assert "BabyAI · отвечаю" in adaptive
     assert 'value.Contains("отвеч")' in activity

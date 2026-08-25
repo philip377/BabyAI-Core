@@ -251,6 +251,18 @@ public sealed partial class MainWindow : Window
             flushWatch.Restart();
         }
 
+        void RollbackAssistantTurn()
+        {
+            if (assistantTurnIndex is not int index)
+                return;
+
+            RemoveConversationTurn(index);
+            assistantTurnIndex = null;
+            responseBuffer.Clear();
+            StartupDiagnostics.Log(
+                $"Desktop provisional assistant turn rolled back: generation={chatGeneration}");
+        }
+
         AppendConversation("Вы", message);
         MessageBox.Text = string.Empty;
 
@@ -306,7 +318,7 @@ public sealed partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            FlushAssistantTurn(force: true);
+            RollbackAssistantTurn();
             CoreStatusText.Text = "Core: подключён";
             ReplyText.Text = "Действие отменено.";
             AppendConversation("Система", "Остановлено пользователем.");
@@ -314,7 +326,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            FlushAssistantTurn(force: true);
+            RollbackAssistantTurn();
             ShowBridgeError(ex);
         }
         finally
@@ -452,6 +464,15 @@ public sealed partial class MainWindow : Window
             return;
 
         _conversation[index] = $"{speaker}: {text}";
+        RenderConversation();
+    }
+
+    private void RemoveConversationTurn(int index)
+    {
+        if (index < 0 || index >= _conversation.Count)
+            return;
+
+        _conversation.RemoveAt(index);
         RenderConversation();
     }
 
