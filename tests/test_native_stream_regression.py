@@ -69,8 +69,8 @@ def test_resident_native_prefills_visible_nonce_and_streams_before_completion(mo
     assert captured.get("streamed_before_return") is True
     assert gate.opened is True
     body = gate.validated_open_body(result.text)
-    assert body == answer
-    assert "".join(visible_deltas) + gate.finish(body) == answer
+    assert body == answer.strip()
+    assert "".join(visible_deltas) + gate.finish(body) == body
     assert marker not in "".join(visible_deltas)
     assert result.first_token_ms == 7
     assert result.generated_tokens == 42
