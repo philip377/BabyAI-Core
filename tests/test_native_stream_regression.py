@@ -91,8 +91,8 @@ def test_native_stream_accepts_normalized_answer_before_quarantined_reasoning_ta
 
     answer = "Я BabyAI — персональный ИИ-ассистент. " * 8
     reasoning_tail = (
-        '\nOkay, the user said "Привет, расскажи немного о себе". '
-        "I need to respond in Russian and should craft the answer."
+        "\nOkay, I need to figure out how to respond to the user's latest message. "
+        "Let me start by understanding the context."
     )
     raw = answer + reasoning_tail
     streamed_before_return = False
@@ -120,8 +120,10 @@ def test_native_stream_accepts_normalized_answer_before_quarantined_reasoning_ta
 
     result = primus.think_stream("Привет, расскажи немного о себе", visible_deltas.append)
 
+    streamed = "".join(visible_deltas)
     assert streamed_before_return is True
     assert result.reply == answer.strip()
-    assert "".join(visible_deltas) == answer.strip()
-    assert "Okay" not in "".join(visible_deltas)
-    assert "user said" not in "".join(visible_deltas)
+    assert streamed == answer.strip()
+    assert "Okay" not in streamed
+    assert "figure out" not in streamed
+    assert "Let me start" not in streamed
