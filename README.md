@@ -61,6 +61,24 @@ The current development path is deliberately incremental:
 
 The design rule is simple: **add one bounded capability, make it observable and testable, then build the next layer on top of it.**
 
+## Long-term communication vision
+
+UNIX is also intended to grow beyond a one-person assistant window into an **AI-centered communication and work client**.
+
+The idea is to make the AI a native participant in the same space where people already communicate and work, rather than keeping it in a separate chatbot tab. A future UNIX workspace can combine:
+
+- persistent **project spaces** with their own context, memory, files, goals, and history
+- **human-to-human and human-to-AI chats** inside the same project
+- shared conversations where UNIX can participate as another member instead of being invoked through a separate interface
+- integrated **documents, files, notes, tasks, and decisions** attached to the conversation that produced them
+- context that persists across chats so the AI understands the project, not only the latest message
+- collaboration between several people and UNIX while retaining explicit permissions for local or external actions
+- the ability for UNIX to summarize discussions, surface unresolved decisions, retrieve relevant project material, and later execute approved work from the same workspace
+
+The intended direction is closer to a **communication layer + project workspace + AI participant** than to a traditional messenger with an AI button added on top.
+
+This is a long-term product direction, not part of the current voice milestone. The lower-level Workspace, Documents, Retrieval, Durable Jobs, permissions, and memory layers are being built first so this client can eventually sit on top of reliable foundations.
+
 ## First Windows development run
 
 Requirements: Windows 10/11 x64, Python 3.11+ and the .NET 10 SDK. Ollama remains available as a development provider, but the Windows release path also supports the packaged native runtime.
