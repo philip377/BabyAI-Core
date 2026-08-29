@@ -98,6 +98,10 @@ class BabyAIConfig:
         return self.data_dir / "workspace_tasks"
 
     @property
+    def workspace_documents_dir(self) -> Path:
+        return self.data_dir / "workspace_documents"
+
+    @property
     def working_memory_file(self) -> Path:
         return self.data_dir / "working_memory.json"
 

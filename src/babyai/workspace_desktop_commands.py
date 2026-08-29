@@ -18,6 +18,7 @@ from .tool_approval import PendingToolApprovalStore
 from .working_memory import TaskState, WorkingMemoryStore
 from .workspace import WorkspaceRecord, WorkspaceStore
 from .workspace_context import WorkspacePrimus
+from .workspace_documents import WorkspaceDocumentStore
 
 
 class WorkspaceDesktopCommands(DesktopCommands):
@@ -41,6 +42,17 @@ class WorkspaceDesktopCommands(DesktopCommands):
         if workspace is None:
             return WorkingMemoryStore(self.config.working_memory_file)
         return WorkingMemoryStore(self.config.workspace_tasks_dir / f"{workspace.id}.json")
+
+    def _document_store(
+        self, workspace: WorkspaceRecord | None = None
+    ) -> WorkspaceDocumentStore:
+        workspace = self._active_workspace() if workspace is None else workspace
+        if workspace is None:
+            raise DesktopCommandError("An active workspace is required for document commands")
+        return WorkspaceDocumentStore(
+            self.config.workspace_documents_dir / f"{workspace.id}.json",
+            workspace.id,
+        )
 
     def _session_store(self, workspace: WorkspaceRecord | None = None) -> SessionMemoryStore:
         workspace = self._active_workspace() if workspace is None else workspace
@@ -248,6 +260,63 @@ class WorkspaceDesktopCommands(DesktopCommands):
             self._workspace_store().clear_active()
             return {"ok": True, "command": command}
 
+        if command == "document.add":
+            path = str(payload.get("path", "")).strip()
+            if not path:
+                raise DesktopCommandError("document.add.path is required")
+            raw_name = payload.get("name")
+            name = None if raw_name is None else str(raw_name)
+            try:
+                document = self._document_store().add(path, name=name)
+            except (ValueError, FileNotFoundError, OSError) as exc:
+                raise DesktopCommandError(str(exc)) from exc
+            return {"ok": True, "command": command, "document": asdict(document)}
+
+        if command == "document.list":
+            try:
+                documents = self._document_store().list()
+            except ValueError as exc:
+                raise DesktopCommandError(str(exc)) from exc
+            return {
+                "ok": True,
+                "command": command,
+                "documents": [asdict(item) for item in documents],
+            }
+
+        if command == "document.get":
+            document_id = str(payload.get("id", "")).strip()
+            try:
+                document = self._document_store().get(document_id)
+            except (ValueError, KeyError) as exc:
+                raise DesktopCommandError(str(exc)) from exc
+            return {"ok": True, "command": command, "document": asdict(document)}
+
+        if command == "document.read":
+            document_id = str(payload.get("id", "")).strip()
+            store = self._document_store()
+            try:
+                document = store.get(document_id)
+                content = store.read_text(
+                    document.id,
+                    PermissionStore(self.config.permissions_file),
+                )
+            except (ValueError, KeyError, FileNotFoundError, PermissionError, OSError) as exc:
+                raise DesktopCommandError(str(exc)) from exc
+            return {
+                "ok": True,
+                "command": command,
+                "document": asdict(document),
+                "content": content,
+            }
+
+        if command == "document.remove":
+            document_id = str(payload.get("id", "")).strip()
+            try:
+                document = self._document_store().remove(document_id)
+            except (ValueError, KeyError) as exc:
+                raise DesktopCommandError(str(exc)) from exc
+            return {"ok": True, "command": command, "document": asdict(document)}
+
         if command == "task.set":
             goal = str(payload.get("goal", "")).strip()
             if not goal:
@@ -354,6 +423,9 @@ class WorkspaceDesktopCommands(DesktopCommands):
                     None if workspace is None else asdict(workspace)
                 )
                 snapshot["task"] = None if task is None else asdict(task)
+                snapshot["documents"] = {
+                    "count": 0 if workspace is None else len(self._document_store(workspace).list())
+                }
                 history = snapshot.get("history")
                 if isinstance(history, dict):
                     history["active_project"] = self._active_project() or None
