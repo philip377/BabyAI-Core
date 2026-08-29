@@ -18,6 +18,7 @@ babyai-loop = "babyai.learning_loop_cli:app"
 babyai-setup = "babyai.setup_cli:app"
 babyai-desktop-bridge = "babyai.desktop_bridge_cli:app"
 babyai-desktop = "babyai.desktop_commands_cli:app"
+babyai-workspace = "babyai.workspace_cli:app"
 
 [build-system]
 requires = ["hatchling"]
