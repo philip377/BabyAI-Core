@@ -13,10 +13,16 @@ from .native_runtime import NativeRuntimeError, NativeRuntimeLoader
 _RESPONSE_BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
 _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
 _INTERNAL_REASONING_TAIL = re.compile(
-    r"(?im)^(?:okay,\s*)?(?:"
+    r"(?im)^(?:"
+    r"okay,\s*(?:"
+    r"the user (?:asked|said|wants|is asking|wrote)|"
+    r"(?:i|we) (?:should|need(?: to)?) "
+    r"(?:answer|respond|reply|figure out|determine|decide|understand|analy[sz]e|consider)"
+    r")|"
     r"the user (?:asked|said|wants|is asking|wrote)|"
     r"(?:i|we) (?:should|need(?: to)?) (?:answer|respond|reply)|"
-    r"(?:let(?:'|’)s|let us) (?:craft|answer|respond|reply)"
+    r"(?:let(?:'|’)s|let us) (?:craft|answer|respond|reply)|"
+    r"let me start by (?:understanding|analy[sz]ing|considering|figuring out)"
     r")\b"
 )
 _PARENTHESISED_ASCII_LINE = re.compile(r"^\([^()\n]*[A-Za-z][^()\n]*\)$")
