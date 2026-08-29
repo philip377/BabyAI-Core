@@ -29,18 +29,25 @@ _INTERNAL_MARKERS = (
     "never put the marker before json",
     "emit exactly one assistant turn",
     "do not explain or repeat this contract",
+    "answer directly in the user's language",
+    "do not reveal reasoning",
+    "do not add a translation unless",
+    "do not wrap a normal answer in json",
+    "return exactly one assistant turn",
+    "never continue the transcript by writing",
 )
 _INTERNAL_REASONING = re.compile(
     r"(?im)^(?:"
     r"okay,\s*(?:"
     r"the user (?:asked|said|wants|is asking|wrote)|"
     r"(?:i|we) (?:should|need(?: to)?) "
-    r"(?:answer|respond|reply|figure out|determine|decide|understand|analy[sz]e|consider)"
+    r"(?:answer|respond|reply|figure out|determine|decide|understand|analy[sz]e|consider)|"
+    r"let me (?:try to )?(?:figure out|determine|decide|understand|analy[sz]e|consider)"
     r")|"
     r"the user (?:asked|said|wants|is asking|wrote)|"
     r"(?:i|we) (?:should|need(?: to)?) (?:answer|respond|reply)|"
     r"(?:let(?:'|’)s|let us) (?:craft|answer|respond|reply)|"
-    r"let me start by (?:understanding|analy[sz]ing|considering|figuring out)"
+    r"let me (?:start by |try to )?(?:understand|analy[sz]e|consider|figure out|determine|decide)"
     r")\b"
 )
 _SYNTHETIC_ROLE_CONTINUATION = re.compile(
