@@ -1,0 +1,16 @@
+# Navigation
+
+- [Home](Home.md)
+- [Architecture](Architecture.md)
+- [Roadmap](Roadmap.md)
+- [Workspace](Workspace.md)
+- [Memory System](Memory-System.md)
+- [Permissions & Safety](Permissions-and-Safety.md)
+- [Native AI Runtime](Native-AI-Runtime.md)
+- [Streaming Protocol v2](Streaming-Protocol-v2.md)
+- [Voice](Voice.md)
+- [Communication Vision](Communication-Vision.md)
+- [Build & Install](Build-and-Install.md)
+- [Troubleshooting](Troubleshooting.md)
+- [Engineering Decisions](Engineering-Decisions.md)
+- [Project Principles](Project-Principles.md)
