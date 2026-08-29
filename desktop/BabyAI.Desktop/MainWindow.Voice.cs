@@ -56,7 +56,6 @@ public sealed partial class MainWindow
         _voiceListening = true;
         AttachVoiceStopHooks();
         VoiceButton.Content = "■";
-        VoiceButton.ToolTip = "Остановить прослушивание";
         ApplyState(OrbState.Listening);
         CoreStatusText.Text = "Core: слушаю";
         ReplyText.Text = "Слушаю · скажите что-нибудь…";
@@ -81,7 +80,6 @@ public sealed partial class MainWindow
         }
 
         VoiceButton.Content = "🎙";
-        VoiceButton.ToolTip = "Голос · проверить микрофон и VAD";
 
         if (!updateUi)
             return;
