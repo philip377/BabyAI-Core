@@ -24,6 +24,11 @@ _INTERNAL_MARKERS = (
     "/no_think",
     "\nuser:",
     "\nbabyai:",
+    "streaming display contract:",
+    "the marker must be the first output",
+    "never put the marker before json",
+    "emit exactly one assistant turn",
+    "do not explain or repeat this contract",
 )
 _INTERNAL_REASONING = re.compile(
     r"(?im)^(?:okay,\s*)?(?:"
@@ -146,8 +151,19 @@ class VisibleTextGate:
         return delta
 
     def strip_marker(self, canonical: str) -> str:
+        """Return only a completed reply that is safe even without progressive authorization.
+
+        Missing visible markers are allowed as a compatibility fallback, but the completed
+        canonical reply must still pass the same display boundary. This prevents prompt or
+        streaming-contract echoes from being accepted through ``done.reply`` simply because
+        no progressive channel was opened.
+        """
+
+        if not isinstance(canonical, str):
+            raise StreamingSafetyError("Streaming completed reply must be text")
         if self._marker is None:
-            return canonical
+            return self._validated_completed_text(canonical)
+
         text = self._after_hidden_prefix(canonical)
         if text is not None and text.startswith(self._marker):
             body = text[len(self._marker) :].lstrip()
@@ -156,10 +172,17 @@ class VisibleTextGate:
                 or _VISIBLE_MARKER_PREFIX in body.casefold()
             ):
                 raise StreamingSafetyError("Streaming response marker validation failed")
-            return body
+            return self._validated_completed_text(body)
         if _VISIBLE_MARKER_PREFIX in canonical.casefold():
             raise StreamingSafetyError("Streaming response marker validation failed")
-        return canonical
+        return self._validated_completed_text(canonical)
+
+    def _validated_completed_text(self, text: str) -> str:
+        probe = VisibleTextGate(tool_names=tuple(self._tool_names))
+        safe = probe._candidate(text)
+        if safe is None or probe._blocked or safe.strip() != text.strip():
+            raise StreamingSafetyError("Streaming completed reply failed safety validation")
+        return text
 
     def validated_open_body(self, canonical: str) -> str | None:
         """Return a safe canonical body only when it retains this gate's nonce."""
@@ -170,11 +193,10 @@ class VisibleTextGate:
         if text is None or not text.startswith(self._marker):
             return None
         body = text[len(self._marker) :].lstrip()
-        probe = VisibleTextGate(tool_names=tuple(self._tool_names))
-        safe = probe._candidate(body)
-        if safe is None or probe._blocked or safe.strip() != body.strip():
+        try:
+            return self._validated_completed_text(body)
+        except StreamingSafetyError:
             return None
-        return body
 
     def finish(self, canonical: str) -> str:
         """Emit only the unseen suffix of an already validated canonical reply."""
