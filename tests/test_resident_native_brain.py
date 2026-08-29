@@ -5,7 +5,7 @@ import pytest
 from babyai.llm import LLMError
 from babyai.native_generation import NativeGenerationResult
 from babyai.native_runtime import NativeRuntimeError
-from babyai.resident_native_brain import ResidentNativeBrainProvider
+from babyai.resident_native_brain import ResidentNativeBrainProvider, ResidentNativeStreamResult
 
 
 class Model:
@@ -85,6 +85,75 @@ def test_model_is_loaded_lazily_and_reused(tmp_path, monkeypatch):
     assert sum(isinstance(call, tuple) and call[0] == "open_model" for call in calls) == 1
     assert ("open_model", tmp_path / "brain.gguf", 4) in calls
     assert provider.model_is_resident is True
+
+
+def test_generate_stream_exposes_raw_candidates_but_returns_canonical_text_and_metrics(
+    tmp_path,
+    monkeypatch,
+):
+    calls = []
+    candidates = []
+    monkeypatch.setattr(
+        "babyai.resident_native_brain.NativeRuntimeLoader",
+        lambda path: Loader(path, calls),
+    )
+
+    raw = "<think>private scratch</think>\nBABYAI: Привет"
+
+    def generate(model, prompt, **kwargs):
+        kwargs["on_candidate"]("<think>private scratch</think>\n")
+        kwargs["on_candidate"]("BABYAI: Привет")
+        return NativeGenerationResult(
+            text=raw,
+            generated_tokens=9,
+            output_bytes=len(raw.encode("utf-8")),
+            stop_reason="eog",
+            first_token_ms=17,
+            generation_ms=42,
+        )
+
+    monkeypatch.setattr("babyai.resident_native_brain.generate_greedy", generate)
+    provider = ResidentNativeBrainProvider(
+        model_path=tmp_path / "brain.gguf",
+        runtime_path=tmp_path / "babyai_native.dll",
+    )
+
+    streamed = provider.generate_stream("hello", candidates.append)
+
+    assert isinstance(streamed, ResidentNativeStreamResult)
+    assert candidates == ["<think>private scratch</think>\n", "BABYAI: Привет"]
+    assert streamed.text == "Привет"
+    assert streamed.generated_tokens == 9
+    assert streamed.output_bytes == len(raw.encode("utf-8"))
+    assert streamed.stop_reason == "eog"
+    assert streamed.first_token_ms == 17
+    assert streamed.generation_ms == 42
+
+
+def test_generate_stream_preserves_canonical_tool_call_json(tmp_path, monkeypatch):
+    calls = []
+    raw = '```json\n{"tool":"system.info","arguments":{}}\n```'
+    monkeypatch.setattr(
+        "babyai.resident_native_brain.NativeRuntimeLoader",
+        lambda path: Loader(path, calls),
+    )
+    monkeypatch.setattr(
+        "babyai.resident_native_brain.generate_greedy",
+        lambda *args, **kwargs: NativeGenerationResult(
+            text=raw,
+            generated_tokens=5,
+            output_bytes=len(raw),
+            stop_reason="stop_sequence",
+        ),
+    )
+    provider = ResidentNativeBrainProvider(
+        model_path=tmp_path / "brain.gguf",
+        runtime_path=tmp_path / "babyai_native.dll",
+    )
+
+    streamed = provider.generate_stream("inspect the system", None)
+
+    assert streamed.text == '{"tool":"system.info","arguments":{}}'
 
 
 def test_close_releases_model_then_runtime(tmp_path, monkeypatch):

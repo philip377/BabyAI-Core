@@ -49,8 +49,10 @@ public static class ReplyActivityBehavior
         var value = status.Trim().ToLowerInvariant();
         var active = value.Contains("thinking")
             || value.Contains("checking")
+            || value.Contains("answering")
             || value.Contains("stopping")
             || value.Contains("дума")
+            || value.Contains("отвеч")
             || value.Contains("выполня")
             || value.Contains("провер")
             || value.Contains("останав");

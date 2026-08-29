@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from dataclasses import asdict
 
 from .agent import AgentExecutor, ToolCall, ToolProtocolError
@@ -132,6 +133,92 @@ class DesktopCommands:
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
+
+    def stream_chat(
+        self,
+        payload: dict[str, object],
+        emit: Callable[[dict[str, object]], None],
+    ) -> dict[str, object]:
+        """Run one chat turn and emit display-safe, protocol-neutral events."""
+
+        message = str(payload.get("message", "")).strip()
+        if not message:
+            raise DesktopCommandError("chat.message is required")
+
+        started = time.monotonic()
+        first_delta_ms: int | None = None
+        delta_count = 0
+        answering = False
+        emit({"event": "state", "state": "thinking"})
+
+        def emit_delta(text: str) -> None:
+            nonlocal answering, delta_count, first_delta_ms
+            if not text:
+                return
+            if not answering:
+                emit({"event": "state", "state": "answering"})
+                answering = True
+            if first_delta_ms is None:
+                first_delta_ms = round((time.monotonic() - started) * 1000)
+            emit({"event": "delta", "text": text})
+            delta_count += 1
+
+        def emit_core_state(state: str) -> None:
+            if state != "executing":
+                raise DesktopCommandError("Unsupported streaming core state")
+            emit({"event": "state", "state": state})
+
+        trace(
+            "chat.core.start",
+            provider=self.config.provider,
+            message_chars=len(message),
+            streaming=True,
+            **process_memory_metrics(),
+        )
+        try:
+            result = self._core().think_stream(message, emit_delta, emit_core_state)
+        except LLMError as exc:
+            trace(
+                "chat.core.error",
+                elapsed_ms=round((time.monotonic() - started) * 1000),
+                error=type(exc).__name__,
+            )
+            raise DesktopCommandError(f"Local brain unavailable: {exc}") from exc
+
+        if not answering:
+            emit({"event": "state", "state": "answering"})
+
+        total_ms = round((time.monotonic() - started) * 1000)
+        trace(
+            "chat.core.done",
+            elapsed_ms=total_ms,
+            reply_chars=len(result.reply),
+            streaming=True,
+            **process_memory_metrics(),
+        )
+        history = ChatHistoryStore(
+            self.config.history_db,
+            self.config.history_settings_file,
+        )
+        task = WorkingMemoryStore(self.config.working_memory_file).load()
+        project = "" if task is None else task.project
+        history.add("user", message, project=project)
+        history.add("babyai", result.reply, project=project)
+
+        metrics = result.metrics
+        return {
+            "reply": result.reply,
+            "metrics": {
+                "visible_ttft_ms": first_delta_ms,
+                "native_first_token_ms": metrics.native_first_token_ms,
+                "generation_ms": metrics.generation_ms,
+                "total_ms": total_ms,
+                "generated_tokens": metrics.generated_tokens,
+                "delta_count": delta_count,
+                "model_calls": metrics.model_calls,
+                "stop_reason": metrics.stop_reason or "completed",
+            },
+        }
 
     def execute(self, command: str, payload: dict[str, object] | None = None) -> dict[str, object]:
         payload = payload or {}

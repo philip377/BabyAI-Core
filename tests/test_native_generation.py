@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from babyai.native_brain import _NATIVE_STOP_SEQUENCES
 from babyai.native_generation import MAX_NATIVE_GENERATION_TOKENS, generate_greedy
 from babyai.native_runtime import NativeRuntimeError, NativeSample
 
@@ -64,6 +65,7 @@ class _FakeModel:
 
 
 def test_generation_loops_sample_piece_decode_until_eog_and_combines_utf8():
+    candidates = []
     model = _FakeModel(
         [
             NativeSample(10, False),
@@ -74,12 +76,24 @@ def test_generation_loops_sample_piece_decode_until_eog_and_combines_utf8():
         {10: b"A\xd0", 11: b"\x9f", 12: b"!"},
     )
 
-    result = generate_greedy(model, "hello", max_tokens=8, n_ctx=64, n_batch=16, n_threads=3)
+    result = generate_greedy(
+        model,
+        "hello",
+        max_tokens=8,
+        n_ctx=64,
+        n_batch=16,
+        n_threads=3,
+        on_candidate=candidates.append,
+    )
 
     assert result.text == "AП!"
     assert result.generated_tokens == 3
     assert result.output_bytes == 4
     assert result.stop_reason == "eog"
+    assert result.first_token_ms is not None
+    assert result.first_token_ms >= 0
+    assert result.generation_ms >= result.first_token_ms
+    assert candidates == ["A", "П", "!"]
     assert model.context.decoded == [10, 11, 12]
     assert model.context.prefilled == (1, 2)
     assert model.context_args == (64, 16, 3)
@@ -88,6 +102,7 @@ def test_generation_loops_sample_piece_decode_until_eog_and_combines_utf8():
 
 
 def test_generation_stops_on_managed_delimiter_and_removes_it():
+    candidates = []
     model = _FakeModel(
         [
             NativeSample(10, False),
@@ -98,7 +113,12 @@ def test_generation_stops_on_managed_delimiter_and_removes_it():
         {10: b"hello", 11: b"\n", 12: b"USER:", 13: b"should-not-run"},
     )
 
-    result = generate_greedy(model, "prompt", stop_sequences=("\nUSER:",))
+    result = generate_greedy(
+        model,
+        "prompt",
+        stop_sequences=("\nUSER:",),
+        on_candidate=candidates.append,
+    )
 
     assert result.text == "hello"
     assert result.stop_reason == "stop_sequence"
@@ -106,6 +126,92 @@ def test_generation_stops_on_managed_delimiter_and_removes_it():
     assert result.output_bytes == 5
     assert model.context.decoded == [10, 11, 12]
     assert model.samples == [NativeSample(13, False)]
+    assert candidates == ["hello"]
+
+
+def test_generation_stops_when_one_piece_contains_delimiter_and_trailing_bytes():
+    candidates = []
+    model = _FakeModel(
+        [NativeSample(10, False), NativeSample(11, False)],
+        {10: b"answer\nUSER: must-not-leak", 11: b"unused"},
+    )
+
+    result = generate_greedy(
+        model,
+        "prompt",
+        stop_sequences=("\nUSER:",),
+        on_candidate=candidates.append,
+    )
+
+    assert result.text == "answer"
+    assert result.stop_reason == "stop_sequence"
+    assert result.generated_tokens == 1
+    assert result.output_bytes == len(b"answer")
+    assert candidates == ["answer"]
+    assert model.context.decoded == [10]
+    assert model.samples == [NativeSample(11, False)]
+
+
+def test_generation_uses_earliest_of_multiple_stops_inside_one_piece():
+    candidates = []
+    model = _FakeModel(
+        [NativeSample(10, False), NativeSample(11, False)],
+        {
+            10: b"answer\nUSER: first hidden turn\nBABYAI: later hidden turn",
+            11: b"unused",
+        },
+    )
+
+    result = generate_greedy(
+        model,
+        "prompt",
+        stop_sequences=("\nBABYAI:", "\nUSER:"),
+        on_candidate=candidates.append,
+    )
+
+    assert result.text == "answer"
+    assert result.stop_reason == "stop_sequence"
+    assert candidates == ["answer"]
+    assert model.context.decoded == [10]
+
+
+def test_generation_stops_on_inline_synthetic_role_continuation():
+    candidates = []
+    model = _FakeModel(
+        [NativeSample(10, False), NativeSample(11, False), NativeSample(12, False)],
+        {10: b"Hello!", 11: b" USER:", 12: b"should-not-run"},
+    )
+
+    result = generate_greedy(
+        model,
+        "prompt",
+        stop_sequences=_NATIVE_STOP_SEQUENCES,
+        on_candidate=candidates.append,
+    )
+
+    assert result.text == "Hello!"
+    assert result.stop_reason == "stop_sequence"
+    assert candidates == ["Hello!"]
+    assert model.context.decoded == [10, 11]
+    assert model.samples == [NativeSample(12, False)]
+
+
+def test_generation_releases_a_held_stop_prefix_after_a_near_miss():
+    candidates = []
+    model = _FakeModel(
+        [NativeSample(10, False), NativeSample(11, False), NativeSample(99, True)],
+        {10: b"answer\nUS", 11: b"X"},
+    )
+
+    result = generate_greedy(
+        model,
+        "prompt",
+        stop_sequences=("\nUSER:",),
+        on_candidate=candidates.append,
+    )
+
+    assert result.text == "answer\nUSX"
+    assert candidates == ["answer", "\nUSX"]
 
 
 def test_generation_stop_sequence_can_span_token_pieces():
@@ -122,18 +228,20 @@ def test_generation_stop_sequence_can_span_token_pieces():
 
 
 def test_generation_max_tokens_is_hard_bound_and_omits_incomplete_utf8_suffix():
+    candidates = []
     model = _FakeModel(
         [NativeSample(10, False), NativeSample(11, False)],
         {10: b"ok\xd0", 11: b"\x9f"},
     )
 
-    result = generate_greedy(model, "prompt", max_tokens=1)
+    result = generate_greedy(model, "prompt", max_tokens=1, on_candidate=candidates.append)
 
     assert result.text == "ok"
     assert result.generated_tokens == 1
     assert result.output_bytes == 3
     assert result.stop_reason == "max_tokens"
     assert model.context.decoded == [10]
+    assert candidates == ["ok"]
 
 
 def test_generation_stops_before_sampling_when_context_is_full():
@@ -183,13 +291,16 @@ def test_generation_cancellation_is_cooperative_at_token_boundaries():
 
 
 def test_generation_rejects_invalid_utf8_when_eog_claims_output_is_complete():
+    candidates = []
     model = _FakeModel(
         [NativeSample(10, False), NativeSample(99, True)],
         {10: b"\xd0"},
     )
 
     with pytest.raises(NativeRuntimeError, match="invalid UTF-8"):
-        generate_greedy(model, "prompt")
+        generate_greedy(model, "prompt", on_candidate=candidates.append)
+
+    assert candidates == []
 
 
 def test_generation_rejects_unbounded_or_invalid_limits_before_native_work():
@@ -203,6 +314,8 @@ def test_generation_rejects_unbounded_or_invalid_limits_before_native_work():
         generate_greedy(model, "prompt", max_output_bytes=0)
     with pytest.raises(NativeRuntimeError, match="n_ctx"):
         generate_greedy(model, "prompt", n_ctx=-1)
+    with pytest.raises(NativeRuntimeError, match="on_candidate"):
+        generate_greedy(model, "prompt", on_candidate="not callable")
     with pytest.raises(NativeRuntimeError, match="stop sequences"):
         generate_greedy(model, "prompt", stop_sequences=("",))
 

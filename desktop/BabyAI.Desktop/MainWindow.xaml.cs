@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using H.NotifyIcon;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
@@ -21,6 +23,7 @@ public sealed partial class MainWindow : Window
     private readonly List<string> _conversation = [];
     private Storyboard? _orbStoryboard;
     private CancellationTokenSource? _chatCancellation;
+    private long _chatGeneration;
     private OrbState _state = OrbState.Idle;
     private bool _expanded;
     private bool _dragging;
@@ -102,6 +105,9 @@ public sealed partial class MainWindow : Window
             _dragMoved = false;
             return;
         }
+
+        if (_busy)
+            return;
 
         try
         {
@@ -214,7 +220,49 @@ public sealed partial class MainWindow : Window
             return;
 
         _chatCancellation?.Dispose();
-        _chatCancellation = new CancellationTokenSource();
+        var chatCancellation = new CancellationTokenSource();
+        _chatCancellation = chatCancellation;
+        var chatGeneration = Interlocked.Increment(ref _chatGeneration);
+        var responseBuffer = new StringBuilder();
+        var flushWatch = Stopwatch.StartNew();
+        int? assistantTurnIndex = null;
+        long? displayedTtftMs = null;
+
+        bool IsCurrentChat() =>
+            chatGeneration == Volatile.Read(ref _chatGeneration)
+            && !chatCancellation.IsCancellationRequested;
+
+        void FlushAssistantTurn(bool force)
+        {
+            if (!force && assistantTurnIndex is not null && flushWatch.ElapsedMilliseconds < 50)
+                return;
+
+            var text = responseBuffer.ToString();
+            if (assistantTurnIndex is null)
+            {
+                if (text.Length == 0)
+                    return;
+                assistantTurnIndex = CreateConversationTurn("BabyAI", text);
+            }
+            else
+            {
+                ReplaceConversationTurn(assistantTurnIndex.Value, "BabyAI", text);
+            }
+            flushWatch.Restart();
+        }
+
+        void RollbackAssistantTurn()
+        {
+            if (assistantTurnIndex is not int index)
+                return;
+
+            RemoveConversationTurn(index);
+            assistantTurnIndex = null;
+            responseBuffer.Clear();
+            StartupDiagnostics.Log(
+                $"Desktop provisional assistant turn rolled back: generation={chatGeneration}");
+        }
+
         AppendConversation("Вы", message);
         MessageBox.Text = string.Empty;
 
@@ -225,15 +273,52 @@ public sealed partial class MainWindow : Window
             CoreStatusText.Text = "Core: думаю";
             RetryButton.Visibility = Visibility.Collapsed;
             ReplyText.Text = "Думаю…";
-            var reply = await _bridge.ChatAsync(message, _chatCancellation.Token);
+            var result = await _bridge.ChatStreamAsync(
+                message,
+                streamEvent =>
+                {
+                    if (!IsCurrentChat())
+                        return ValueTask.CompletedTask;
+
+                    if (streamEvent.Kind == DesktopChatEventKind.State)
+                    {
+                        ApplyChatStreamState(streamEvent.State);
+                        return ValueTask.CompletedTask;
+                    }
+
+                    responseBuffer.Append(streamEvent.Text);
+                    if (streamEvent.IsFirstDelta)
+                    {
+                        displayedTtftMs = streamEvent.ElapsedMilliseconds;
+                        ApplyState(OrbState.Answering);
+                        CoreStatusText.Text = "Core: отвечаю";
+                        ReplyText.Text = $"Отвечаю · первый фрагмент {FormatLatency(streamEvent.ElapsedMilliseconds)}";
+                        StartupDiagnostics.Log(
+                            $"Desktop chat first fragment displayed: generation={chatGeneration}; ttft_ms={streamEvent.ElapsedMilliseconds}");
+                    }
+                    FlushAssistantTurn(streamEvent.IsFirstDelta);
+                    return ValueTask.CompletedTask;
+                },
+                chatCancellation.Token);
+
+            if (!IsCurrentChat())
+                throw new OperationCanceledException(chatCancellation.Token);
+
+            responseBuffer.Clear();
+            responseBuffer.Append(result.Reply);
+            FlushAssistantTurn(force: true);
+            displayedTtftMs ??= result.Metrics.EndToEndTtftMs;
             ReplyText.Text = "Готово.";
-            AppendConversation("BabyAI", reply);
+            if (displayedTtftMs is long ttft)
+                ReplyText.Text = $"Готово · первый фрагмент {FormatLatency(ttft)}";
+            SetBusy(true);
             await RefreshStatusAsync();
             if (ApprovalCard.Visibility != Visibility.Visible)
                 ApplyState(OrbState.Done);
         }
         catch (OperationCanceledException)
         {
+            RollbackAssistantTurn();
             CoreStatusText.Text = "Core: подключён";
             ReplyText.Text = "Действие отменено.";
             AppendConversation("Система", "Остановлено пользователем.");
@@ -241,12 +326,14 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            RollbackAssistantTurn();
             ShowBridgeError(ex);
         }
         finally
         {
-            _chatCancellation?.Dispose();
-            _chatCancellation = null;
+            if (ReferenceEquals(_chatCancellation, chatCancellation))
+                _chatCancellation = null;
+            chatCancellation.Dispose();
             SetBusy(false);
             if (_expanded)
                 MessageBox.Focus(FocusState.Programmatic);
@@ -261,6 +348,7 @@ public sealed partial class MainWindow : Window
         CoreStatusText.Text = "Core: останавливаю";
         ReplyText.Text = "Останавливаю…";
         StopButton.IsEnabled = false;
+        Interlocked.Increment(ref _chatGeneration);
         _chatCancellation.Cancel();
     }
 
@@ -357,14 +445,70 @@ public sealed partial class MainWindow : Window
         if (text.Length == 0)
             return;
 
+        CreateConversationTurn(speaker, text);
+    }
+
+    private int CreateConversationTurn(string speaker, string text)
+    {
         _conversation.Add($"{speaker}: {text}");
         if (_conversation.Count > 24)
             _conversation.RemoveAt(0);
 
+        RenderConversation();
+        return _conversation.Count - 1;
+    }
+
+    private void ReplaceConversationTurn(int index, string speaker, string text)
+    {
+        if (index < 0 || index >= _conversation.Count)
+            return;
+
+        _conversation[index] = $"{speaker}: {text}";
+        RenderConversation();
+    }
+
+    private void RemoveConversationTurn(int index)
+    {
+        if (index < 0 || index >= _conversation.Count)
+            return;
+
+        _conversation.RemoveAt(index);
+        RenderConversation();
+    }
+
+    private void RenderConversation()
+    {
         ConversationText.Text = string.Join("\n\n", _conversation);
         ConversationScroller.UpdateLayout();
         ConversationScroller.ChangeView(null, ConversationScroller.ScrollableHeight, null);
     }
+
+    private void ApplyChatStreamState(DesktopChatState? state)
+    {
+        switch (state)
+        {
+            case DesktopChatState.Thinking:
+                ApplyState(OrbState.Thinking);
+                CoreStatusText.Text = "Core: думаю";
+                ReplyText.Text = "Думаю…";
+                break;
+            case DesktopChatState.Answering:
+                ApplyState(OrbState.Answering);
+                CoreStatusText.Text = "Core: отвечаю";
+                ReplyText.Text = "Отвечаю…";
+                break;
+            case DesktopChatState.Executing:
+                ApplyState(OrbState.Executing);
+                CoreStatusText.Text = "Core: выполняю";
+                ReplyText.Text = "Выполняю подтверждённое действие…";
+                break;
+        }
+    }
+
+    private static string FormatLatency(long milliseconds) =>
+        milliseconds < 1_000
+            ? $"{milliseconds} мс"
+            : $"{milliseconds / 1_000d:0.0} с";
 
     private static string BuildRuntimeLabel()
     {
@@ -486,6 +630,7 @@ public sealed partial class MainWindow : Window
             OrbState.Idle => "•",
             OrbState.Listening => "≈",
             OrbState.Thinking => "✦",
+            OrbState.Answering => "…",
             OrbState.Executing => "›",
             OrbState.Approval => "!",
             OrbState.Done => "✓",
@@ -498,6 +643,7 @@ public sealed partial class MainWindow : Window
             OrbState.Idle => new OrbVisual(1.035, 0.26, 2600, Color.FromArgb(255, 124, 141, 255), Color.FromArgb(255, 184, 200, 255), Color.FromArgb(255, 109, 124, 255)),
             OrbState.Listening => new OrbVisual(1.09, 0.48, 850, Color.FromArgb(255, 99, 220, 255), Color.FromArgb(255, 126, 220, 255), Color.FromArgb(255, 65, 151, 255)),
             OrbState.Thinking => new OrbVisual(1.075, 0.58, 650, Color.FromArgb(255, 174, 122, 255), Color.FromArgb(255, 163, 132, 255), Color.FromArgb(255, 111, 90, 255)),
+            OrbState.Answering => new OrbVisual(1.055, 0.46, 920, Color.FromArgb(255, 125, 164, 255), Color.FromArgb(255, 153, 181, 255), Color.FromArgb(255, 79, 112, 229)),
             OrbState.Executing => new OrbVisual(1.07, 0.55, 720, Color.FromArgb(255, 83, 205, 214), Color.FromArgb(255, 111, 218, 224), Color.FromArgb(255, 45, 156, 171)),
             OrbState.Approval => new OrbVisual(1.055, 0.62, 1100, Color.FromArgb(255, 255, 190, 86), Color.FromArgb(255, 255, 204, 118), Color.FromArgb(255, 227, 148, 44)),
             OrbState.Done => new OrbVisual(1.045, 0.42, 1800, Color.FromArgb(255, 76, 212, 145), Color.FromArgb(255, 108, 236, 173), Color.FromArgb(255, 49, 165, 112)),
@@ -550,6 +696,7 @@ public enum OrbState
     Idle,
     Listening,
     Thinking,
+    Answering,
     Executing,
     Approval,
     Done,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -11,9 +12,19 @@ from .native_brain import (
     _prepare_native_prompt,
     _requests_translation,
 )
-from .native_generation import generate_greedy
+from .native_generation import NativeGenerationStop, generate_greedy
 from .native_runtime import NativeModelHandle, NativeRuntimeError, NativeRuntimeLoader, NativeRuntimeSession
 from .runtime_trace import trace
+
+
+@dataclass(frozen=True, slots=True)
+class ResidentNativeStreamResult:
+    text: str
+    generated_tokens: int
+    output_bytes: int
+    stop_reason: NativeGenerationStop
+    first_token_ms: int | None = None
+    generation_ms: int = 0
 
 
 @dataclass(slots=True)
@@ -36,6 +47,20 @@ class ResidentNativeBrainProvider(LLMProvider):
         return self._model is not None and not self._model.closed
 
     def generate(self, prompt: str) -> str:
+        return self.generate_stream(prompt, None).text
+
+    def generate_stream(
+        self,
+        prompt: str,
+        on_candidate: Callable[[str], None] | None,
+    ) -> ResidentNativeStreamResult:
+        """Generate one canonical reply while exposing untrusted raw text candidates.
+
+        Candidate chunks have only passed native UTF-8 and stop-delimiter handling.
+        They can still contain reasoning, response wrappers, or tool-call JSON and
+        therefore must not be displayed before a higher layer validates them.
+        """
+
         native_prompt = _prepare_native_prompt(prompt)
         started = time.monotonic()
         trace(
@@ -62,6 +87,7 @@ class ResidentNativeBrainProvider(LLMProvider):
                 n_ctx=self.n_ctx,
                 n_batch=self.n_batch,
                 n_threads=self.n_threads,
+                on_candidate=on_candidate,
                 stop_sequences=_NATIVE_STOP_SEQUENCES,
                 fit_context_to_prompt=True,
             )
@@ -91,7 +117,14 @@ class ResidentNativeBrainProvider(LLMProvider):
                 "Native brain returned no text "
                 f"(stop reason: {result.stop_reason}, generated tokens: {result.generated_tokens})."
             )
-        return text
+        return ResidentNativeStreamResult(
+            text=text,
+            generated_tokens=result.generated_tokens,
+            output_bytes=result.output_bytes,
+            stop_reason=result.stop_reason,
+            first_token_ms=result.first_token_ms,
+            generation_ms=result.generation_ms,
+        )
 
     def _ensure_model(self) -> NativeModelHandle:
         if self.model_is_resident:

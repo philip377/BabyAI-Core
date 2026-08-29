@@ -7,7 +7,12 @@ import pytest
 from babyai.brain import probe_brain_runtime
 from babyai.config import BabyAIConfig
 from babyai.llm import LLMError
-from babyai.native_brain import NativeBrainProvider, _normalise_native_reply, _requests_translation
+from babyai.native_brain import (
+    NativeBrainProvider,
+    _NATIVE_STOP_SEQUENCES,
+    _normalise_native_reply,
+    _requests_translation,
+)
 from babyai.native_generation import NativeGenerationResult
 from babyai.native_runtime import NativeRuntimeError
 
@@ -89,6 +94,7 @@ def test_native_provider_runs_bounded_generation_and_closes_native_lifetime(tmp_
     assert generate_call[2].startswith("hello")
     assert "/no_think" in generate_call[2]
     assert "Do not add a translation unless the user requested one." in generate_call[2]
+    assert "Return exactly one assistant turn and stop after that answer." in generate_call[2]
     assert generate_call[2].endswith("BABYAI:")
     assert generate_call[3] == {
         "max_tokens": 77,
@@ -96,7 +102,7 @@ def test_native_provider_runs_bounded_generation_and_closes_native_lifetime(tmp_
         "n_ctx": 2048,
         "n_batch": 1024,
         "n_threads": 6,
-        "stop_sequences": ("\n\nUSER:", "\nUSER:", "\n\nBABYAI:", "\nBABYAI:"),
+        "stop_sequences": _NATIVE_STOP_SEQUENCES,
         "fit_context_to_prompt": True,
     }
     assert calls[-2:] == ["model_exit", "runtime_exit"]

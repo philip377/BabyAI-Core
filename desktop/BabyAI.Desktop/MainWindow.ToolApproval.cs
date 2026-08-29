@@ -32,8 +32,8 @@ public sealed partial class MainWindow
             _chatCancellation?.Dispose();
             _chatCancellation = new CancellationTokenSource();
             SetBusy(true, canStop: true);
-            ApplyState(OrbState.Executing);
-            ReplyText.Text = "Выполняю разрешённое действие…";
+            ApplyState(OrbState.Approval);
+            ReplyText.Text = "Применяю ваше решение…";
             try
             {
                 var reply = await _bridge.ApproveToolAsync(_chatCancellation.Token);
@@ -77,7 +77,8 @@ public sealed partial class MainWindow
         try
         {
             SetBusy(true);
-            ApplyState(OrbState.Executing);
+            ApplyState(OrbState.Approval);
+            ReplyText.Text = "Отклоняю запрос…";
             try
             {
                 var reply = await _bridge.RejectToolAsync();
