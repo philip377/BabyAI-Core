@@ -14,7 +14,11 @@ class WorkspacePrimus(Primus):
     workspace: WorkspaceRecord | None = None
 
     def _base_prompt(self, user_input: str, *, include_tool_catalog: bool | None = None) -> str:
-        base = super()._base_prompt(user_input, include_tool_catalog=include_tool_catalog)
+        base = Primus._base_prompt(
+            self,
+            user_input,
+            include_tool_catalog=include_tool_catalog,
+        )
         if self.workspace is None:
             return base
 
