@@ -17,12 +17,23 @@ _INTERNAL_REASONING_TAIL = re.compile(
     r"okay,\s*(?:"
     r"the user (?:asked|said|wants|is asking|wrote)|"
     r"(?:i|we) (?:should|need(?: to)?) "
-    r"(?:answer|respond|reply|figure out|determine|decide|understand|analy[sz]e|consider)"
+    r"(?:answer|respond|reply|figure out|determine|decide|understand|analy[sz]e|consider)|"
+    r"let me (?:try to )?(?:figure out|determine|decide|understand|analy[sz]e|consider)"
     r")|"
     r"the user (?:asked|said|wants|is asking|wrote)|"
     r"(?:i|we) (?:should|need(?: to)?) (?:answer|respond|reply)|"
     r"(?:let(?:'|’)s|let us) (?:craft|answer|respond|reply)|"
-    r"let me start by (?:understanding|analy[sz]ing|considering|figuring out)"
+    r"let me (?:start by |try to )?(?:understand|analy[sz]e|consider|figure out|determine|decide)"
+    r")\b"
+)
+_INTERNAL_PROMPT_TAIL = re.compile(
+    r"(?im)^(?:"
+    r"answer directly in the user's language|"
+    r"do not reveal reasoning|"
+    r"do not add a translation unless|"
+    r"do not wrap a normal answer in json|"
+    r"return exactly one assistant turn|"
+    r"never continue the transcript by writing"
     r")\b"
 )
 _PARENTHESISED_ASCII_LINE = re.compile(r"^\([^()\n]*[A-Za-z][^()\n]*\)$")
@@ -87,11 +98,15 @@ def _requests_translation(prompt: str) -> bool:
 
 
 def _strip_internal_reasoning_tail(text: str, *, allow_translation: bool = False) -> str:
-    """Remove untagged scratchpad text emitted after an already complete answer."""
+    """Remove untagged scratchpad or echoed prompt text after a complete answer."""
 
-    match = _INTERNAL_REASONING_TAIL.search(text)
-    if match is not None and text[: match.start()].strip():
-        text = text[: match.start()].rstrip()
+    cut_positions: list[int] = []
+    for pattern in (_INTERNAL_PROMPT_TAIL, _INTERNAL_REASONING_TAIL):
+        match = pattern.search(text)
+        if match is not None and text[: match.start()].strip():
+            cut_positions.append(match.start())
+    if cut_positions:
+        text = text[: min(cut_positions)].rstrip()
 
     lines = text.splitlines()
     visible: list[str] = []
