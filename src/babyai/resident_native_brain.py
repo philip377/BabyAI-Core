@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -15,6 +16,9 @@ from .native_brain import (
 from .native_generation import NativeGenerationStop, generate_greedy
 from .native_runtime import NativeModelHandle, NativeRuntimeError, NativeRuntimeLoader, NativeRuntimeSession
 from .runtime_trace import trace
+
+
+_VISIBLE_MARKER = re.compile(r"<babyai-visible-[0-9a-f]{32}>")
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +53,13 @@ class ResidentNativeBrainProvider(LLMProvider):
     def generate(self, prompt: str) -> str:
         return self.generate_stream(prompt, None).text
 
+    @staticmethod
+    def _visible_marker(prompt: str, on_candidate: Callable[[str], None] | None) -> str | None:
+        if on_candidate is None:
+            return None
+        matches = list(_VISIBLE_MARKER.finditer(prompt))
+        return matches[-1].group(0) if matches else None
+
     def generate_stream(
         self,
         prompt: str,
@@ -59,9 +70,24 @@ class ResidentNativeBrainProvider(LLMProvider):
         Candidate chunks have only passed native UTF-8 and stop-delimiter handling.
         They can still contain reasoning, response wrappers, or tool-call JSON and
         therefore must not be displayed before a higher layer validates them.
+
+        PRIMUS gives answer-only streams an unpredictable visible marker. Small local
+        models often fail to copy that nonce verbatim, which used to keep the safety
+        gate closed until generation completed. Native owns the assistant cue, so it
+        can safely prefill that exact marker into the assistant prefix instead. The
+        gate still validates every generated candidate for reasoning/tool/protocol
+        leakage before it exposes any text.
         """
 
+        visible_marker = self._visible_marker(prompt, on_candidate)
         native_prompt = _prepare_native_prompt(prompt)
+        if visible_marker is not None:
+            native_prompt += visible_marker
+            assert on_candidate is not None
+            # Prime the gate with the same nonce already present in the native
+            # assistant prefix. A marker by itself emits no user-visible text.
+            on_candidate(visible_marker)
+
         started = time.monotonic()
         trace(
             "native.generate.start",
@@ -71,6 +97,7 @@ class ResidentNativeBrainProvider(LLMProvider):
             n_ctx=self.n_ctx,
             n_batch=self.n_batch,
             n_gpu_layers=self.n_gpu_layers,
+            stream_marker_prefilled=visible_marker is not None,
         )
         try:
             model = self._ensure_model()
@@ -117,6 +144,10 @@ class ResidentNativeBrainProvider(LLMProvider):
                 "Native brain returned no text "
                 f"(stop reason: {result.stop_reason}, generated tokens: {result.generated_tokens})."
             )
+        if visible_marker is not None:
+            # Keep the canonical completed value consistent with the progressive
+            # channel so VisibleTextGate can validate and remove the nonce.
+            text = visible_marker + text
         return ResidentNativeStreamResult(
             text=text,
             generated_tokens=result.generated_tokens,

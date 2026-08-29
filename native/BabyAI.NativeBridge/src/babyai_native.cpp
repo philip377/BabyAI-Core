@@ -23,6 +23,7 @@ struct babyai_native_model {
 
 struct babyai_native_context {
     llama_context * handle = nullptr;
+    llama_sampler * sampler = nullptr;
     babyai_native_model * model = nullptr;
     uint32_t token_count = 0;
     bool prefill_attempted = false;
@@ -35,6 +36,10 @@ namespace {
 
 std::mutex g_backend_mutex;
 std::size_t g_backend_ref_count = 0;
+
+constexpr int32_t k_sampling_top_k = 64;
+constexpr int32_t k_repeat_penalty_last_n = 64;
+constexpr float k_repeat_penalty = 1.12f;
 
 void backend_acquire() {
     std::scoped_lock lock(g_backend_mutex);
@@ -65,6 +70,53 @@ int32_t fail(babyai_native_runtime * runtime, babyai_native_result code, const c
         runtime->last_error = message == nullptr ? "Unknown native error." : message;
     }
     return static_cast<int32_t>(code);
+}
+
+llama_sampler * create_generation_sampler(const llama_model * model) {
+    if (model == nullptr) {
+        return nullptr;
+    }
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+    if (vocab == nullptr) {
+        return nullptr;
+    }
+    const int32_t vocab_size = llama_vocab_n_tokens(vocab);
+    if (vocab_size <= 0) {
+        return nullptr;
+    }
+
+    llama_sampler * chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler * top_k = llama_sampler_init_top_k(k_sampling_top_k);
+    llama_sampler * penalties = llama_sampler_init_penalties(
+        vocab_size,
+        k_repeat_penalty_last_n,
+        k_repeat_penalty,
+        0.0f,
+        0.0f);
+    llama_sampler * greedy = llama_sampler_init_greedy();
+    if (chain == nullptr || top_k == nullptr || penalties == nullptr || greedy == nullptr) {
+        if (top_k != nullptr) {
+            llama_sampler_free(top_k);
+        }
+        if (penalties != nullptr) {
+            llama_sampler_free(penalties);
+        }
+        if (greedy != nullptr) {
+            llama_sampler_free(greedy);
+        }
+        if (chain != nullptr) {
+            llama_sampler_free(chain);
+        }
+        return nullptr;
+    }
+
+    // Keep the final choice deterministic while letting the persistent penalties
+    // sampler remember recently generated tokens. Top-k bounds penalty work and
+    // leaves ordinary greedy behavior unchanged when no repeated token is involved.
+    llama_sampler_chain_add(chain, top_k);
+    llama_sampler_chain_add(chain, penalties);
+    llama_sampler_chain_add(chain, greedy);
+    return chain;
 }
 
 } // namespace
@@ -373,10 +425,18 @@ int32_t babyai_native_context_create(
         }
 
         wrapper->handle = context;
+        wrapper->sampler = create_generation_sampler(model->handle);
         wrapper->model = model;
+        if (wrapper->sampler == nullptr) {
+            llama_free(context);
+            delete wrapper;
+            return fail(runtime, BABYAI_NATIVE_SAMPLER_FAILED, "Could not create the native repetition-aware sampler.");
+        }
         try {
             model->contexts.push_back(wrapper);
         } catch (...) {
+            llama_sampler_free(wrapper->sampler);
+            wrapper->sampler = nullptr;
             llama_free(context);
             delete wrapper;
             return fail(runtime, BABYAI_NATIVE_OUT_OF_MEMORY, "Could not register the BabyAI native context handle.");
@@ -392,6 +452,11 @@ int32_t babyai_native_context_create(
 void babyai_native_context_destroy(babyai_native_context * context) {
     if (context == nullptr) {
         return;
+    }
+
+    if (context->sampler != nullptr) {
+        llama_sampler_free(context->sampler);
+        context->sampler = nullptr;
     }
 
     if (context->handle != nullptr) {
@@ -522,22 +587,18 @@ int32_t babyai_native_context_sample_greedy(
     if (context->sample_taken) {
         return fail(runtime, BABYAI_NATIVE_SAMPLE_ALREADY_TAKEN, "Native context already sampled the current logits; decode that token first.");
     }
+    if (context->sampler == nullptr) {
+        return fail(runtime, BABYAI_NATIVE_SAMPLER_FAILED, "Native repetition-aware sampler is unavailable.");
+    }
 
     const llama_vocab * vocab = llama_model_get_vocab(context->model->handle);
     if (vocab == nullptr) {
         return fail(runtime, BABYAI_NATIVE_INTERNAL_ERROR, "Native model vocabulary is unavailable for sampling.");
     }
 
-    llama_sampler * sampler = llama_sampler_init_greedy();
-    if (sampler == nullptr) {
-        return fail(runtime, BABYAI_NATIVE_SAMPLER_FAILED, "Could not create the native greedy sampler.");
-    }
-
-    const llama_token token = llama_sampler_sample(sampler, context->handle, -1);
-    llama_sampler_free(sampler);
-
+    const llama_token token = llama_sampler_sample(context->sampler, context->handle, -1);
     if (token == LLAMA_TOKEN_NULL) {
-        return fail(runtime, BABYAI_NATIVE_SAMPLER_FAILED, "Native greedy sampler returned LLAMA_TOKEN_NULL.");
+        return fail(runtime, BABYAI_NATIVE_SAMPLER_FAILED, "Native repetition-aware sampler returned LLAMA_TOKEN_NULL.");
     }
 
     *out_token = static_cast<int32_t>(token);
