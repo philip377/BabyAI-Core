@@ -144,6 +144,18 @@ def test_visible_gate_blocks_inline_synthetic_role_continuation() -> None:
     assert "BABYAI:" not in gate.emitted
 
 
+def test_visible_gate_recovers_only_exact_safe_prefix_before_reasoning_tail() -> None:
+    marker = new_visible_marker()
+    gate = VisibleTextGate(marker=marker)
+    answer = "Безопасный ответ пользователю. " * 8
+
+    assert gate.feed(marker + answer)
+    assert gate.feed("\nOkay, the user asked for an answer. I should respond.") == ""
+    assert gate.invalid is True
+    assert gate.validated_open_body(marker + answer.strip()) == answer.strip()
+    assert gate.validated_open_body(marker + answer + "Переписанный хвост") is None
+
+
 def test_answer_only_stream_uses_safe_canonical_reply(tmp_path) -> None:
     provider = StreamingProvider(
         "Привет! Чем помочь?",

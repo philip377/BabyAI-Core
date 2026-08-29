@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from babyai.identity import Identity
+from babyai.memory import SQLiteMemoryStore
 from babyai.native_generation import NativeGenerationResult
+from babyai.primus import Primus
 from babyai.resident_native_brain import ResidentNativeBrainProvider
 from babyai.streaming import VisibleTextGate, new_visible_marker, with_visible_marker_contract
 
@@ -74,3 +77,51 @@ def test_resident_native_prefills_visible_nonce_and_streams_before_completion(mo
     assert marker not in "".join(visible_deltas)
     assert result.first_token_ms == 7
     assert result.generated_tokens == 42
+
+
+def test_native_stream_accepts_normalized_answer_before_quarantined_reasoning_tail(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    provider = ResidentNativeBrainProvider(
+        model_path=Path("model.gguf"),
+        runtime_path=Path("babyai_native.dll"),
+    )
+    monkeypatch.setattr(ResidentNativeBrainProvider, "_ensure_model", lambda self: object())
+
+    answer = "Я BabyAI — персональный ИИ-ассистент. " * 8
+    reasoning_tail = (
+        '\nOkay, the user said "Привет, расскажи немного о себе". '
+        "I need to respond in Russian and should craft the answer."
+    )
+    raw = answer + reasoning_tail
+    streamed_before_return = False
+    visible_deltas: list[str] = []
+
+    def fake_generate(model, native_prompt: str, **kwargs) -> NativeGenerationResult:
+        nonlocal streamed_before_return
+        sink = kwargs["on_candidate"]
+        for index in range(0, len(raw), 13):
+            sink(raw[index : index + 13])
+            streamed_before_return = streamed_before_return or bool(visible_deltas)
+        return NativeGenerationResult(
+            text=raw,
+            generated_tokens=128,
+            output_bytes=len(raw.encode("utf-8")),
+            stop_reason="max_tokens",
+        )
+
+    monkeypatch.setattr("babyai.resident_native_brain.generate_greedy", fake_generate)
+    primus = Primus(
+        llm=provider,
+        memory=SQLiteMemoryStore(tmp_path / "memory.sqlite3"),
+        identity=Identity(),
+    )
+
+    result = primus.think_stream("Привет, расскажи немного о себе", visible_deltas.append)
+
+    assert streamed_before_return is True
+    assert result.reply == answer.strip()
+    assert "".join(visible_deltas) == answer.strip()
+    assert "Okay" not in "".join(visible_deltas)
+    assert "user said" not in "".join(visible_deltas)
