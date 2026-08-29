@@ -6,8 +6,9 @@ import time
 import traceback
 from typing import TextIO
 
-from .desktop_commands import DesktopCommandError, DesktopCommands
+from .desktop_commands import DesktopCommandError
 from .runtime_trace import trace
+from .workspace_desktop_commands import WorkspaceDesktopCommands as DesktopCommands
 
 
 MAX_WORKER_REQUEST_CHARS = 1_048_576
@@ -57,11 +58,17 @@ def serve(
                 nonlocal sequence, terminal_sent
                 event_name = event.get("event")
                 if event_name not in {"state", "delta", "done", "error"}:
-                    raise DesktopCommandError("Desktop worker emitted an invalid streaming event")
+                    raise DesktopCommandError(
+                        "Desktop worker emitted an invalid streaming event"
+                    )
                 if terminal_sent:
-                    raise DesktopCommandError("Desktop worker emitted an event after the terminal event")
+                    raise DesktopCommandError(
+                        "Desktop worker emitted an event after the terminal event"
+                    )
                 if any(key in event for key in ("id", "protocol", "seq")):
-                    raise DesktopCommandError("Desktop streaming envelope fields are worker-owned")
+                    raise DesktopCommandError(
+                        "Desktop streaming envelope fields are worker-owned"
+                    )
                 write_message(
                     {
                         "id": request_id,
@@ -79,18 +86,32 @@ def serve(
 
                 request = json.loads(line)
                 if not isinstance(request, dict):
-                    raise DesktopCommandError("Desktop worker request must be a JSON object")
+                    raise DesktopCommandError(
+                        "Desktop worker request must be a JSON object"
+                    )
 
                 request_id = request.get("id")
-                if isinstance(request_id, bool) or not isinstance(request_id, int) or request_id < 0:
-                    raise DesktopCommandError("Desktop worker id must be a non-negative integer")
+                if (
+                    isinstance(request_id, bool)
+                    or not isinstance(request_id, int)
+                    or request_id < 0
+                ):
+                    raise DesktopCommandError(
+                        "Desktop worker id must be a non-negative integer"
+                    )
 
                 protocol_value = request.get("protocol", 1)
-                if isinstance(protocol_value, bool) or not isinstance(protocol_value, int):
-                    raise DesktopCommandError("Desktop worker protocol must be an integer")
+                if isinstance(protocol_value, bool) or not isinstance(
+                    protocol_value, int
+                ):
+                    raise DesktopCommandError(
+                        "Desktop worker protocol must be an integer"
+                    )
                 protocol = protocol_value
                 if protocol not in {1, 2}:
-                    raise DesktopCommandError("Unsupported desktop worker protocol")
+                    raise DesktopCommandError(
+                        "Unsupported desktop worker protocol"
+                    )
                 v2_active = protocol == 2
 
                 command_value = request.get("command")
@@ -100,12 +121,20 @@ def serve(
 
                 payload = request.get("payload", {})
                 if not isinstance(payload, dict):
-                    raise DesktopCommandError("Desktop worker payload must be a JSON object")
+                    raise DesktopCommandError(
+                        "Desktop worker payload must be a JSON object"
+                    )
 
-                trace("worker.command.start", request_id=request_id, command=command)
+                trace(
+                    "worker.command.start",
+                    request_id=request_id,
+                    command=command,
+                )
                 if protocol == 2:
                     if command != "chat":
-                        raise DesktopCommandError("Desktop worker protocol 2 supports only chat")
+                        raise DesktopCommandError(
+                            "Desktop worker protocol 2 supports only chat"
+                        )
 
                     def emit_stream_event(event: dict[str, object]) -> None:
                         if event.get("event") not in {"state", "delta"}:
@@ -114,7 +143,10 @@ def serve(
                             )
                         emit_v2(event)
 
-                    result = command_surface.stream_chat(payload, emit_stream_event)
+                    result = command_surface.stream_chat(
+                        payload,
+                        emit_stream_event,
+                    )
                     emit_v2(
                         {
                             "event": "done",
@@ -132,7 +164,10 @@ def serve(
                     }
                     should_stop = True
                 else:
-                    response = {"id": request_id, **command_surface.execute(command, payload)}
+                    response = {
+                        "id": request_id,
+                        **command_surface.execute(command, payload),
+                    }
                 trace(
                     "worker.command.done",
                     request_id=request_id,
@@ -149,9 +184,19 @@ def serve(
                 )
                 if v2_active:
                     if not terminal_sent:
-                        emit_v2({"event": "error", "ok": False, "error": str(exc)})
+                        emit_v2(
+                            {
+                                "event": "error",
+                                "ok": False,
+                                "error": str(exc),
+                            }
+                        )
                 else:
-                    response = {"id": request_id, "ok": False, "error": str(exc)}
+                    response = {
+                        "id": request_id,
+                        "ok": False,
+                        "error": str(exc),
+                    }
             except Exception as exc:
                 # One bad legacy state file or command must not kill the persistent
                 # desktop worker. Keep the JSONL protocol alive and preserve the full
