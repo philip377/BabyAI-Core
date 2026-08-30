@@ -39,6 +39,8 @@ jobs:
       VULKAN_SDK_SHA256: "855b27ba05d2d8119c5114c5d4ff870ca38f2c632b11e1bb9923b9b7e6ecfe7b"
       SEVEN_ZIP_LZMA_VERSION: "26.02"
       SEVEN_ZIP_LZMA_SHA256: "2878c85f5f43a4a4e0952b1fd4e5fe097c1c143997a8047c7e1e788892aa9357"
+      BABYAI_STT_MODEL_NAME: "vosk-model-small-ru-0.22"
+      BABYAI_STT_MODEL_SHA256: "961d5ff98a17f4aa6de69864d0aa71fa5bac682301d2b5d17a3f24c5c99a46d4"
 
     steps:
       - name: Checkout BabyAI
@@ -103,6 +105,28 @@ jobs:
           if (-not (Test-Path release-desktop/BabyAI.Desktop.exe -PathType Leaf)) {
             throw "BabyAI.Desktop.exe was not produced."
           }
+
+      - name: Bundle pinned local Russian STT model
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "$env:BABYAI_STT_MODEL_NAME.zip"
+          $extractRoot = Join-Path $env:RUNNER_TEMP "babyai-stt-model"
+          $url = "https://alphacephei.com/vosk/models/$env:BABYAI_STT_MODEL_NAME.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $env:BABYAI_STT_MODEL_SHA256) {
+            throw "STT model SHA256 mismatch: $actual"
+          }
+          if (Test-Path $extractRoot) { Remove-Item $extractRoot -Recurse -Force }
+          Expand-Archive $archive $extractRoot -Force
+          $modelRoot = Join-Path $extractRoot $env:BABYAI_STT_MODEL_NAME
+          if (-not (Test-Path (Join-Path $modelRoot "am\final.mdl") -PathType Leaf)) {
+            throw "Extracted STT model is incomplete."
+          }
+          $sttRoot = Join-Path $env:GITHUB_WORKSPACE "release-desktop\stt"
+          New-Item -ItemType Directory -Force $sttRoot | Out-Null
+          Copy-Item $modelRoot (Join-Path $sttRoot $env:BABYAI_STT_MODEL_NAME) -Recurse
+          Write-Host "Bundled local STT model: $env:BABYAI_STT_MODEL_NAME"
 
       - name: Configure portable CPU native runtime
         shell: pwsh
