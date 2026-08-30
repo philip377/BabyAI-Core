@@ -68,7 +68,8 @@ def test_resident_native_prefills_visible_nonce_and_streams_before_completion(mo
 
     result = provider.generate_stream(prompt, accept)
 
-    assert str(captured["prompt"]).endswith("\n\nBABYAI:" + marker)
+    assert str(captured["prompt"]).endswith("<|im_start|>assistant\n" + marker)
+    assert "<|im_start|>assistant\nBABYAI:" not in str(captured["prompt"])
     assert captured.get("streamed_before_return") is True
     assert gate.opened is True
     body = gate.validated_open_body(result.text)
