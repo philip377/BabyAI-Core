@@ -33,13 +33,12 @@ class AgentRuntimePrimusMixin:
 
     @staticmethod
     def _agent_followup(base: str) -> str:
-        return (
-            base
-            + "\n\nThe agent has completed the requested local action. "
-            "Answer the user's latest message using the recent trusted agent observation. "
-            "Do not expose internal tool names, JSON, protocol details, or permission mechanics. "
-            "Do not invent local machine facts that are absent from the observation."
-        )
+        # The trusted observation is already inserted before the active USER turn by
+        # _base_prompt(). Keep USER as the final prompt section: native_chat.py treats
+        # everything after that marker as the latest user message, so appending host
+        # instructions here would contaminate the user's language/content and can make
+        # a small native model refuse or ignore a successful local observation.
+        return base
 
     def _execute_or_request_approval(
         self,
