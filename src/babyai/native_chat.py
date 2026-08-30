@@ -76,10 +76,10 @@ def _split_recent_episode(context: str) -> tuple[str, list[tuple[str, str]]]:
 def prepare_native_chat_prompt(prompt: str) -> str:
     """Format PRIMUS' managed prompt as a real Qwen ChatML conversation.
 
-    Identity, durable facts, tool policy and streaming policy remain system context.
-    Recent episodic memory is promoted to genuine user/assistant turns, and the final
-    top-level ``USER:`` becomes the active user turn. This prevents small local Qwen
-    models from treating a previous BabyAI answer as a system instruction to repeat.
+    Identity, durable facts and tool policy remain system context. Recent episodic
+    memory is promoted to genuine user/assistant turns, and the final top-level
+    ``USER:`` becomes the active user turn. Streaming authorization is a host-side
+    transport concern and is deliberately removed before model tokenization.
     """
 
     if not isinstance(prompt, str):
@@ -88,29 +88,27 @@ def prepare_native_chat_prompt(prompt: str) -> str:
     context, latest_user = _split_latest_user(prompt)
     system_context, history = _split_recent_episode(context)
 
-    streaming_contract = ""
+    # PRIMUS appends the visible-stream contract after the active user message.
+    # Resident native streaming authorizes that channel out-of-band, so neither the
+    # contract nor its random nonce should influence Qwen's language or completion.
     if _STREAMING_CONTRACT in latest_user:
-        latest_user, contract = latest_user.split(_STREAMING_CONTRACT, 1)
-        streaming_contract = "Streaming display contract:" + contract
+        latest_user, _transport_contract = latest_user.split(_STREAMING_CONTRACT, 1)
 
     latest_user = latest_user.strip()
     if not latest_user:
         latest_user = "Continue the current conversation."
 
-    system_parts = [
-        part for part in (system_context, streaming_contract, _NATIVE_CHAT_POLICY) if part
-    ]
+    system_parts = [part for part in (system_context, _NATIVE_CHAT_POLICY) if part]
     system = "\n\n".join(system_parts)
 
     chunks = [f"{_QWEN_IM_START}system\n{system}{_QWEN_IM_END}\n"]
     for role, content in history:
         chunks.append(f"{_QWEN_IM_START}{role}\n{content}{_QWEN_IM_END}\n")
 
-    # Qwen3 understands /no_think as a soft switch; Qwen2.5 simply sees a short
-    # harmless instruction token sequence. Keeping it inside the active user turn
-    # avoids putting free-form text after the assistant role cue.
-    user_turn = latest_user + "\n/no_think"
-    chunks.append(f"{_QWEN_IM_START}user\n{user_turn}{_QWEN_IM_END}\n")
+    # Do not append Qwen3-only controls such as /no_think to a Qwen2.5 user turn.
+    # On small multilingual models that suffix becomes the last English fragment of
+    # the user's message and can bias both language selection and follow-up behavior.
+    chunks.append(f"{_QWEN_IM_START}user\n{latest_user}{_QWEN_IM_END}\n")
     # ChatML already identifies the generated role as assistant. Do not add a second
     # textual 'BABYAI:' label here: small Qwen models can treat that legacy completion
     # cue as a request to restart the self-introduction on every follow-up turn.
