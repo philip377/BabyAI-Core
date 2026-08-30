@@ -10,6 +10,8 @@ from .agent_desktop import DesktopCommands
 from .desktop_commands import DesktopCommandError
 from .runtime_trace import trace
 
+# Compatibility contract: AgentDesktopCommands remains layered over
+# workspace_desktop_retrieval.WorkspaceDesktopCommands as DesktopCommands.
 
 MAX_WORKER_REQUEST_CHARS = 1_048_576
 
