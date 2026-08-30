@@ -10,15 +10,16 @@ from .llm import LLMError, LLMProvider
 from .native_brain import (
     _NATIVE_STOP_SEQUENCES,
     _normalise_native_reply,
-    _prepare_native_prompt,
     _requests_translation,
 )
+from .native_chat import prepare_native_chat_prompt
 from .native_generation import NativeGenerationStop, generate_greedy
 from .native_runtime import NativeModelHandle, NativeRuntimeError, NativeRuntimeLoader, NativeRuntimeSession
 from .runtime_trace import trace
 
 
 _VISIBLE_MARKER = re.compile(r"<babyai-visible-[0-9a-f]{32}>")
+_QWEN_CHAT_STOP_SEQUENCES = (*_NATIVE_STOP_SEQUENCES, "<|im_end|>", "<|im_start|>")
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,7 +81,7 @@ class ResidentNativeBrainProvider(LLMProvider):
         """
 
         visible_marker = self._visible_marker(prompt, on_candidate)
-        native_prompt = _prepare_native_prompt(prompt)
+        native_prompt = prepare_native_chat_prompt(prompt)
         if visible_marker is not None:
             native_prompt += visible_marker
             assert on_candidate is not None
@@ -115,7 +116,7 @@ class ResidentNativeBrainProvider(LLMProvider):
                 n_batch=self.n_batch,
                 n_threads=self.n_threads,
                 on_candidate=on_candidate,
-                stop_sequences=_NATIVE_STOP_SEQUENCES,
+                stop_sequences=_QWEN_CHAT_STOP_SEQUENCES,
                 fit_context_to_prompt=True,
             )
             trace(
