@@ -82,6 +82,10 @@ def test_approved_agent_observation_returns_to_llm(tmp_path) -> None:
     assert "OBSERVATION:" in provider.prompts[-1]
     assert "price.xlsx" in provider.prompts[-1]
     assert "notes.txt" in provider.prompts[-1]
+    assert provider.prompts[-1].rstrip().endswith(
+        "USER: Какие файлы находятся в этой папке?"
+    )
+    assert "The agent has completed the requested local action" not in provider.prompts[-1]
     assert approvals.load() is None
     assert not permissions.is_granted(Capability.FILESYSTEM_LIST)
 
