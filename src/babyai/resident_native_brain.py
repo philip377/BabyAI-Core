@@ -79,7 +79,6 @@ class ResidentNativeBrainProvider(LLMProvider):
         """
 
         visible_marker = self._visible_marker(prompt, on_candidate)
-        native_prompt = prepare_native_chat_prompt(prompt)
         if visible_marker is not None:
             assert on_candidate is not None
             # Prime the host-side gate without placing the nonce in model context.
@@ -90,7 +89,7 @@ class ResidentNativeBrainProvider(LLMProvider):
         started = time.monotonic()
         trace(
             "native.generate.start",
-            prompt_chars=len(native_prompt),
+            prompt_chars=len(prompt),
             model_resident=self.model_is_resident,
             max_tokens=self.max_tokens,
             n_ctx=self.n_ctx,
@@ -101,9 +100,16 @@ class ResidentNativeBrainProvider(LLMProvider):
         )
         try:
             model = self._ensure_model()
+            architecture = getattr(model, "architecture", None)
+            native_prompt = prepare_native_chat_prompt(
+                prompt,
+                model_architecture=architecture if isinstance(architecture, str) else None,
+            )
             trace(
                 "native.generate.model_ready",
                 elapsed_ms=round((time.monotonic() - started) * 1000),
+                model_architecture=architecture,
+                native_prompt_chars=len(native_prompt),
             )
             generation_started = time.monotonic()
             result = generate_greedy(

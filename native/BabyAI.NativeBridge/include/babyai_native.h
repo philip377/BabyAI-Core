@@ -70,6 +70,11 @@ BABYAI_NATIVE_API int32_t babyai_native_model_open(
 BABYAI_NATIVE_API void babyai_native_model_close(
     babyai_native_model * model);
 
+// Optional ABI v6 extension. Returns the GGUF general.architecture value for
+// the lifetime of the open model, or null when the metadata is unavailable.
+BABYAI_NATIVE_API const char * babyai_native_model_architecture(
+    const babyai_native_model * model);
+
 BABYAI_NATIVE_API int32_t babyai_native_model_tokenize(
     babyai_native_runtime * runtime,
     babyai_native_model * model,

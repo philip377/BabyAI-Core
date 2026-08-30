@@ -9,9 +9,10 @@ from babyai.resident_native_brain import ResidentNativeBrainProvider, ResidentNa
 
 
 class Model:
-    def __init__(self, calls):
+    def __init__(self, calls, *, architecture=None):
         self.calls = calls
         self.closed = False
+        self.architecture = architecture
 
     def close(self):
         if not self.closed:
@@ -154,6 +155,31 @@ def test_generate_stream_preserves_canonical_tool_call_json(tmp_path, monkeypatc
     streamed = provider.generate_stream("inspect the system", None)
 
     assert streamed.text == '{"tool":"system.info","arguments":{}}'
+
+
+def test_qwen3_architecture_uses_no_think_without_affecting_provider_contract(
+    tmp_path,
+    monkeypatch,
+):
+    provider = ResidentNativeBrainProvider(
+        model_path=tmp_path / "renamed-model.gguf",
+        runtime_path=tmp_path / "babyai_native.dll",
+    )
+    monkeypatch.setattr(
+        ResidentNativeBrainProvider,
+        "_ensure_model",
+        lambda self: Model([], architecture="qwen3"),
+    )
+    captured = {}
+
+    def generate(model, prompt, **kwargs):
+        captured["prompt"] = prompt
+        return result("Привет!")
+
+    monkeypatch.setattr("babyai.resident_native_brain.generate_greedy", generate)
+
+    assert provider.generate("USER: привет") == "Привет!"
+    assert "<|im_start|>user\nпривет\n\n/no_think<|im_end|>" in captured["prompt"]
 
 
 def test_close_releases_model_then_runtime(tmp_path, monkeypatch):

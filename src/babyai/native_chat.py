@@ -73,7 +73,11 @@ def _split_recent_episode(context: str) -> tuple[str, list[tuple[str, str]]]:
     return "\n\n".join(system_parts), history
 
 
-def prepare_native_chat_prompt(prompt: str) -> str:
+def prepare_native_chat_prompt(
+    prompt: str,
+    *,
+    model_architecture: str | None = None,
+) -> str:
     """Format PRIMUS' managed prompt as a real Qwen ChatML conversation.
 
     Identity, durable facts and tool policy remain system context. Recent episodic
@@ -105,9 +109,12 @@ def prepare_native_chat_prompt(prompt: str) -> str:
     for role, content in history:
         chunks.append(f"{_QWEN_IM_START}{role}\n{content}{_QWEN_IM_END}\n")
 
-    # Do not append Qwen3-only controls such as /no_think to a Qwen2.5 user turn.
-    # On small multilingual models that suffix becomes the last English fragment of
-    # the user's message and can bias both language selection and follow-up behavior.
+    # Qwen3 thinking models can spend the entire bounded output budget inside an
+    # unfinished <think> block. Its official soft switch belongs in the active user
+    # turn. Do not send it to Qwen2.5: there it is plain English-ish user content and
+    # can bias both language selection and follow-up behavior.
+    if (model_architecture or "").strip().casefold() == "qwen3":
+        latest_user += "\n\n/no_think"
     chunks.append(f"{_QWEN_IM_START}user\n{latest_user}{_QWEN_IM_END}\n")
     # ChatML already identifies the generated role as assistant. Do not add a second
     # textual 'BABYAI:' label here: small Qwen models can treat that legacy completion
