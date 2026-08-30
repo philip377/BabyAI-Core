@@ -31,7 +31,8 @@ internal static class SpeechToTextProviderFactory
 
 internal sealed class VoskSpeechToTextProvider : ISpeechToTextProvider
 {
-    private readonly Model _model;
+    private readonly object _modelSync = new();
+    private Model? _model;
     private bool _disposed;
 
     public VoskSpeechToTextProvider(string modelPath)
@@ -46,7 +47,6 @@ internal sealed class VoskSpeechToTextProvider : ISpeechToTextProvider
         }
 
         global::Vosk.Vosk.SetLogLevel(-1);
-        _model = new Model(modelPath);
         ModelPath = modelPath;
     }
 
@@ -73,7 +73,9 @@ internal sealed class VoskSpeechToTextProvider : ISpeechToTextProvider
 
     private string TranscribeCore(byte[] audio, int sampleRate, CancellationToken cancellationToken)
     {
-        using var recognizer = new VoskRecognizer(_model, sampleRate);
+        cancellationToken.ThrowIfCancellationRequested();
+        var model = GetOrCreateModel();
+        using var recognizer = new VoskRecognizer(model, sampleRate);
         recognizer.SetMaxAlternatives(0);
         recognizer.SetWords(false);
 
@@ -92,6 +94,15 @@ internal sealed class VoskSpeechToTextProvider : ISpeechToTextProvider
         cancellationToken.ThrowIfCancellationRequested();
         AppendResultText(text, recognizer.FinalResult());
         return NormalizeTranscript(text.ToString());
+    }
+
+    private Model GetOrCreateModel()
+    {
+        lock (_modelSync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _model ??= new Model(ModelPath);
+        }
     }
 
     private static void AppendResultText(StringBuilder target, string json)
@@ -121,9 +132,13 @@ internal sealed class VoskSpeechToTextProvider : ISpeechToTextProvider
 
     public void Dispose()
     {
-        if (_disposed)
-            return;
-        _disposed = true;
-        _model.Dispose();
+        lock (_modelSync)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _model?.Dispose();
+            _model = null;
+        }
     }
 }
