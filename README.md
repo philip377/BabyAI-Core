@@ -13,9 +13,9 @@ The product name is **UNIX**. Existing package names, paths, environment variabl
 
 The main Milestone 2 foundation is complete, and the first Workspace / Documents / Retrieval foundation is integrated into `main`.
 
-The latest owner-tested native-chat milestone is PR **#128**, which fixed repetition loops and rebuilt the resident native conversation path around genuine ChatML turns. The installed Windows smoke confirmed Russian multi-turn conversation, progressive output, continuity between turns, and no leakage of internal `babyai-visible` transport markers.
+PR **#128** rebuilt the resident native conversation path around genuine ChatML turns and fixed the major repetition / progressive-streaming regressions. PR **#131** then added the first **model-driven Agent Runtime** and was accepted by owner Windows smoke: the model can request an approved local action, the agent performs it through the protected executor, and a real observation returns to the model before the final conversational answer.
 
-The current bounded architecture work adds the first **model-driven Agent Runtime**. Its job is to keep the language model as the component that decides when outside information is needed and writes the user-facing answer, while a separate agent layer performs approved local actions and returns trustworthy observations back to the model.
+The next active integration track is **Voice/VAD**: bounded microphone capture, 16 kHz mono audio handling, speech activity detection, and a visible listening state. That work remains outside `main` until it is rebased onto the current architecture and passes owner microphone smoke.
 
 Already working in `main`:
 
@@ -32,6 +32,8 @@ Already working in `main`:
 - repetition-aware persistent sampler chain for native generation
 - cancellation / Stop without accepting stale or ghost deltas
 - fail-closed streaming visibility checks so reasoning, tool JSON, protocol data, synthetic role continuations, and transport markers do not become normal chat output
+- first-class **Agent Runtime** between model reasoning and protected local execution
+- process-local trusted agent observations returned to the model for grounded follow-ups
 - capability-gated Windows actions with deny-by-default permissions
 - one-shot approval flow for protected local actions
 - filesystem list/read/write boundaries
@@ -54,7 +56,7 @@ Already working in `main`:
 
 UNIX separates **reasoning**, **coordination**, and **execution** instead of letting the language model pretend that it can directly see or control the computer.
 
-The intended local-action path is:
+The accepted local-action path is:
 
 ```text
 User
@@ -83,9 +85,9 @@ The roles are deliberately different:
 - **Tools / capabilities** — filesystem, process, window, application, diagnostic, screen-capture, and later external integrations.
 - **Observations** — real tool results supplied back to the model as evidence, never proof generated from model text itself.
 
-For example, asking `Какие файлы у меня на рабочем столе?` should not be answered from model memory or a Python phrase-specific shortcut. The model requests a filesystem observation, the agent performs the approved scan, and the resulting filenames are returned to the model before it answers.
+For example, asking `Какие файлы у меня на рабочем столе?` is not answered from model memory or a Python phrase-specific shortcut. The model requests a filesystem observation, the agent performs the approved scan, and the resulting filenames are returned to the model before it answers.
 
-A follow-up such as `а ещё какие?` should use the previously recorded real observation while it remains relevant. If that observation cannot answer the new question, the model should request the agent again rather than inventing local state.
+A follow-up such as `а ещё какие?` can reuse the previously recorded real observation while it remains relevant. If that observation cannot answer the new question, the model should request the agent again rather than inventing local state.
 
 The superseded PR **#129** explored a host-side shortcut where Python answered filesystem follow-ups directly without another model pass. It was closed without merge because that prevented hallucinated filenames but violated the intended architecture: UNIX should use the agent as the bridge to reality while the model remains the conversational decision-maker and answer author.
 
@@ -100,7 +102,7 @@ Two useful real-world baselines have already been exercised during development:
 
 Existing user launch settings are preserved rather than silently overwritten by new builds. A future model/runtime migration should therefore be treated as its own compatibility-conscious change, not hidden inside unrelated feature work.
 
-## Latest native-chat acceptance
+## Latest Windows acceptance
 
 The Windows owner smoke after PR #128 verified the important user-visible parts of the resident native path:
 
@@ -109,9 +111,15 @@ The Windows owner smoke after PR #128 verified the important user-visible parts 
 - previous assistant replies remain conversational history instead of becoming system instructions
 - progressive text appears before generation is complete
 - internal `babyai-visible` marker text does not appear in the UI or canonical reply
-- local permission requests still remain separate from ordinary answer streaming
+- local permission requests remain separate from ordinary answer streaming
 
-The same smoke exposed the next architectural boundary: the model can converse correctly but must not invent facts about local files, processes, windows, or completed actions. Those facts now belong to the Agent Runtime observation path rather than further native-model prompt patches or phrase-specific host answers.
+The subsequent PR #131 owner smoke verified the first model-driven local-observation loop:
+
+- a local-machine request can produce a structured agent action instead of a model guess
+- the protected action remains behind one-shot permission approval
+- the real tool result is returned to the model as an observation before the final answer
+- local state is grounded in executed tools rather than invented filenames or other host facts
+- native safety validation remains fail-closed instead of being weakened to make the agent path pass
 
 ## Workspace, Documents, and Retrieval
 
@@ -136,9 +144,9 @@ The current retrieval layer is deliberately deterministic and local. Semantic em
 
 ## Voice status
 
-Voice is being developed independently from the Workspace and agent-runtime work.
+Voice is being developed independently from the Workspace and Agent Runtime work.
 
-The current voice/VAD branch establishes the first bounded microphone foundation: microphone capture, 16 kHz mono audio handling, VAD, and a visible listening state. It is **not yet part of `main`** and still requires integration / owner testing against the current codebase.
+The current voice/VAD branch establishes the first bounded microphone foundation: microphone capture, 16 kHz mono audio handling, VAD, and a visible listening state. It is **not yet part of `main`** and now needs integration / owner testing against the post-#131 codebase.
 
 Not implemented as completed product features yet:
 
@@ -171,8 +179,8 @@ Current progression:
 5. **Native multi-turn ChatML conversation path** — completed and owner-smoke tested
 6. **Workspace registry and context isolation** — completed foundation
 7. **Documents and local retrieval** — completed foundation
-8. **First-class Agent Runtime + observation loop** — current bounded integration
-9. **Voice capture / VAD foundation** — separate integration track
+8. **First-class Agent Runtime + observation loop** — completed foundation and owner-smoke tested
+9. **Voice capture / VAD foundation** — current integration / owner-smoke track
 10. **Streaming STT** — planned
 11. **Streaming TTS** — planned
 12. **Barge-in** — planned
