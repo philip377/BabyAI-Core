@@ -100,7 +100,9 @@ def test_desktop_has_explicit_localized_assistant_states() -> None:
     approve_handler = approval.split("private async void ApprovalApproveButton_Click", 1)[1]
     approve_handler = approve_handler.split("private async void ApprovalRejectButton_Click", 1)[0]
     assert "ApplyState(OrbState.Approval)" in approve_handler
-    assert "ApplyState(OrbState.Executing)" not in approve_handler
+    assert "ApplyState(OrbState.Executing)" in approve_handler
+    assert 'ApprovalCard.Visibility = Visibility.Collapsed' in approve_handler
+    assert 'CoreStatusText.Text = "Core: агент выполняет"' in approve_handler
     reject_handler = approval.split("private async void ApprovalRejectButton_Click", 1)[1]
     reject_handler = reject_handler.split("private static bool IsNoPendingToolApproval", 1)[0]
     assert "ApplyState(OrbState.Approval)" in reject_handler
