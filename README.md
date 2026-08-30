@@ -13,9 +13,11 @@ The product name is **UNIX**. Existing package names, paths, environment variabl
 
 The main Milestone 2 foundation is complete, and the first Workspace / Documents / Retrieval foundation is integrated into `main`.
 
-PR **#128** rebuilt the resident native conversation path around genuine ChatML turns and fixed the major repetition / progressive-streaming regressions. PR **#131** then added the first **model-driven Agent Runtime** and was accepted by owner Windows smoke: the model can request an approved local action, the agent performs it through the protected executor, and a real observation returns to the model before the final conversational answer.
+PR **#128** rebuilt the resident native conversation path around genuine ChatML turns and fixed the major repetition / progressive-streaming regressions. PR **#131** added the first **model-driven Agent Runtime** and was accepted by owner Windows smoke: the model can request an approved local action, the agent performs it through the protected executor, and a real observation returns to the model before the final conversational answer.
 
-The next active integration track is **Voice/VAD**: bounded microphone capture, 16 kHz mono audio handling, speech activity detection, and a visible listening state. That work remains outside `main` until it is rebased onto the current architecture and passes owner microphone smoke.
+PR **#133** then integrated the bounded microphone/VAD foundation onto the current architecture and passed owner Windows smoke: microphone capture opens correctly, speech start and end are detected, capture is released after the utterance, and normal text chat plus Agent Runtime remain healthy afterwards.
+
+The current bounded integration track is **STT v1**. Detected 16 kHz mono PCM utterances remain process-local, are transcribed by a replaceable local STT provider, and the resulting text is submitted through the same Desktop chat path as keyboard input. The first provider is Vosk with the small Russian `vosk-model-small-ru-0.22` model bundled into the Windows release.
 
 Already working in `main`:
 
@@ -48,6 +50,7 @@ Already working in `main`:
 - per-Workspace **retrieval index** with deterministic local lexical ranking
 - Desktop commands for document ingestion, search, retrieval status, and removal
 - retrieved document text treated as untrusted reference data rather than instructions
+- owner-tested **microphone capture + adaptive VAD** with 16 kHz mono PCM, no audio persistence, bounded listening time, and visible listening state
 - structured project Wiki source under `docs/wiki/`
 - Windows installer / portable release pipeline with bundled native CPU and Vulkan runtimes
 - side-by-side physical install slots so repeated development builds of the same logical version can be installed safely
@@ -121,6 +124,15 @@ The subsequent PR #131 owner smoke verified the first model-driven local-observa
 - local state is grounded in executed tools rather than invented filenames or other host facts
 - native safety validation remains fail-closed instead of being weakened to make the agent path pass
 
+The PR #133 owner smoke then verified the microphone/VAD foundation:
+
+- the microphone button opens capture on the installed Windows build
+- silence does not immediately become a false phrase
+- normal speech produces the visible `Слышу речь…` state
+- the end-of-speech silence window is detected and capture is released
+- text chat and Agent Runtime still work after microphone use
+- raw microphone audio is not persisted to disk
+
 ## Workspace, Documents, and Retrieval
 
 Workspace is no longer only a roadmap item.
@@ -144,13 +156,28 @@ The current retrieval layer is deliberately deterministic and local. Semantic em
 
 ## Voice status
 
-Voice is being developed independently from the Workspace and Agent Runtime work.
+The first bounded microphone foundation is now in `main` and owner-smoke tested. It provides user-initiated 16 kHz mono capture, adaptive RMS VAD, a small in-memory pre-roll, bounded utterance handling, and visible listening/speech states. Audio frames are not written to disk.
 
-The current voice/VAD branch establishes the first bounded microphone foundation: microphone capture, 16 kHz mono audio handling, VAD, and a visible listening state. It is **not yet part of `main`** and now needs integration / owner testing against the post-#131 codebase.
+The current **STT v1** integration keeps speech recognition as another replaceable provider boundary:
+
+```text
+Microphone
+  ↓
+VAD
+  ↓ bounded in-memory utterance
+STT provider
+  ↓ recognized text
+Normal Desktop Send/chat path
+  ↓
+PRIMUS / Agent Runtime / LLM
+```
+
+The first development provider is **Vosk 0.3.38** with the lightweight Russian `vosk-model-small-ru-0.22` model. The model is bundled into the Windows release and may be overridden for development with `BABYAI_STT_MODEL_DIR`. No microphone audio is sent to the language model; only recognized text enters normal chat.
 
 Not implemented as completed product features yet:
 
-- streaming STT
+- accepted/owner-tested STT
+- streaming partial transcription
 - streaming TTS
 - interruption / barge-in
 - full conversational voice loop
@@ -180,13 +207,14 @@ Current progression:
 6. **Workspace registry and context isolation** — completed foundation
 7. **Documents and local retrieval** — completed foundation
 8. **First-class Agent Runtime + observation loop** — completed foundation and owner-smoke tested
-9. **Voice capture / VAD foundation** — current integration / owner-smoke track
-10. **Streaming STT** — planned
-11. **Streaming TTS** — planned
-12. **Barge-in** — planned
-13. **Durable jobs** — planned; tasks that can survive beyond one chat turn and pause for approval
-14. **Vision understanding** — planned beyond the current capture-only boundary
-15. **External agent capabilities** — browser workflows, GitHub, business software, databases, and other connectors behind explicit action boundaries
+9. **Voice capture / VAD foundation** — completed foundation and owner-smoke tested
+10. **Local STT v1** — current integration / owner-smoke track
+11. **Streaming / partial STT** — planned after STT v1 acceptance
+12. **Streaming TTS** — planned
+13. **Barge-in** — planned
+14. **Durable jobs** — planned; tasks that can survive beyond one chat turn and pause for approval
+15. **Vision understanding** — planned beyond the current capture-only boundary
+16. **External agent capabilities** — browser workflows, GitHub, business software, databases, and other connectors behind explicit action boundaries
 
 The engineering rule remains simple:
 
@@ -318,6 +346,7 @@ Current environment variables retain the BabyAI technical namespace:
 - `BABYAI_DATA_DIR=...`
 - `BABYAI_NAME=BabyAI`
 - `BABYAI_OWNER=owner`
+- `BABYAI_STT_MODEL_DIR=...` — optional development override for the local STT model directory
 
 Native Windows builds additionally use native model/runtime configuration managed by installer and launch settings. Existing explicit model choices are preserved rather than silently replaced during unrelated updates.
 
