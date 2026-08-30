@@ -253,6 +253,28 @@ def test_loader_configures_append_decode_abi(tmp_path, monkeypatch):
     ]
 
 
+def test_optional_model_architecture_metadata_is_normalized(tmp_path, monkeypatch):
+    library, _calls = _lifecycle_library()
+    library.babyai_native_model_architecture = _FakeFunction(value=b"QWEN3")
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            assert model.architecture == "qwen3"
+
+    assert library.babyai_native_model_architecture.argtypes == [ctypes.c_void_p]
+    assert library.babyai_native_model_architecture.restype is ctypes.c_char_p
+
+
+def test_model_architecture_is_optional_for_older_abi_v6_runtime(tmp_path, monkeypatch):
+    library, _calls = _lifecycle_library()
+    runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)
+
+    with NativeRuntimeLoader(runtime_file).open_runtime() as runtime:
+        with runtime.open_model(tmp_path / "model.gguf") as model:
+            assert model.architecture is None
+
+
 def test_model_tokenize_is_two_pass_utf8_and_preserves_flags(tmp_path, monkeypatch):
     library, calls = _lifecycle_library(token_ids=(17, 23, 42))
     runtime_file = _install_fake_runtime(tmp_path, monkeypatch, library)

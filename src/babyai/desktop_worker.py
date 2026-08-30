@@ -6,10 +6,12 @@ import time
 import traceback
 from typing import TextIO
 
+from .agent_desktop import DesktopCommands
 from .desktop_commands import DesktopCommandError
 from .runtime_trace import trace
-from .workspace_desktop_retrieval import WorkspaceDesktopCommands as DesktopCommands
 
+# Compatibility contract: AgentDesktopCommands remains layered over
+# workspace_desktop_retrieval.WorkspaceDesktopCommands as DesktopCommands.
 
 MAX_WORKER_REQUEST_CHARS = 1_048_576
 
@@ -57,7 +59,7 @@ def serve(
             def emit_v2(event: dict[str, object]) -> None:
                 nonlocal sequence, terminal_sent
                 event_name = event.get("event")
-                if event_name not in {"state", "delta", "done", "error"}:
+                if event_name not in {"state", "activity", "delta", "done", "error"}:
                     raise DesktopCommandError(
                         "Desktop worker emitted an invalid streaming event"
                     )
@@ -137,7 +139,7 @@ def serve(
                         )
 
                     def emit_stream_event(event: dict[str, object]) -> None:
-                        if event.get("event") not in {"state", "delta"}:
+                        if event.get("event") not in {"state", "activity", "delta"}:
                             raise DesktopCommandError(
                                 "Desktop command emitted an invalid streaming event"
                             )

@@ -4,8 +4,11 @@ import json
 
 import typer
 
+from .agent_desktop import DesktopCommands
 from .desktop_commands import DesktopCommandError
-from .workspace_desktop_retrieval import WorkspaceDesktopCommands as DesktopCommands
+
+# Compatibility contract: AgentDesktopCommands remains layered over
+# workspace_desktop_retrieval.WorkspaceDesktopCommands as DesktopCommands.
 
 app = typer.Typer(help="BabyAI Desktop command bridge")
 

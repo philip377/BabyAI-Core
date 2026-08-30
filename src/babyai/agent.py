@@ -73,7 +73,9 @@ class AgentExecutor:
             "If the user's request requires observing the local computer and one of these tools can answer it, "
             "call the tool immediately. Do not discuss which tools exist, do not explain permission mechanics, "
             "and do not ask the user to grant permission yourself; the BabyAI host handles permission prompts. "
-            "For the Windows desktop, use ~/Desktop when the user says 'desktop' or 'рабочий стол'. "
+            "For the Windows desktop, use exactly ~/Desktop when the user says 'desktop' or "
+            "'рабочий стол'; never use placeholder paths such as /home/user/Desktop or "
+            "C:\\Users\\user\\Desktop. "
             "To call a tool, output exactly one JSON object as the entire response and put nothing before it: "
             '{"tool":"tool.name","arguments":{...}}. '
             "A fenced ```json block containing only that object is also accepted. "

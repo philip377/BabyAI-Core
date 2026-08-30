@@ -11,9 +11,11 @@ The product name is **UNIX**. Existing package names, paths, environment variabl
 
 ## Current status — August 2026
 
-The main Milestone 2 agent foundation is complete, and the first Workspace / Documents / Retrieval foundation is now integrated into `main`.
+The main Milestone 2 foundation is complete, and the first Workspace / Documents / Retrieval foundation is integrated into `main`.
 
 The latest owner-tested native-chat milestone is PR **#128**, which fixed repetition loops and rebuilt the resident native conversation path around genuine ChatML turns. The installed Windows smoke confirmed Russian multi-turn conversation, progressive output, continuity between turns, and no leakage of internal `babyai-visible` transport markers.
+
+The current bounded architecture work adds the first **model-driven Agent Runtime**. Its job is to keep the language model as the component that decides when outside information is needed and writes the user-facing answer, while a separate agent layer performs approved local actions and returns trustworthy observations back to the model.
 
 Already working in `main`:
 
@@ -48,6 +50,45 @@ Already working in `main`:
 - Windows installer / portable release pipeline with bundled native CPU and Vulkan runtimes
 - side-by-side physical install slots so repeated development builds of the same logical version can be installed safely
 
+## Agent architecture
+
+UNIX separates **reasoning**, **coordination**, and **execution** instead of letting the language model pretend that it can directly see or control the computer.
+
+The intended local-action path is:
+
+```text
+User
+  ↓
+LLM / PRIMUS
+  ↓ structured agent request
+Agent Runtime
+  ↓ permission check
+AgentExecutor
+  ↓
+Windows / filesystem / local capability
+  ↓ real result
+Agent Runtime observation
+  ↓
+LLM / PRIMUS
+  ↓
+User-facing answer
+```
+
+The roles are deliberately different:
+
+- **LLM** — understands the request, decides whether an outside observation/action is needed, and writes the final conversational answer.
+- **PRIMUS** — supplies bounded context and coordinates the conversation turn.
+- **Agent Runtime** — accepts model-selected structured actions, handles the permission handoff, records the latest real observation for conversational follow-ups, and returns evidence to the model.
+- **AgentExecutor** — low-level deny-by-default executor. It validates capabilities and is the only layer that actually touches protected local resources.
+- **Tools / capabilities** — filesystem, process, window, application, diagnostic, screen-capture, and later external integrations.
+- **Observations** — real tool results supplied back to the model as evidence, never proof generated from model text itself.
+
+For example, asking `Какие файлы у меня на рабочем столе?` should not be answered from model memory or a Python phrase-specific shortcut. The model requests a filesystem observation, the agent performs the approved scan, and the resulting filenames are returned to the model before it answers.
+
+A follow-up such as `а ещё какие?` should use the previously recorded real observation while it remains relevant. If that observation cannot answer the new question, the model should request the agent again rather than inventing local state.
+
+The superseded PR **#129** explored a host-side shortcut where Python answered filesystem follow-ups directly without another model pass. It was closed without merge because that prevented hallucinated filenames but violated the intended architecture: UNIX should use the agent as the bridge to reality while the model remains the conversational decision-maker and answer author.
+
 ## Native model status
 
 UNIX does not hard-code one permanent model architecture into the product design. The native runtime and provider boundary are intentionally replaceable.
@@ -70,9 +111,7 @@ The Windows owner smoke after PR #128 verified the important user-visible parts 
 - internal `babyai-visible` marker text does not appear in the UI or canonical reply
 - local permission requests still remain separate from ordinary answer streaming
 
-The smoke also exposed the next truthfulness boundary: short follow-ups after a real local filesystem observation must never fall back to model guesses such as invented filenames, and creator/origin questions must be grounded rather than guessed from model pretraining.
-
-That work is intentionally isolated from #128 instead of being folded back into the already-verified streaming fix.
+The same smoke exposed the next architectural boundary: the model can converse correctly but must not invent facts about local files, processes, windows, or completed actions. Those facts now belong to the Agent Runtime observation path rather than further native-model prompt patches or phrase-specific host answers.
 
 ## Workspace, Documents, and Retrieval
 
@@ -97,9 +136,9 @@ The current retrieval layer is deliberately deterministic and local. Semantic em
 
 ## Voice status
 
-Voice is being developed independently from the Workspace and native-chat work.
+Voice is being developed independently from the Workspace and agent-runtime work.
 
-The current voice/VAD branch establishes the first bounded microphone foundation: microphone capture, 16 kHz mono audio handling, VAD, and a visible listening state. It is **not yet part of `main`** and still requires integration / owner testing against the current post-#128 codebase.
+The current voice/VAD branch establishes the first bounded microphone foundation: microphone capture, 16 kHz mono audio handling, VAD, and a visible listening state. It is **not yet part of `main`** and still requires integration / owner testing against the current codebase.
 
 Not implemented as completed product features yet:
 
@@ -132,14 +171,14 @@ Current progression:
 5. **Native multi-turn ChatML conversation path** — completed and owner-smoke tested
 6. **Workspace registry and context isolation** — completed foundation
 7. **Documents and local retrieval** — completed foundation
-8. **Truthful local-observation follow-ups** — current bounded follow-up work
+8. **First-class Agent Runtime + observation loop** — current bounded integration
 9. **Voice capture / VAD foundation** — separate integration track
 10. **Streaming STT** — planned
 11. **Streaming TTS** — planned
 12. **Barge-in** — planned
 13. **Durable jobs** — planned; tasks that can survive beyond one chat turn and pause for approval
 14. **Vision understanding** — planned beyond the current capture-only boundary
-15. **External tools and systems** — browser workflows, GitHub, business software, databases, and other connectors behind explicit action boundaries
+15. **External agent capabilities** — browser workflows, GitHub, business software, databases, and other connectors behind explicit action boundaries
 
 The engineering rule remains simple:
 
@@ -159,7 +198,7 @@ The long-term idea is to make the AI a native participant in the same space wher
 - collaboration between several people and UNIX while retaining explicit permissions for local or external actions
 - summaries, unresolved-decision tracking, retrieval of project material, and later approved execution from the same workspace
 
-This remains a long-term product direction. The lower-level Workspace, Documents, Retrieval, permissions, memory, and runtime layers are being built first so the future communication client sits on reliable foundations.
+This remains a long-term product direction. The lower-level Workspace, Documents, Retrieval, permissions, memory, runtime, and agent layers are being built first so the future communication client sits on reliable foundations.
 
 ## First Windows development run
 
@@ -286,7 +325,7 @@ Planned / evolving protocol work:
 
 ## Documentation
 
-The repository now contains both canonical technical documents and a readable Wiki layer.
+The repository contains both canonical technical documents and a readable Wiki layer.
 
 Useful entry points:
 
@@ -308,9 +347,11 @@ When readable Wiki text and implementation details disagree, current code and ca
 ## Principles
 
 - **Local-first** — local capability and local state are the default direction
+- **Model decides, agent observes/acts** — the model requests outside work; the agent performs it and returns evidence
 - **Explicit permissions** — protected actions are deny-by-default
 - **Truthful execution** — model output is not treated as proof of an external action
-- **Ground local facts in observations** — local files, processes, windows, and other machine state should come from executed tools, not model guesses
+- **Ground local facts in observations** — local files, processes, windows, and other machine state come from executed agent tools, not model guesses
+- **No host-authored fake conversation** — deterministic safety code may block or request approval, but normal local-data answers belong to the LLM after it receives real observations
 - **Human-approved durable learning** — persistent learning is intentional, not silent
 - **Fail closed** — ambiguous internal model output is withheld rather than exposed as trusted UI
 - **Portable state** — important state should remain inspectable and movable

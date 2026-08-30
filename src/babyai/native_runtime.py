@@ -66,6 +66,10 @@ def _configure_abi(library: Any) -> None:
     library.babyai_native_model_open.restype = ctypes.c_int32
     library.babyai_native_model_close.argtypes = [ctypes.c_void_p]
     library.babyai_native_model_close.restype = None
+    model_architecture = getattr(library, "babyai_native_model_architecture", None)
+    if model_architecture is not None:
+        model_architecture.argtypes = [ctypes.c_void_p]
+        model_architecture.restype = ctypes.c_char_p
     library.babyai_native_model_tokenize.argtypes = [
         ctypes.c_void_p,
         ctypes.c_void_p,
@@ -321,6 +325,28 @@ class NativeModelHandle:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    @property
+    def architecture(self) -> str | None:
+        """Return trusted GGUF architecture metadata when the shim exposes it."""
+
+        if self._closed or not self.pointer.value:
+            raise NativeRuntimeError("Native model handle is closed.")
+        symbol = getattr(self.runtime.handle.library, "babyai_native_model_architecture", None)
+        if symbol is None:
+            return None
+        raw = symbol(self.pointer)
+        if not raw:
+            return None
+        if not isinstance(raw, bytes):
+            raise NativeRuntimeError("Native model architecture metadata is not UTF-8 bytes.")
+        try:
+            architecture = raw.decode("utf-8").strip().casefold()
+        except UnicodeDecodeError as exc:
+            raise NativeRuntimeError("Native model architecture metadata is not valid UTF-8.") from exc
+        if not architecture or len(architecture) > 128:
+            raise NativeRuntimeError("Native model architecture metadata is invalid.")
+        return architecture
 
     def tokenize(
         self,

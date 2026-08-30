@@ -18,6 +18,7 @@ struct babyai_native_runtime {
 struct babyai_native_model {
     llama_model * handle = nullptr;
     babyai_native_runtime * runtime = nullptr;
+    std::string architecture;
     std::vector<babyai_native_context *> contexts;
 };
 
@@ -194,6 +195,28 @@ int32_t babyai_native_model_open(
 
         wrapper->handle = model;
         wrapper->runtime = runtime;
+        const int32_t architecture_length = llama_model_meta_val_str(
+            model,
+            "general.architecture",
+            nullptr,
+            0);
+        if (architecture_length > 0 && architecture_length <= 128) {
+            char architecture[129] = {};
+            const int32_t copied = llama_model_meta_val_str(
+                model,
+                "general.architecture",
+                architecture,
+                sizeof(architecture));
+            if (copied == architecture_length) {
+                try {
+                    wrapper->architecture.assign(architecture, static_cast<std::size_t>(copied));
+                } catch (const std::bad_alloc &) {
+                    llama_model_free(model);
+                    delete wrapper;
+                    return fail(runtime, BABYAI_NATIVE_OUT_OF_MEMORY, "Could not store native model metadata.");
+                }
+            }
+        }
         try {
             runtime->models.push_back(wrapper);
         } catch (...) {
@@ -207,6 +230,13 @@ int32_t babyai_native_model_open(
     } catch (...) {
         return fail(runtime, BABYAI_NATIVE_INTERNAL_ERROR, "Unexpected native model lifecycle error.");
     }
+}
+
+const char * babyai_native_model_architecture(const babyai_native_model * model) {
+    if (model == nullptr || model->handle == nullptr || model->architecture.empty()) {
+        return nullptr;
+    }
+    return model->architecture.c_str();
 }
 
 void babyai_native_model_close(babyai_native_model * model) {

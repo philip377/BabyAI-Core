@@ -39,6 +39,8 @@ def test_native_shim_exposes_stable_abi_v6_append_decode_contract():
     assert "babyai_native_build_backend" in backend_source
     assert 'return "cpu"' in backend_source
     assert 'return "vulkan"' in backend_source
+    assert "babyai_native_model_architecture" in header
+    assert "llama_model_meta_val_str" in source
 
     assert "llama_tokenize" in source
     assert "llama_token_to_piece" in source

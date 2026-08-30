@@ -99,6 +99,14 @@ def test_native_chat_wraps_plain_input_as_clean_user_turn() -> None:
     assert not native.endswith("BABYAI:")
 
 
+def test_native_chat_disables_thinking_only_for_qwen3_architecture() -> None:
+    qwen3 = prepare_native_chat_prompt("привет", model_architecture="qwen3")
+    qwen25 = prepare_native_chat_prompt("привет", model_architecture="qwen2")
+
+    assert "<|im_start|>user\nпривет\n\n/no_think<|im_end|>" in qwen3
+    assert "/no_think" not in qwen25
+
+
 def test_native_chat_drops_streaming_transport_contract_from_model_prompt() -> None:
     marker = "<babyai-visible-0123456789abcdef0123456789abcdef>"
     prompt = (
