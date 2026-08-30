@@ -18,7 +18,7 @@ def test_identity_creator_question_is_grounded() -> None:
     assert "владелец/разработчик" in reply
     assert "BabyAI Core" in reply
     assert "не является продуктом Anthropic" in reply
-    assert "created by the owner/developer" in identity.system_context()
+    assert "Creator: the BabyAI Core owner/developer" in identity.system_context()
 
 
 def test_file_followups_only_use_recorded_listing() -> None:
