@@ -32,10 +32,12 @@ def test_native_chat_promotes_recent_episode_to_real_roles() -> None:
     ) in native
     assert (
         "<|im_start|>user\n"
-        "а что на английском то?\n/no_think"
+        "а что на английском то?"
         "<|im_end|>"
     ) in native
-    assert native.index("Streaming display contract:") < native.index("<|im_start|>user\n")
+    assert "Streaming display contract:" not in native
+    assert "<babyai-visible-" not in native
+    assert "/no_think" not in native
     assert native.endswith("<|im_start|>assistant\n")
     assert not native.endswith("BABYAI:")
 
@@ -58,7 +60,7 @@ def test_native_chat_keeps_latest_followup_after_previous_russian_answer() -> No
     )
     latest = (
         "<|im_start|>user\n"
-        "отлично, что расскажешь?\n/no_think"
+        "отлично, что расскажешь?"
         "<|im_end|>"
     )
     assert old_answer in native
@@ -66,6 +68,7 @@ def test_native_chat_keeps_latest_followup_after_previous_russian_answer() -> No
     assert native.index(old_answer) < native.index(latest)
     assert "Do not repeat an earlier assistant answer unless the user asks you to repeat it." in native
     assert "When the latest message is a follow-up" in native
+    assert "/no_think" not in native
     assert native.endswith("<|im_start|>assistant\n")
     assert "<|im_start|>assistant\nBABYAI:" not in native
 
@@ -87,12 +90,29 @@ def test_native_chat_preserves_tool_catalog_as_system_context() -> None:
     assert "Available tools:" not in native[system_end + len("<|im_end|>") :]
 
 
-def test_native_chat_wraps_plain_input_as_user_turn() -> None:
+def test_native_chat_wraps_plain_input_as_clean_user_turn() -> None:
     native = prepare_native_chat_prompt("привет")
 
-    assert "<|im_start|>user\nпривет\n/no_think<|im_end|>" in native
+    assert "<|im_start|>user\nпривет<|im_end|>" in native
+    assert "/no_think" not in native
     assert native.endswith("<|im_start|>assistant\n")
     assert not native.endswith("BABYAI:")
+
+
+def test_native_chat_drops_streaming_transport_contract_from_model_prompt() -> None:
+    marker = "<babyai-visible-0123456789abcdef0123456789abcdef>"
+    prompt = (
+        "You are BabyAI.\n\n"
+        "USER: привет, как дела?\n\n"
+        "Streaming display contract: if this is visible, begin with exactly " + marker
+    )
+
+    native = prepare_native_chat_prompt(prompt)
+
+    assert "привет, как дела?" in native
+    assert "Streaming display contract:" not in native
+    assert marker not in native
+    assert "/no_think" not in native
 
 
 def test_resident_native_stops_at_qwen_turn_boundaries() -> None:
