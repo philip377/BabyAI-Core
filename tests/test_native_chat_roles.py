@@ -36,7 +36,8 @@ def test_native_chat_promotes_recent_episode_to_real_roles() -> None:
         "<|im_end|>"
     ) in native
     assert native.index("Streaming display contract:") < native.index("<|im_start|>user\n")
-    assert native.endswith("<|im_start|>assistant\n\nBABYAI:")
+    assert native.endswith("<|im_start|>assistant\n")
+    assert not native.endswith("BABYAI:")
 
 
 def test_native_chat_keeps_latest_followup_after_previous_russian_answer() -> None:
@@ -64,6 +65,9 @@ def test_native_chat_keeps_latest_followup_after_previous_russian_answer() -> No
     assert latest in native
     assert native.index(old_answer) < native.index(latest)
     assert "Do not repeat an earlier assistant answer unless the user asks you to repeat it." in native
+    assert "When the latest message is a follow-up" in native
+    assert native.endswith("<|im_start|>assistant\n")
+    assert "<|im_start|>assistant\nBABYAI:" not in native
 
 
 def test_native_chat_preserves_tool_catalog_as_system_context() -> None:
@@ -87,7 +91,8 @@ def test_native_chat_wraps_plain_input_as_user_turn() -> None:
     native = prepare_native_chat_prompt("привет")
 
     assert "<|im_start|>user\nпривет\n/no_think<|im_end|>" in native
-    assert native.endswith("<|im_start|>assistant\n\nBABYAI:")
+    assert native.endswith("<|im_start|>assistant\n")
+    assert not native.endswith("BABYAI:")
 
 
 def test_resident_native_stops_at_qwen_turn_boundaries() -> None:
