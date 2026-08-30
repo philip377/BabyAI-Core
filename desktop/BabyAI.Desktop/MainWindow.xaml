@@ -230,6 +230,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <TextBox x:Name="MessageBox"
@@ -245,8 +246,22 @@
                                  Foreground="#FFF8FAFF"
                                  KeyDown="MessageBox_KeyDown" />
 
-                        <Button x:Name="SendButton"
+                        <Button x:Name="VoiceButton"
                                 Grid.Column="1"
+                                Width="42"
+                                Height="42"
+                                Padding="0"
+                                CornerRadius="21"
+                                Content="🎙"
+                                FontFamily="Segoe UI Emoji"
+                                FontSize="17"
+                                Click="VoiceButton_Click"
+                                IsEnabled="{Binding IsEnabled, ElementName=SendButton}"
+                                AutomationProperties.Name="Голосовой ввод"
+                                ToolTipService.ToolTip="Голос · проверить микрофон и VAD" />
+
+                        <Button x:Name="SendButton"
+                                Grid.Column="2"
                                 Width="42"
                                 Height="42"
                                 Padding="0"
@@ -257,7 +272,7 @@
                                 Click="SendButton_Click"
                                 ToolTipService.ToolTip="Отправить · Enter" />
                         <Button x:Name="StopButton"
-                                Grid.Column="2"
+                                Grid.Column="3"
                                 Width="42"
                                 Height="42"
                                 Padding="0"
