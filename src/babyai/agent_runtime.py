@@ -5,8 +5,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .agent import AgentExecutor, ToolCall
+from .agent import AgentExecutor, ToolCall, ToolProtocolError
 from .tool_approval import PendingToolApproval, PendingToolApprovalStore
+
+
+class ModelDrivenAgentExecutor(AgentExecutor):
+    """Keep the safe executor while disabling the old pre-LLM intent shortcut."""
+
+    @staticmethod
+    def infer_safe_local_intent(user_input: str) -> ToolCall | None:
+        del user_input
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +78,11 @@ class AgentRuntime:
     def requests_local_action(self, user_input: str) -> bool:
         return self.executor.requests_local_action(user_input)
 
+    @property
+    def last_activity(self) -> str | None:
+        observation = self._last_observation
+        return None if observation is None else observation.activity
+
     def observation_context(self) -> str:
         observation = self._last_observation
         return "" if observation is None else observation.as_context()
@@ -106,16 +120,16 @@ class AgentRuntime:
         on_activity: Callable[[str], None] | None = None,
     ) -> tuple[str, AgentObservation]:
         if self.approvals is None:
-            raise ValueError("Tool approval is unavailable")
+            raise ToolProtocolError("Tool approval is unavailable")
         pending = self.approvals.load()
         if pending is None:
-            raise ValueError("No pending tool approval")
+            raise ToolProtocolError("No pending tool approval")
 
         call = ToolCall(name=pending.tool, arguments=pending.arguments)
         capability = self.executor.required_capability(call)
         if capability.value != pending.capability:
             self.approvals.clear()
-            raise ValueError("Pending tool approval capability mismatch")
+            raise ToolProtocolError("Pending tool approval capability mismatch")
 
         # Consume before execution so a cancelled/crashed worker cannot replay the same grant.
         self.approvals.clear()
@@ -124,7 +138,7 @@ class AgentRuntime:
 
     def reject_pending(self) -> None:
         if self.approvals is None or self.approvals.load() is None:
-            raise ValueError("No pending tool approval")
+            raise ToolProtocolError("No pending tool approval")
         self.approvals.clear()
 
     def _execute(
@@ -151,7 +165,8 @@ class AgentRuntime:
     def activity_text(call: ToolCall) -> str:
         if call.name == "filesystem.list":
             path = str(call.arguments.get("path", ".")).strip() or "."
-            if path.replace("\\", "/").rstrip("/").endswith("~/Desktop") or path == "~/Desktop":
+            normalized = path.replace("\\", "/").rstrip("/")
+            if normalized in {"~/Desktop", "Desktop"}:
                 return "Проверяю рабочий стол…"
             return f"Проверяю папку {path}…"
         if call.name == "filesystem.read":
