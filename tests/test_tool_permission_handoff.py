@@ -50,7 +50,7 @@ def test_malformed_tool_discussion_gets_one_structured_repair(tmp_path) -> None:
         repair_tool_calls=True,
     )
 
-    reply = primus.think("Назови любой файл на моём рабочем столе")
+    reply = primus.think("Посмотри, что лежит на моём рабочем столе")
 
     assert "разреш" in reply.lower()
     pending = approvals.load()

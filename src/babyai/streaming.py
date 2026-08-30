@@ -15,6 +15,7 @@ _INTERNAL_MARKERS = (
     "<reasoning",
     "</reasoning",
     "<babyai-visible-",
+    "</babyai-visible-",
     '"tool"',
     '"arguments"',
     '"response"',
@@ -29,19 +30,33 @@ _INTERNAL_MARKERS = (
     "never put the marker before json",
     "emit exactly one assistant turn",
     "do not explain or repeat this contract",
+    "answer directly in the user's language",
+    "do not reveal reasoning",
+    "do not add a translation unless",
+    "do not wrap a normal answer in json",
+    "return exactly one assistant turn",
+    "never continue the transcript by writing",
 )
 _INTERNAL_REASONING = re.compile(
-    r"(?im)^(?:okay,\s*)?(?:"
-    r"the user (?:asked|said|wants|is asking|wrote)|"
+    r"(?im)^(?:"
+    r"okay,\s*(?:"
+    r"the user\b|"
+    r"(?:i|we) (?:should|need(?: to)?) "
+    r"(?:answer|respond|reply|figure out|determine|decide|understand|analy[sz]e|consider)|"
+    r"let me (?:try to )?(?:figure out|determine|decide|understand|analy[sz]e|consider)"
+    r")|"
+    r"the user\b|"
     r"(?:i|we) (?:should|need(?: to)?) (?:answer|respond|reply)|"
-    r"(?:let(?:'|’)s|let us) (?:craft|answer|respond|reply)"
+    r"(?:let(?:'|’)s|let us) (?:craft|answer|respond|reply)|"
+    r"let me (?:start by |try to )?(?:understand|analy[sz]e|consider|figure out|determine|decide)"
     r")\b"
 )
 _SYNTHETIC_ROLE_CONTINUATION = re.compile(
     r"(?:^|[\r\n\t ])(?:USER|User|BABYAI|BabyAI)\s*:"
 )
 _UNSOLICITED_TRANSLATION_START = re.compile(r"\s+\((?=[^()\n]*[A-Za-z])")
-_VISIBLE_MARKER_PREFIX = "<babyai-visible-"
+_VISIBLE_MARKER_OPEN_PREFIX = "<babyai-visible-"
+_VISIBLE_MARKER_PREFIXES = (_VISIBLE_MARKER_OPEN_PREFIX, "</babyai-visible-")
 
 
 class StreamingSafetyError(ValueError):
@@ -96,6 +111,7 @@ class VisibleTextGate:
         self._blocked = False
         self._opened = False
         self._invalid = False
+        self._safe_prefix_before_block: str | None = None
         self._marker = marker
         self._tool_names = tuple(name.casefold() for name in tool_names)
 
@@ -167,13 +183,16 @@ class VisibleTextGate:
         text = self._after_hidden_prefix(canonical)
         if text is not None and text.startswith(self._marker):
             body = text[len(self._marker) :].lstrip()
+            folded = canonical.casefold()
+            body_folded = body.casefold()
             if (
-                canonical.casefold().count(_VISIBLE_MARKER_PREFIX) != 1
-                or _VISIBLE_MARKER_PREFIX in body.casefold()
+                folded.count(_VISIBLE_MARKER_OPEN_PREFIX) != 1
+                or any(prefix in body_folded for prefix in _VISIBLE_MARKER_PREFIXES)
             ):
                 raise StreamingSafetyError("Streaming response marker validation failed")
             return self._validated_completed_text(body)
-        if _VISIBLE_MARKER_PREFIX in canonical.casefold():
+        folded = canonical.casefold()
+        if any(prefix in folded for prefix in _VISIBLE_MARKER_PREFIXES):
             raise StreamingSafetyError("Streaming response marker validation failed")
         return self._validated_completed_text(canonical)
 
@@ -187,16 +206,28 @@ class VisibleTextGate:
     def validated_open_body(self, canonical: str) -> str | None:
         """Return a safe canonical body only when it retains this gate's nonce."""
 
-        if not self._opened or self._invalid or self._marker is None:
+        if not self._opened or self._marker is None:
             return None
         text = self._after_hidden_prefix(canonical)
         if text is None or not text.startswith(self._marker):
             return None
         body = text[len(self._marker) :].lstrip()
         try:
-            return self._validated_completed_text(body)
+            safe_body = self._validated_completed_text(body)
         except StreamingSafetyError:
             return None
+        if not safe_body.startswith(self._emitted):
+            return None
+        if self._invalid:
+            # A local model may append an unsafe scratchpad after an already complete
+            # answer. The streaming gate quarantines that suffix immediately, while
+            # the provider's canonical normalizer removes it. Recover only when the
+            # completed body is exactly the safe prefix observed before the block;
+            # arbitrary rewrites, tool calls and protocol tails remain rejected.
+            safe_prefix = self._safe_prefix_before_block
+            if safe_prefix is None or safe_body.strip() != safe_prefix.strip():
+                return None
+        return safe_body
 
     def finish(self, canonical: str) -> str:
         """Emit only the unseen suffix of an already validated canonical reply."""
@@ -273,8 +304,10 @@ class VisibleTextGate:
 
         if unsafe_positions:
             self._blocked = True
+            safe_prefix = text[: min(unsafe_positions)].rstrip()
             if self._opened:
                 self._invalid = True
+                self._safe_prefix_before_block = safe_prefix
                 return None
-            text = text[: min(unsafe_positions)].rstrip()
+            text = safe_prefix
         return text

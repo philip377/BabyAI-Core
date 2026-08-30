@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -9,12 +10,16 @@ from .llm import LLMError, LLMProvider
 from .native_brain import (
     _NATIVE_STOP_SEQUENCES,
     _normalise_native_reply,
-    _prepare_native_prompt,
     _requests_translation,
 )
+from .native_chat import prepare_native_chat_prompt
 from .native_generation import NativeGenerationStop, generate_greedy
 from .native_runtime import NativeModelHandle, NativeRuntimeError, NativeRuntimeLoader, NativeRuntimeSession
 from .runtime_trace import trace
+
+
+_VISIBLE_MARKER = re.compile(r"<babyai-visible-[0-9a-f]{32}>")
+_QWEN_CHAT_STOP_SEQUENCES = (*_NATIVE_STOP_SEQUENCES, "<|im_end|>", "<|im_start|>")
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +54,13 @@ class ResidentNativeBrainProvider(LLMProvider):
     def generate(self, prompt: str) -> str:
         return self.generate_stream(prompt, None).text
 
+    @staticmethod
+    def _visible_marker(prompt: str, on_candidate: Callable[[str], None] | None) -> str | None:
+        if on_candidate is None:
+            return None
+        matches = list(_VISIBLE_MARKER.finditer(prompt))
+        return matches[-1].group(0) if matches else None
+
     def generate_stream(
         self,
         prompt: str,
@@ -59,9 +71,22 @@ class ResidentNativeBrainProvider(LLMProvider):
         Candidate chunks have only passed native UTF-8 and stop-delimiter handling.
         They can still contain reasoning, response wrappers, or tool-call JSON and
         therefore must not be displayed before a higher layer validates them.
+
+        PRIMUS gives answer-only streams an unpredictable visible marker. Resident
+        native treats that marker as transport metadata only: the gate is primed
+        out-of-band, while Qwen receives a clean ChatML prompt that contains neither
+        the marker nor the streaming contract that named it.
         """
 
-        native_prompt = _prepare_native_prompt(prompt)
+        visible_marker = self._visible_marker(prompt, on_candidate)
+        native_prompt = prepare_native_chat_prompt(prompt)
+        if visible_marker is not None:
+            assert on_candidate is not None
+            # Prime the host-side gate without placing the nonce in model context.
+            # A marker by itself emits no user-visible text; the first model chunk
+            # opens the channel against the nonce already buffered by the gate.
+            on_candidate(visible_marker)
+
         started = time.monotonic()
         trace(
             "native.generate.start",
@@ -71,6 +96,8 @@ class ResidentNativeBrainProvider(LLMProvider):
             n_ctx=self.n_ctx,
             n_batch=self.n_batch,
             n_gpu_layers=self.n_gpu_layers,
+            stream_marker_prefilled=visible_marker is not None,
+            stream_marker_model_visible=False,
         )
         try:
             model = self._ensure_model()
@@ -88,7 +115,7 @@ class ResidentNativeBrainProvider(LLMProvider):
                 n_batch=self.n_batch,
                 n_threads=self.n_threads,
                 on_candidate=on_candidate,
-                stop_sequences=_NATIVE_STOP_SEQUENCES,
+                stop_sequences=_QWEN_CHAT_STOP_SEQUENCES,
                 fit_context_to_prompt=True,
             )
             trace(
@@ -117,6 +144,10 @@ class ResidentNativeBrainProvider(LLMProvider):
                 "Native brain returned no text "
                 f"(stop reason: {result.stop_reason}, generated tokens: {result.generated_tokens})."
             )
+        if visible_marker is not None:
+            # Canonical transport still carries the nonce so VisibleTextGate can
+            # authenticate completion, but the model never saw or generated it.
+            text = visible_marker + text
         return ResidentNativeStreamResult(
             text=text,
             generated_tokens=result.generated_tokens,
