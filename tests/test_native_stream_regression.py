@@ -22,7 +22,9 @@ def test_native_shim_keeps_repetition_sampler_for_the_context() -> None:
     assert "llama_sampler_free(context->sampler);" in source
 
 
-def test_resident_native_prefills_visible_nonce_and_streams_before_completion(monkeypatch) -> None:
+def test_resident_native_keeps_visible_nonce_out_of_model_and_streams_before_completion(
+    monkeypatch,
+) -> None:
     provider = ResidentNativeBrainProvider(
         model_path=Path("model.gguf"),
         runtime_path=Path("babyai_native.dll"),
@@ -68,14 +70,19 @@ def test_resident_native_prefills_visible_nonce_and_streams_before_completion(mo
 
     result = provider.generate_stream(prompt, accept)
 
-    assert str(captured["prompt"]).endswith("<|im_start|>assistant\n" + marker)
-    assert "<|im_start|>assistant\nBABYAI:" not in str(captured["prompt"])
+    model_prompt = str(captured["prompt"])
+    assert model_prompt.endswith("<|im_start|>assistant\n")
+    assert marker not in model_prompt
+    assert "Streaming display contract:" not in model_prompt
+    assert "/no_think" not in model_prompt
+    assert "<|im_start|>assistant\nBABYAI:" not in model_prompt
     assert captured.get("streamed_before_return") is True
     assert gate.opened is True
     body = gate.validated_open_body(result.text)
     assert body == answer.strip()
     assert "".join(visible_deltas) + gate.finish(body) == body
     assert marker not in "".join(visible_deltas)
+    assert result.text.startswith(marker)
     assert result.first_token_ms == 7
     assert result.generated_tokens == 42
 
