@@ -29,8 +29,10 @@ class AgentObservation:
         return (
             "Recent trusted agent observation (local machine evidence).\n"
             "Use it when it is relevant to the user's current request. Do not invent local files, "
-            "processes, windows, system state, or action results beyond this observation. If the "
-            "observation is insufficient or stale, request the agent again.\n"
+            "processes, windows, system state, or action results beyond this observation. The "
+            "requested local action has already completed: answer the current user directly from "
+            "OBSERVATION and do not output another tool call or ask for permission again. If a "
+            "later user request needs different or newer evidence, the agent may be requested then.\n"
             f"AGENT_ACTION: {self.tool}\n"
             f"ARGUMENTS: {json.dumps(self.arguments, ensure_ascii=False, separators=(',', ':'))}\n"
             f"OBSERVATION:\n{self.result}"
@@ -94,6 +96,7 @@ class AgentRuntime:
         *,
         on_activity: Callable[[str], None] | None = None,
     ) -> AgentRunResult:
+        call = self._canonicalize_model_call(user_input, call)
         capability = self.executor.required_capability(call)
         if not self.executor.is_allowed(call):
             if self.approvals is None:
@@ -113,6 +116,31 @@ class AgentRuntime:
         return AgentRunResult(
             observation=self._execute(call, on_activity=on_activity, once=False)
         )
+
+    @staticmethod
+    def _canonicalize_model_call(user_input: str, call: ToolCall) -> ToolCall:
+        """Replace known model placeholder paths only for an explicit Desktop request."""
+
+        if call.name != "filesystem.list":
+            return call
+        text = user_input.casefold()
+        requests_desktop = "desktop" in text or ("рабоч" in text and "стол" in text)
+        if not requests_desktop:
+            return call
+        raw_path = str(call.arguments.get("path", ".")).strip()
+        normalized = raw_path.replace("\\", "/").rstrip("/").casefold()
+        desktop_aliases = {
+            "desktop",
+            "~/desktop",
+            "/home/user/desktop",
+            "/users/user/desktop",
+            "c:/users/user/desktop",
+        }
+        if normalized not in desktop_aliases:
+            return call
+        arguments = dict(call.arguments)
+        arguments["path"] = "~/Desktop"
+        return ToolCall(name=call.name, arguments=arguments)
 
     def approve_pending(
         self,

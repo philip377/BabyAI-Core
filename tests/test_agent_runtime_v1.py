@@ -57,6 +57,35 @@ def test_model_decides_to_call_agent_before_permission_handoff(tmp_path) -> None
     assert not permissions.is_granted(Capability.FILESYSTEM_LIST)
 
 
+def test_model_placeholder_path_is_canonicalized_only_for_explicit_desktop_request(
+    tmp_path,
+) -> None:
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    approvals = PendingToolApprovalStore(tmp_path / "pending.json")
+    runtime = AgentRuntime(ModelDrivenAgentExecutor(permissions), approvals)
+
+    runtime.invoke(
+        "Посмотри файлы на рабочем столе",
+        runtime.parse_request(
+            '{"tool":"filesystem.list","arguments":{"path":"/home/user/Desktop"}}'
+        ),
+    )
+    pending = approvals.load()
+    assert pending is not None
+    assert pending.arguments == {"path": "~/Desktop"}
+
+    approvals.clear()
+    runtime.invoke(
+        "Посмотри файлы в этой папке",
+        runtime.parse_request(
+            '{"tool":"filesystem.list","arguments":{"path":"/home/user/Desktop"}}'
+        ),
+    )
+    pending = approvals.load()
+    assert pending is not None
+    assert pending.arguments == {"path": "/home/user/Desktop"}
+
+
 def test_approved_agent_observation_returns_to_llm(tmp_path) -> None:
     folder = tmp_path / "Desktop"
     folder.mkdir()
@@ -81,6 +110,7 @@ def test_approved_agent_observation_returns_to_llm(tmp_path) -> None:
     assert "price.xlsx" in final
     assert "notes.txt" in final
     assert "Recent trusted agent observation" in provider.prompts[-1]
+    assert "do not output another tool call" in provider.prompts[-1]
     assert "OBSERVATION:" in provider.prompts[-1]
     assert "price.xlsx" in provider.prompts[-1]
     assert "notes.txt" in provider.prompts[-1]
@@ -144,7 +174,8 @@ def test_desktop_worker_surface_runs_approved_observation_loop_and_followup(
     )
 
     provider = ScriptedProvider([
-        '{"tool":"filesystem.list","arguments":{"path":"~/Desktop"}}',
+        # Qwen3 may substitute this common Unix placeholder despite the Windows contract.
+        '{"tool":"filesystem.list","arguments":{"path":"/home/user/Desktop"}}',
         "На рабочем столе вижу owner-notes.txt и vacation-photo.jpg.",
         "Ещё там есть vacation-photo.jpg.",
     ])
