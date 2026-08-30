@@ -8,7 +8,7 @@ from typing import TextIO
 
 from .desktop_commands import DesktopCommandError
 from .runtime_trace import trace
-from .workspace_desktop_retrieval import WorkspaceDesktopCommands as DesktopCommands
+from .truthful_desktop import TruthfulWorkspaceDesktopCommands as DesktopCommands
 
 
 MAX_WORKER_REQUEST_CHARS = 1_048_576
