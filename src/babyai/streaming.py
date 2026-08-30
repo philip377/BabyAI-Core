@@ -15,6 +15,7 @@ _INTERNAL_MARKERS = (
     "<reasoning",
     "</reasoning",
     "<babyai-visible-",
+    "</babyai-visible-",
     '"tool"',
     '"arguments"',
     '"response"',
@@ -54,7 +55,8 @@ _SYNTHETIC_ROLE_CONTINUATION = re.compile(
     r"(?:^|[\r\n\t ])(?:USER|User|BABYAI|BabyAI)\s*:"
 )
 _UNSOLICITED_TRANSLATION_START = re.compile(r"\s+\((?=[^()\n]*[A-Za-z])")
-_VISIBLE_MARKER_PREFIX = "<babyai-visible-"
+_VISIBLE_MARKER_OPEN_PREFIX = "<babyai-visible-"
+_VISIBLE_MARKER_PREFIXES = (_VISIBLE_MARKER_OPEN_PREFIX, "</babyai-visible-")
 
 
 class StreamingSafetyError(ValueError):
@@ -181,13 +183,16 @@ class VisibleTextGate:
         text = self._after_hidden_prefix(canonical)
         if text is not None and text.startswith(self._marker):
             body = text[len(self._marker) :].lstrip()
+            folded = canonical.casefold()
+            body_folded = body.casefold()
             if (
-                canonical.casefold().count(_VISIBLE_MARKER_PREFIX) != 1
-                or _VISIBLE_MARKER_PREFIX in body.casefold()
+                folded.count(_VISIBLE_MARKER_OPEN_PREFIX) != 1
+                or any(prefix in body_folded for prefix in _VISIBLE_MARKER_PREFIXES)
             ):
                 raise StreamingSafetyError("Streaming response marker validation failed")
             return self._validated_completed_text(body)
-        if _VISIBLE_MARKER_PREFIX in canonical.casefold():
+        folded = canonical.casefold()
+        if any(prefix in folded for prefix in _VISIBLE_MARKER_PREFIXES):
             raise StreamingSafetyError("Streaming response marker validation failed")
         return self._validated_completed_text(canonical)
 
