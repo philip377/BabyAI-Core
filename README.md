@@ -3,85 +3,169 @@
 > **Product name:** UNIX  
 > **Repository / technical codename:** BabyAI Core
 
-UNIX is a local-first personal AI assistant being developed in this repository under the technical name **BabyAI Core**. The product name is now **UNIX**, while existing package names, paths, environment variables, executable names, and internal identifiers continue to use `BabyAI` during development for compatibility and to avoid unnecessary large-scale renames.
+UNIX is a local-first personal AI assistant being developed in this repository under the technical name **BabyAI Core**.
 
-The goal is not just a chat window. UNIX is being built as a persistent local companion that can reason with a local model, remember approved information, interact with the computer through explicit capabilities, and gradually take on longer real-world tasks without silently crossing permission boundaries.
+The project is no longer just an experimental chat window. It now has a native Windows desktop client, a resident local-model runtime, progressive multi-turn chat, explicit memory and permissions, safe local actions, Workspaces, document registration and retrieval, a Windows installer pipeline, and a growing documentation layer.
 
-## Current status
+The product name is **UNIX**. Existing package names, paths, environment variables, executable names, UI labels, and internal identifiers still use `BabyAI` in many places during development so compatibility work is not mixed into feature development.
 
-The project has moved beyond the initial Genesis MVP and completed the main Milestone 2 agent foundation.
+## Current status — August 2026
 
-Already working:
+The main Milestone 2 agent foundation is complete, and the first Workspace / Documents / Retrieval foundation is now integrated into `main`.
+
+The latest owner-tested native-chat milestone is PR **#128**, which fixed repetition loops and rebuilt the resident native conversation path around genuine ChatML turns. The installed Windows smoke confirmed Russian multi-turn conversation, progressive output, continuity between turns, and no leakage of internal `babyai-visible` transport markers.
+
+Already working in `main`:
 
 - **PRIMUS** orchestration and bounded agent loop
-- **MEMORIA** typed persistent memory on SQLite
-- persistent identity, bounded session context, preferences, facts, and project memory
-- native Windows Orb desktop application with Acrylic chat UI, tray lifecycle, drag persistence, and animated states
-- local **Qwen3-8B Q4_K_M** execution through the native runtime
-- Windows **Vulkan GPU acceleration** with CPU fallback tiers
-- safe Desktop protocol v2 with progressive response streaming
+- **MEMORIA** typed memory with SQLite-backed durable state and bounded process-local session context
+- persistent identity, preferences, facts, learned knowledge, project memory, and opt-in local chat history
+- native Windows Orb desktop application with Acrylic-style chat UI, tray lifecycle, drag persistence, and assistant states
+- resident native model process so the model does not need to reload for every chat turn
+- configurable local GGUF execution through the native llama.cpp-based runtime
+- Windows **Vulkan GPU acceleration** plus portable / AVX / AVX2 CPU runtime tiers
+- safe Desktop protocol v2 with ordered state events and progressive response deltas
+- real ChatML `system -> user -> assistant` conversation formatting for the resident native path
+- multi-turn session continuity without treating old assistant replies as system instructions
+- repetition-aware persistent sampler chain for native generation
 - cancellation / Stop without accepting stale or ghost deltas
-- fail-closed streaming visibility checks so model reasoning, tool JSON, protocol data, and synthetic role continuations do not become normal chat output
+- fail-closed streaming visibility checks so reasoning, tool JSON, protocol data, synthetic role continuations, and transport markers do not become normal chat output
 - capability-gated Windows actions with deny-by-default permissions
 - one-shot approval flow for protected local actions
 - filesystem list/read/write boundaries
-- process, application, window, diagnostic command, workstation lock, and screen-capture capabilities
+- process, application, window, fixed diagnostic command, workstation lock, and screen-capture capabilities
 - redirected Windows Desktop / OneDrive Known Folder resolution
 - executor-confirmed action results: UNIX does not treat a model claim as proof that an action happened
 - permissioned screen capture with a capture-only boundary until a real vision provider is connected
-- opt-in local chat history
-- Windows installer / portable release pipeline with native CPU and Vulkan runtimes
+- persistent **Workspace registry** with stable IDs and one active Workspace
+- Workspace-isolated session context, tasks, project memory, and persisted history
+- per-Workspace **document registry** with explicit registration instead of directory scanning
+- bounded text document reading behind the existing filesystem permission boundary
+- per-Workspace **retrieval index** with deterministic local lexical ranking
+- Desktop commands for document ingestion, search, retrieval status, and removal
+- retrieved document text treated as untrusted reference data rather than instructions
+- structured project Wiki source under `docs/wiki/`
+- Windows installer / portable release pipeline with bundled native CPU and Vulkan runtimes
+- side-by-side physical install slots so repeated development builds of the same logical version can be installed safely
 
-The currently active next slice is the **voice foundation**: bounded microphone capture plus VAD (voice activity detection). STT, TTS, and interruption/barge-in are intentionally separate later steps.
+## Native model status
+
+UNIX does not hard-code one permanent model architecture into the product design. The native runtime and provider boundary are intentionally replaceable.
+
+Two useful real-world baselines have already been exercised during development:
+
+- **Qwen3-8B Q4_K_M + Vulkan** on an RTX 2060 SUPER, used during Milestone 2 acceptance and streaming work
+- **Qwen2.5 1.5B + CPU** on the installed owner test path used to diagnose and verify the post-#127 / #128 conversational fixes
+
+Existing user launch settings are preserved rather than silently overwritten by new builds. A future model/runtime migration should therefore be treated as its own compatibility-conscious change, not hidden inside unrelated feature work.
+
+## Latest native-chat acceptance
+
+The Windows owner smoke after PR #128 verified the important user-visible parts of the resident native path:
+
+- Russian input receives Russian output
+- a second and third message are treated as new conversational turns rather than restarting the assistant introduction
+- previous assistant replies remain conversational history instead of becoming system instructions
+- progressive text appears before generation is complete
+- internal `babyai-visible` marker text does not appear in the UI or canonical reply
+- local permission requests still remain separate from ordinary answer streaming
+
+The smoke also exposed the next truthfulness boundary: short follow-ups after a real local filesystem observation must never fall back to model guesses such as invented filenames, and creator/origin questions must be grounded rather than guessed from model pretraining.
+
+That work is intentionally isolated from #128 instead of being folded back into the already-verified streaming fix.
+
+## Workspace, Documents, and Retrieval
+
+Workspace is no longer only a roadmap item.
+
+The current foundation supports:
+
+- creating and selecting persistent Workspaces
+- stable Workspace IDs and optional project-root metadata
+- no implicit scanning or reading merely because a root path is registered
+- separate task files and session context per active Workspace
+- isolated project memory and chat history
+- explicit document registration with stable document IDs
+- document metadata removal without deleting the original file
+- explicit text ingestion behind `filesystem.read`
+- bounded local chunking and lexical retrieval
+- automatic retrieval of relevant chunks into Workspace chat context
+- retrieval filtering so documents from another Workspace cannot leak into the active one
+- Desktop-level ingest/search/status wiring
+
+The current retrieval layer is deliberately deterministic and local. Semantic embeddings, reranking, richer binary/PDF/DOCX parsing, editing, and preview/diff workflows are later layers.
+
+## Voice status
+
+Voice is being developed independently from the Workspace and native-chat work.
+
+The current voice/VAD branch establishes the first bounded microphone foundation: microphone capture, 16 kHz mono audio handling, VAD, and a visible listening state. It is **not yet part of `main`** and still requires integration / owner testing against the current post-#128 codebase.
+
+Not implemented as completed product features yet:
+
+- streaming STT
+- streaming TTS
+- interruption / barge-in
+- full conversational voice loop
+
+These remain separate stages so microphone capture, speech recognition, speech synthesis, and interruption can each be tested independently.
 
 ## Development naming
 
 For now, two names intentionally coexist:
 
-- **UNIX** — the real product and assistant name going forward.
-- **BabyAI Core / BabyAI** — the repository name and current internal technical identifiers.
+- **UNIX** — the product name and long-term assistant identity.
+- **BabyAI Core / BabyAI** — repository name and current technical identifiers used throughout the codebase and installed development builds.
 
-A full code/package/installer rename is **not** being done yet. It will be handled as a dedicated compatibility-conscious migration rather than mixed into feature work.
+A full code/package/installer rename is **not** being done opportunistically. It should be handled as a dedicated migration with compatibility coverage for paths, state, installer upgrades, shortcuts, environment variables, and user data.
 
 ## Architecture direction
 
-The current development path is deliberately incremental:
+The project is being built as bounded layers rather than one large autonomous system.
 
-1. **Agent foundation** — completed
-2. **Safe response streaming** — completed
-3. **Voice foundation / VAD** — in progress
-4. **Streaming STT** — speech to text while the user is still talking
-5. **Streaming TTS** — begin speaking before the whole answer is complete
-6. **Barge-in** — user speech interrupts UNIX immediately
-7. **Workspace / Projects** — persistent project-aware working context
-8. **Documents + retrieval** — read, search, compare, and later edit through preview/diff approval
-9. **Durable jobs** — tasks that survive beyond one chat turn and can pause for approval
-10. **Vision** — understand captured screen content instead of capture-only behavior
-11. **External tools and systems** — GitHub, browser workflows, business software, databases, and other connectors behind explicit action boundaries
+Current progression:
 
-The design rule is simple: **add one bounded capability, make it observable and testable, then build the next layer on top of it.**
+1. **Core assistant / PRIMUS foundation** — completed
+2. **Safe permissions and Windows action boundary** — completed
+3. **Resident native runtime and Windows packaging** — completed foundation
+4. **Versioned progressive response streaming** — completed
+5. **Native multi-turn ChatML conversation path** — completed and owner-smoke tested
+6. **Workspace registry and context isolation** — completed foundation
+7. **Documents and local retrieval** — completed foundation
+8. **Truthful local-observation follow-ups** — current bounded follow-up work
+9. **Voice capture / VAD foundation** — separate integration track
+10. **Streaming STT** — planned
+11. **Streaming TTS** — planned
+12. **Barge-in** — planned
+13. **Durable jobs** — planned; tasks that can survive beyond one chat turn and pause for approval
+14. **Vision understanding** — planned beyond the current capture-only boundary
+15. **External tools and systems** — browser workflows, GitHub, business software, databases, and other connectors behind explicit action boundaries
+
+The engineering rule remains simple:
+
+> **Add one bounded capability, make it observable and testable, then build the next layer on top of it.**
 
 ## Long-term communication vision
 
-UNIX is also intended to grow beyond a one-person assistant window into an **AI-centered communication and work client**.
+UNIX is intended to grow beyond a one-person assistant window into an **AI-centered communication and work client**.
 
-The idea is to make the AI a native participant in the same space where people already communicate and work, rather than keeping it in a separate chatbot tab. A future UNIX workspace can combine:
+The long-term idea is to make the AI a native participant in the same space where people communicate and work, rather than keeping it in a separate chatbot tab. A future UNIX client can combine:
 
-- persistent **project spaces** with their own context, memory, files, goals, and history
-- **human-to-human and human-to-AI chats** inside the same project
-- shared conversations where UNIX can participate as another member instead of being invoked through a separate interface
-- integrated **documents, files, notes, tasks, and decisions** attached to the conversation that produced them
+- persistent project spaces with their own context, memory, files, goals, and history
+- human-to-human and human-to-AI chats inside the same project
+- shared conversations where UNIX participates as another member
+- integrated documents, files, notes, tasks, and decisions attached to the conversation that produced them
 - context that persists across chats so the AI understands the project, not only the latest message
 - collaboration between several people and UNIX while retaining explicit permissions for local or external actions
-- the ability for UNIX to summarize discussions, surface unresolved decisions, retrieve relevant project material, and later execute approved work from the same workspace
+- summaries, unresolved-decision tracking, retrieval of project material, and later approved execution from the same workspace
 
-The intended direction is closer to a **communication layer + project workspace + AI participant** than to a traditional messenger with an AI button added on top.
-
-This is a long-term product direction, not part of the current voice milestone. The lower-level Workspace, Documents, Retrieval, Durable Jobs, permissions, and memory layers are being built first so this client can eventually sit on top of reliable foundations.
+This remains a long-term product direction. The lower-level Workspace, Documents, Retrieval, permissions, memory, and runtime layers are being built first so the future communication client sits on reliable foundations.
 
 ## First Windows development run
 
-Requirements: Windows 10/11 x64, Python 3.11+ and the .NET 10 SDK. Ollama remains available as a development provider, but the Windows release path also supports the packaged native runtime.
+Requirements: Windows 10/11 x64, Python 3.11+ and the .NET 10 SDK.
+
+Ollama remains available as a development provider, but the packaged Windows release path supports the native runtime and does not require Ollama for native inference.
 
 From PowerShell in the repository root, the simplest UI smoke test is:
 
@@ -89,7 +173,7 @@ From PowerShell in the repository root, the simplest UI smoke test is:
 powershell -ExecutionPolicy Bypass -File .\scripts\windows\start.ps1 -Provider echo
 ```
 
-`start.ps1` checks whether Core and the runnable Orb already exist. On the first run (or after a broken/incomplete setup) it automatically runs bootstrap; on later runs it launches the existing executable directly.
+`start.ps1` checks whether Core and the runnable Orb already exist. On the first run, or after an incomplete setup, it runs bootstrap; on later runs it launches the existing executable directly.
 
 Echo mode verifies the Windows application, bridge, state initialization, and UI without needing an LLM.
 
@@ -114,7 +198,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\windows\diagnose.ps1 -Provide
 
 This creates `babyai-diagnostics.txt` in the repository root. The report deliberately excludes MEMORIA contents, chats, task/identity contents, permission contents, and user-file contents.
 
-Local state currently lives under `~/.babyai`, while Desktop-specific state is stored under `%LocalAppData%\BabyAI`. These paths retain the technical codename for compatibility.
+Local Core state currently lives under `~/.babyai`, while Desktop-specific state is stored under `%LocalAppData%\BabyAI`. These paths retain the technical codename for compatibility.
 
 ## Core quick start
 
@@ -157,7 +241,7 @@ babyai-learn approve
 
 ## Permissions
 
-UNIX starts with no system capabilities granted.
+UNIX starts with no protected system capabilities granted.
 
 ```bash
 babyai permissions list
@@ -188,7 +272,7 @@ Current environment variables retain the BabyAI technical namespace:
 - `BABYAI_NAME=BabyAI`
 - `BABYAI_OWNER=owner`
 
-Native Windows builds additionally use native model/runtime configuration managed by the installer and launch settings.
+Native Windows builds additionally use native model/runtime configuration managed by installer and launch settings. Existing explicit model choices are preserved rather than silently replaced during unrelated updates.
 
 ## Protocols
 
@@ -200,17 +284,33 @@ Planned / evolving protocol work:
 
 **METAMORPHOSIS · LINGUA · TEMPUS · PHANTOM · EVOLUTIO · CURA**
 
-Architecture notes currently live in:
+## Documentation
+
+The repository now contains both canonical technical documents and a readable Wiki layer.
+
+Useful entry points:
 
 - `docs/MILESTONE_2_READINESS.md`
 - `docs/MILESTONE_3_COMPANION_WORKSPACE_PLAN.md`
 - `docs/STREAMING_PROTOCOL_V2.md`
+- `docs/NATIVE_BRAIN.md`
+- `docs/SECURITY_MODEL.md`
+- `docs/wiki/Home.md`
+- `docs/wiki/Architecture.md`
+- `docs/wiki/Roadmap.md`
+- `docs/wiki/Workspace.md`
+- `docs/wiki/Voice.md`
+- `docs/wiki/Build-and-Install.md`
+- `docs/wiki/Troubleshooting.md`
+
+When readable Wiki text and implementation details disagree, current code and canonical technical contracts are authoritative.
 
 ## Principles
 
 - **Local-first** — local capability and local state are the default direction
 - **Explicit permissions** — protected actions are deny-by-default
 - **Truthful execution** — model output is not treated as proof of an external action
+- **Ground local facts in observations** — local files, processes, windows, and other machine state should come from executed tools, not model guesses
 - **Human-approved durable learning** — persistent learning is intentional, not silent
 - **Fail closed** — ambiguous internal model output is withheld rather than exposed as trusted UI
 - **Portable state** — important state should remain inspectable and movable
