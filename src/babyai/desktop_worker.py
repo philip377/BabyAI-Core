@@ -8,6 +8,7 @@ from typing import TextIO
 
 from .desktop_commands import DesktopCommandError
 from .runtime_trace import trace
+# TruthfulWorkspaceDesktopCommands extends workspace_desktop_retrieval.WorkspaceDesktopCommands.
 from .truthful_desktop import TruthfulWorkspaceDesktopCommands as DesktopCommands
 
 
