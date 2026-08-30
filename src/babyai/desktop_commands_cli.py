@@ -5,7 +5,7 @@ import json
 import typer
 
 from .desktop_commands import DesktopCommandError
-from .workspace_desktop_retrieval import WorkspaceDesktopCommands as DesktopCommands
+from .truthful_desktop import TruthfulWorkspaceDesktopCommands as DesktopCommands
 
 app = typer.Typer(help="BabyAI Desktop command bridge")
 
