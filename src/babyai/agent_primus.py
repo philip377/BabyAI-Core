@@ -59,10 +59,9 @@ class AgentRuntimePrimusMixin:
                 on_state=on_state,
             )
 
-        def show_activity(text: str) -> None:
+        def show_activity(_: str) -> None:
             if on_state is not None:
                 on_state("executing")
-                on_state("activity:" + text)
 
         result = runtime.invoke(
             user_input,
@@ -75,16 +74,18 @@ class AgentRuntimePrimusMixin:
 
         assert result.observation is not None
         followup_base = self._base_prompt(user_input, include_tool_catalog=False)
-        return self.llm.generate(self._agent_followup(followup_base))  # type: ignore[attr-defined]
+        answer = self.llm.generate(self._agent_followup(followup_base))  # type: ignore[attr-defined]
+        return result.observation.activity + "\n\n" + answer
 
     def approve_pending_tool(self) -> str:
         runtime = self.agent_runtime
         if runtime is None:
             return super().approve_pending_tool()  # type: ignore[misc]
 
-        user_input, _ = runtime.approve_pending()
+        user_input, observation = runtime.approve_pending()
         base = self._base_prompt(user_input, include_tool_catalog=False)
-        response = self.llm.generate(self._agent_followup(base))  # type: ignore[attr-defined]
+        answer = self.llm.generate(self._agent_followup(base))  # type: ignore[attr-defined]
+        response = observation.activity + "\n\n" + answer
         self._remember_episode("babyai", response)  # type: ignore[attr-defined]
         return response
 
