@@ -72,21 +72,19 @@ class ResidentNativeBrainProvider(LLMProvider):
         They can still contain reasoning, response wrappers, or tool-call JSON and
         therefore must not be displayed before a higher layer validates them.
 
-        PRIMUS gives answer-only streams an unpredictable visible marker. Small local
-        models often fail to copy that nonce verbatim, which used to keep the safety
-        gate closed until generation completed. Native owns the assistant cue, so it
-        can safely prefill that exact marker into the assistant prefix instead. The
-        gate still validates every generated candidate for reasoning/tool/protocol
-        leakage before it exposes any text.
+        PRIMUS gives answer-only streams an unpredictable visible marker. Resident
+        native treats that marker as transport metadata only: the gate is primed
+        out-of-band, while Qwen receives a clean ChatML prompt that contains neither
+        the marker nor the streaming contract that named it.
         """
 
         visible_marker = self._visible_marker(prompt, on_candidate)
         native_prompt = prepare_native_chat_prompt(prompt)
         if visible_marker is not None:
-            native_prompt += visible_marker
             assert on_candidate is not None
-            # Prime the gate with the same nonce already present in the native
-            # assistant prefix. A marker by itself emits no user-visible text.
+            # Prime the host-side gate without placing the nonce in model context.
+            # A marker by itself emits no user-visible text; the first model chunk
+            # opens the channel against the nonce already buffered by the gate.
             on_candidate(visible_marker)
 
         started = time.monotonic()
@@ -99,6 +97,7 @@ class ResidentNativeBrainProvider(LLMProvider):
             n_batch=self.n_batch,
             n_gpu_layers=self.n_gpu_layers,
             stream_marker_prefilled=visible_marker is not None,
+            stream_marker_model_visible=False,
         )
         try:
             model = self._ensure_model()
@@ -146,8 +145,8 @@ class ResidentNativeBrainProvider(LLMProvider):
                 f"(stop reason: {result.stop_reason}, generated tokens: {result.generated_tokens})."
             )
         if visible_marker is not None:
-            # Keep the canonical completed value consistent with the progressive
-            # channel so VisibleTextGate can validate and remove the nonce.
+            # Canonical transport still carries the nonce so VisibleTextGate can
+            # authenticate completion, but the model never saw or generated it.
             text = visible_marker + text
         return ResidentNativeStreamResult(
             text=text,
