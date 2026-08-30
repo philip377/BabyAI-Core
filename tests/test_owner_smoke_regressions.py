@@ -79,3 +79,31 @@ def test_native_normalizer_removes_prompt_echo_before_reasoning_tail() -> None:
     )
 
     assert _normalise_native_reply(raw) == answer
+
+
+def test_visible_stream_quarantines_any_okay_the_user_reasoning_tail() -> None:
+    marker = new_visible_marker()
+    gate = VisibleTextGate(marker=marker)
+    answer = "Я рад, что ты починил! Что тебя интересует? " * 6
+
+    assert gate.feed(marker + answer)
+    leaked = (
+        "\nOkay, the user mentioned that there was some mess with files on their desktop "
+        "but they fixed it. They're asking what else I can tell them."
+    )
+    assert gate.feed(leaked) == ""
+
+    visible = gate.emitted
+    assert "Okay, the user" not in visible
+    assert "They're asking" not in visible
+
+
+def test_native_normalizer_removes_any_okay_the_user_reasoning_tail() -> None:
+    answer = "Я рад, что ты починил! Что тебя интересует?"
+    raw = (
+        answer
+        + "\nOkay, the user mentioned that there was some mess with files on their desktop "
+        + "but they fixed it. They're asking what else I can tell them."
+    )
+
+    assert _normalise_native_reply(raw) == answer
