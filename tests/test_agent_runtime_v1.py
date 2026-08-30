@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections import deque
 
 from babyai.agent_primus import AgentPrimus
+from babyai.agent_desktop import AgentDesktopCommands
 from babyai.agent_runtime import AgentRuntime, ModelDrivenAgentExecutor
+from babyai.config import BabyAIConfig
 from babyai.identity import Identity
 from babyai.llm import LLMProvider
 from babyai.memory import SQLiteMemoryStore, SessionMemoryStore
@@ -126,3 +128,58 @@ def test_model_driven_executor_disables_old_pre_llm_shortcut(tmp_path) -> None:
 
     assert executor.infer_safe_local_intent("Назови файл на моём рабочем столе") is None
     assert executor.requests_local_action("Назови файл на моём рабочем столе") is True
+
+
+def test_desktop_worker_surface_runs_approved_observation_loop_and_followup(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    desktop = tmp_path / "real-desktop"
+    desktop.mkdir()
+    (desktop / "owner-notes.txt").write_text("x", encoding="utf-8")
+    (desktop / "vacation-photo.jpg").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(
+        "babyai.tools._resolve_local_path",
+        lambda path: desktop if str(path) == "~/Desktop" else path,
+    )
+
+    provider = ScriptedProvider([
+        '{"tool":"filesystem.list","arguments":{"path":"~/Desktop"}}',
+        "На рабочем столе вижу owner-notes.txt и vacation-photo.jpg.",
+        "Ещё там есть vacation-photo.jpg.",
+    ])
+    commands = AgentDesktopCommands(
+        BabyAIConfig(data_dir=tmp_path / "data", provider="native"),
+        persistent=True,
+    )
+    commands._provider_instance = provider
+
+    events: list[dict[str, object]] = []
+    first = commands.stream_chat(
+        {"message": "посмотри какие файлы на рабочем столе у меня есть"},
+        events.append,
+    )
+
+    assert "разреш" in first["reply"].casefold()
+    assert len(provider.prompts) == 1
+    assert provider.prompts[0].rstrip().endswith(
+        "USER: посмотри какие файлы на рабочем столе у меня есть"
+    )
+    assert "Available tools:" in provider.prompts[0]
+
+    approved = commands.execute("approval.approve")
+
+    assert approved["activity"] == "Проверяю рабочий стол…"
+    assert "owner-notes.txt" in approved["reply"]
+    assert "vacation-photo.jpg" in approved["reply"]
+    assert "OBSERVATION:" in provider.prompts[1]
+    assert "owner-notes.txt" in provider.prompts[1]
+    assert "vacation-photo.jpg" in provider.prompts[1]
+
+    followup_events: list[dict[str, object]] = []
+    followup = commands.stream_chat({"message": "а ещё какие?"}, followup_events.append)
+
+    assert followup["reply"] == "Ещё там есть vacation-photo.jpg."
+    assert "OBSERVATION:" in provider.prompts[2]
+    assert "owner-notes.txt" in provider.prompts[2]
+    assert "vacation-photo.jpg" in provider.prompts[2]

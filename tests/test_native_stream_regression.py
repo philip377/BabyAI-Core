@@ -135,3 +135,51 @@ def test_native_stream_accepts_normalized_answer_before_quarantined_reasoning_ta
     assert "Okay" not in streamed
     assert "figure out" not in streamed
     assert "Let me start" not in streamed
+
+
+def test_native_stream_accepts_valid_answer_after_leading_think_block(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """An adopted Qwen3 GGUF may still emit a leading thinking block.
+
+    The resident provider owns the out-of-band visible nonce, while the native
+    normalizer owns removal of a complete leading think block.  The progressive
+    gate must apply the same hidden-prefix boundary before it compares the raw
+    stream with that normalized canonical answer.
+    """
+
+    provider = ResidentNativeBrainProvider(
+        model_path=Path("adopted-qwen3.gguf"),
+        runtime_path=Path("babyai_native.dll"),
+    )
+    monkeypatch.setattr(ResidentNativeBrainProvider, "_ensure_model", lambda self: object())
+
+    answer = "Привет! У меня всё хорошо. Чем могу помочь?"
+    raw = "<think>We need answer the greeting in Russian.</think>\n\n" + answer
+
+    def fake_generate(model, native_prompt: str, **kwargs) -> NativeGenerationResult:
+        sink = kwargs["on_candidate"]
+        for index in range(0, len(raw), 7):
+            sink(raw[index : index + 7])
+        return NativeGenerationResult(
+            text=raw,
+            generated_tokens=24,
+            output_bytes=len(raw.encode("utf-8")),
+            stop_reason="eog",
+        )
+
+    monkeypatch.setattr("babyai.resident_native_brain.generate_greedy", fake_generate)
+    primus = Primus(
+        llm=provider,
+        memory=SQLiteMemoryStore(tmp_path / "memory.sqlite3"),
+        identity=Identity(),
+    )
+    visible_deltas: list[str] = []
+
+    result = primus.think_stream("привет, как дела?", visible_deltas.append)
+
+    assert result.reply == answer
+    assert "".join(visible_deltas) == answer
+    assert "<think>" not in "".join(visible_deltas)
+    assert "We need" not in "".join(visible_deltas)

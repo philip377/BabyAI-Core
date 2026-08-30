@@ -143,8 +143,18 @@ class VisibleTextGate:
             if not prefix.startswith(self._marker):
                 self._blocked = True
                 return ""
+            # Resident native owns the nonce and prefixes it out-of-band before
+            # any model token.  A previously adopted thinking-model GGUF can then
+            # start its otherwise valid answer with <think>...</think>.  Apply the
+            # same leading-hidden-block boundary on the model side of the nonce;
+            # do not open the visible channel until actual answer text follows.
+            # Incomplete tags remain buffered, and malformed/non-leading protocol
+            # text still reaches _candidate() and fails closed as before.
+            visible = self._after_hidden_prefix(prefix[len(self._marker) :])
+            if visible is None or not visible:
+                return ""
             self._opened = True
-            self._visible = prefix[len(self._marker) :].lstrip()
+            self._visible = visible
         else:
             self._visible += chunk
 
