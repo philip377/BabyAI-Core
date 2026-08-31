@@ -14,13 +14,16 @@ def _sources() -> tuple[str, str, str, str]:
 
 def test_stt_is_replaceable_and_local_first() -> None:
     project, stt, _, workflow = _sources()
-    assert '<PackageReference Include="Vosk" Version="0.3.38" />' in project
+    assert '<PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />' in project
     assert "interface ISpeechToTextProvider" in stt
-    assert "class VoskSpeechToTextProvider" in stt
-    assert 'Name => "vosk-local"' in stt
+    assert "class SherpaOnnxWhisperSpeechToTextProvider" in stt
+    assert 'Name => "sherpa-onnx-whisper-tiny"' in stt
     assert "BABYAI_STT_MODEL_DIR" in stt
-    assert "vosk-model-small-ru-0.22" in stt
-    assert "alphacephei.com/vosk/models" in workflow
+    assert "sherpa-onnx-whisper-tiny" in stt
+    assert "tiny-encoder.int8.onnx" in stt
+    assert "tiny-decoder.int8.onnx" in stt
+    assert 'config.ModelConfig.Whisper.Language = "ru"' in stt
+    assert "github.com/k2-fsa/sherpa-onnx/releases/download/asr-models" in workflow
     assert "BABYAI_STT_MODEL_SHA256" in workflow
 
 
@@ -47,7 +50,9 @@ def test_stt_output_reuses_normal_chat_send_path() -> None:
 def test_stt_failure_is_visible_and_does_not_fake_a_transcript() -> None:
     _, stt, voice, _ = _sources()
     assert "DirectoryNotFoundException" in stt
+    assert "FileNotFoundException" in stt
     assert "Локальная STT-модель не найдена" in stt
+    assert "Локальная STT-модель неполная" in stt
     assert 'CoreStatusText.Text = "Core: STT недоступен"' in voice
     assert "Не удалось разобрать фразу" in voice
     assert "StartupDiagnostics.Log(\"Local STT unavailable\"" in voice
@@ -59,6 +64,11 @@ def test_release_bundle_contains_pinned_stt_model() -> None:
         encoding="utf-8"
     )
     _, _, _, workflow = _sources()
-    assert "961d5ff98a17f4aa6de69864d0aa71fa5bac682301d2b5d17a3f24c5c99a46d4" in workflow
-    assert "app/stt/vosk-model-small-ru-0.22/am/final.mdl" in verify
-    assert "libvosk.dll" in verify
+    assert "c46116994e539aa165266d96b325252728429c12535eb9d8b6a2b10f129e66b1" in workflow
+    assert 'BABYAI_STT_MODEL_SIZE: "116204861"' in workflow
+    assert "tar.exe -xjf" in workflow
+    assert "app/stt/sherpa-onnx-whisper-tiny/tiny-encoder.int8.onnx" in verify
+    assert "app/stt/sherpa-onnx-whisper-tiny/tiny-decoder.int8.onnx" in verify
+    assert "app/stt/sherpa-onnx-whisper-tiny/tiny-tokens.txt" in verify
+    assert "sherpa-onnx-c-api.dll" in verify
+    assert "onnxruntime.dll" in verify

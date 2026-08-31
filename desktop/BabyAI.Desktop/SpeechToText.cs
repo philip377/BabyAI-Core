@@ -1,6 +1,5 @@
-using System.Text;
-using System.Text.Json;
-using Vosk;
+using System.Buffers.Binary;
+using SherpaOnnx;
 
 namespace BabyAI.Desktop;
 
@@ -16,7 +15,7 @@ internal interface ISpeechToTextProvider : IDisposable
 
 internal static class SpeechToTextProviderFactory
 {
-    internal const string DefaultModelName = "vosk-model-small-ru-0.22";
+    internal const string DefaultModelName = "sherpa-onnx-whisper-tiny";
 
     public static ISpeechToTextProvider CreateDefault()
     {
@@ -25,17 +24,21 @@ internal static class SpeechToTextProviderFactory
             ? Path.Combine(AppContext.BaseDirectory, "stt", DefaultModelName)
             : Path.GetFullPath(Environment.ExpandEnvironmentVariables(configured.Trim()));
 
-        return new VoskSpeechToTextProvider(modelPath);
+        return new SherpaOnnxWhisperSpeechToTextProvider(modelPath);
     }
 }
 
-internal sealed class VoskSpeechToTextProvider : ISpeechToTextProvider
+internal sealed class SherpaOnnxWhisperSpeechToTextProvider : ISpeechToTextProvider
 {
-    private readonly object _modelSync = new();
-    private Model? _model;
+    private const string EncoderFileName = "tiny-encoder.int8.onnx";
+    private const string DecoderFileName = "tiny-decoder.int8.onnx";
+    private const string TokensFileName = "tiny-tokens.txt";
+
+    private readonly object _recognizerSync = new();
+    private OfflineRecognizer? _recognizer;
     private bool _disposed;
 
-    public VoskSpeechToTextProvider(string modelPath)
+    public SherpaOnnxWhisperSpeechToTextProvider(string modelPath)
     {
         if (string.IsNullOrWhiteSpace(modelPath))
             throw new ArgumentException("STT model path is required.", nameof(modelPath));
@@ -46,11 +49,21 @@ internal sealed class VoskSpeechToTextProvider : ISpeechToTextProvider
                 "Переустановите актуальную сборку BabyAI или задайте BABYAI_STT_MODEL_DIR.");
         }
 
-        global::Vosk.Vosk.SetLogLevel(-1);
+        foreach (var fileName in new[] { EncoderFileName, DecoderFileName, TokensFileName })
+        {
+            var path = Path.Combine(modelPath, fileName);
+            if (!File.Exists(path))
+            {
+                throw new FileNotFoundException(
+                    $"Локальная STT-модель неполная: отсутствует {fileName}.",
+                    path);
+            }
+        }
+
         ModelPath = modelPath;
     }
 
-    public string Name => "vosk-local";
+    public string Name => "sherpa-onnx-whisper-tiny";
 
     internal string ModelPath { get; }
 
@@ -74,53 +87,54 @@ internal sealed class VoskSpeechToTextProvider : ISpeechToTextProvider
     private string TranscribeCore(byte[] audio, int sampleRate, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var model = GetOrCreateModel();
-        using var recognizer = new VoskRecognizer(model, sampleRate);
-        recognizer.SetMaxAlternatives(0);
-        recognizer.SetWords(false);
+        var samples = ConvertPcm16ToFloat(audio);
+        if (samples.Length == 0)
+            return string.Empty;
 
-        var text = new StringBuilder();
-        const int chunkSize = 4_096;
-        for (var offset = 0; offset < audio.Length; offset += chunkSize)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var count = Math.Min(chunkSize, audio.Length - offset);
-            var chunk = new byte[count];
-            Buffer.BlockCopy(audio, offset, chunk, 0, count);
-            if (recognizer.AcceptWaveform(chunk, count))
-                AppendResultText(text, recognizer.Result());
-        }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        AppendResultText(text, recognizer.FinalResult());
-        return NormalizeTranscript(text.ToString());
-    }
-
-    private Model GetOrCreateModel()
-    {
-        lock (_modelSync)
+        lock (_recognizerSync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return _model ??= new Model(ModelPath);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var recognizer = _recognizer ??= CreateRecognizer();
+            using var stream = recognizer.CreateStream();
+            stream.AcceptWaveform(sampleRate, samples);
+
+            cancellationToken.ThrowIfCancellationRequested();
+            recognizer.Decode(stream);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            return NormalizeTranscript(stream.Result.Text);
         }
     }
 
-    private static void AppendResultText(StringBuilder target, string json)
+    private OfflineRecognizer CreateRecognizer()
     {
-        if (string.IsNullOrWhiteSpace(json))
-            return;
+        var config = new OfflineRecognizerConfig();
+        config.FeatConfig.SampleRate = 16_000;
+        config.FeatConfig.FeatureDim = 80;
+        config.ModelConfig.Tokens = Path.Combine(ModelPath, TokensFileName);
+        config.ModelConfig.NumThreads = 2;
+        config.ModelConfig.Debug = 0;
+        config.ModelConfig.Provider = "cpu";
+        config.ModelConfig.Whisper.Encoder = Path.Combine(ModelPath, EncoderFileName);
+        config.ModelConfig.Whisper.Decoder = Path.Combine(ModelPath, DecoderFileName);
+        config.ModelConfig.Whisper.Language = "ru";
+        config.ModelConfig.Whisper.Task = "transcribe";
+        config.DecodingMethod = "greedy_search";
+        return new OfflineRecognizer(config);
+    }
 
-        using var document = JsonDocument.Parse(json);
-        if (!document.RootElement.TryGetProperty("text", out var textElement))
-            return;
-
-        var text = textElement.GetString()?.Trim();
-        if (string.IsNullOrWhiteSpace(text))
-            return;
-
-        if (target.Length > 0)
-            target.Append(' ');
-        target.Append(text);
+    private static float[] ConvertPcm16ToFloat(byte[] audio)
+    {
+        var sampleCount = audio.Length / sizeof(short);
+        var samples = new float[sampleCount];
+        for (var i = 0; i < sampleCount; i++)
+        {
+            var value = BinaryPrimitives.ReadInt16LittleEndian(audio.AsSpan(i * sizeof(short), sizeof(short)));
+            samples[i] = value / 32768f;
+        }
+        return samples;
     }
 
     private static string NormalizeTranscript(string text)
@@ -132,13 +146,13 @@ internal sealed class VoskSpeechToTextProvider : ISpeechToTextProvider
 
     public void Dispose()
     {
-        lock (_modelSync)
+        lock (_recognizerSync)
         {
             if (_disposed)
                 return;
             _disposed = true;
-            _model?.Dispose();
-            _model = null;
+            _recognizer?.Dispose();
+            _recognizer = null;
         }
     }
 }

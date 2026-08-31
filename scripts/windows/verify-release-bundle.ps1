@@ -34,8 +34,9 @@ try {
         "app/App.xbf",
         "app/MainWindow.xbf",
         "app/BabyAI.Desktop.pri",
-        "app/stt/vosk-model-small-ru-0.22/am/final.mdl",
-        "app/stt/vosk-model-small-ru-0.22/conf/model.conf",
+        "app/stt/sherpa-onnx-whisper-tiny/tiny-encoder.int8.onnx",
+        "app/stt/sherpa-onnx-whisper-tiny/tiny-decoder.int8.onnx",
+        "app/stt/sherpa-onnx-whisper-tiny/tiny-tokens.txt",
         "runtime/cpu/babyai_native.dll",
         "runtime/cpu-avx/babyai_native.dll",
         "runtime/cpu-avx2/babyai_native.dll",
@@ -46,9 +47,11 @@ try {
         }
     }
 
-    $voskNative = Get-ChildItem (Join-Path $root "app") -Filter "libvosk.dll" -File -Recurse | Select-Object -First 1
-    if (-not $voskNative) {
-        throw "Release bundle is missing the Vosk native runtime."
+    foreach ($nativeName in @("sherpa-onnx-c-api.dll", "onnxruntime.dll")) {
+        $native = Get-ChildItem (Join-Path $root "app") -Filter $nativeName -File -Recurse | Select-Object -First 1
+        if (-not $native) {
+            throw "Release bundle is missing the sherpa-onnx native runtime dependency: $nativeName"
+        }
     }
 
     $manifest = Get-Content (Join-Path $root "release.json") -Raw | ConvertFrom-Json
@@ -104,16 +107,20 @@ try {
         "runtime\cpu-avx\babyai_native.dll",
         "runtime\cpu-avx2\babyai_native.dll",
         "runtime\vulkan\babyai_native.dll",
-        "app\stt\vosk-model-small-ru-0.22\am\final.mdl"
+        "app\stt\sherpa-onnx-whisper-tiny\tiny-encoder.int8.onnx",
+        "app\stt\sherpa-onnx-whisper-tiny\tiny-decoder.int8.onnx",
+        "app\stt\sherpa-onnx-whisper-tiny\tiny-tokens.txt"
     )) {
         if (-not (Test-Path (Join-Path $installed $required) -PathType Leaf)) {
             throw "Installed release is missing $required"
         }
     }
 
-    $installedVosk = Get-ChildItem (Join-Path $installed "app") -Filter "libvosk.dll" -File -Recurse | Select-Object -First 1
-    if (-not $installedVosk) {
-        throw "Installed release is missing the Vosk native runtime."
+    foreach ($nativeName in @("sherpa-onnx-c-api.dll", "onnxruntime.dll")) {
+        $native = Get-ChildItem (Join-Path $installed "app") -Filter $nativeName -File -Recurse | Select-Object -First 1
+        if (-not $native) {
+            throw "Installed release is missing the sherpa-onnx native runtime dependency: $nativeName"
+        }
     }
 
     $embeddedPython = Join-Path $installed "python\python.exe"
@@ -132,7 +139,7 @@ try {
     Write-Host "Self-contained Python: $([bool]$manifest.python_included)"
     Write-Host "Production model manifest: $([string]$model.display_name)"
     Write-Host "CPU runtime tiers verified: portable, AVX, AVX2"
-    Write-Host "Local STT verified: Vosk + vosk-model-small-ru-0.22"
+    Write-Host "Local STT verified: sherpa-onnx + multilingual Whisper Tiny int8"
 }
 finally {
     if (Test-Path $workRoot) {
