@@ -252,7 +252,7 @@ jobs:
           $bundle = "dist-release/BabyAI-$env:BABYAI_RELEASE_VERSION-windows-x64"
           $output = "dist-release/BabyAI-Setup-$env:BABYAI_RELEASE_VERSION.exe"
           .\scripts\windows\build-single-exe-installer.ps1 `
-            -SetupExe installer-publish/BabyAI.Setup.exe `
+            -SetupExe installer-publish/BabyAI-Setup.exe `
             -BundleDir $bundle `
             -SfxModule $env:BABYAI_INSTALLER_SFX `
             -OutputExe $output
