@@ -149,7 +149,7 @@ def vk_api_call(method: str, params: dict[str, Any], token: str) -> Any:
         data=urllib.parse.urlencode(request_params).encode("utf-8"),
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "BabyAI-Core-VK-Publisher/1.2",
+            "User-Agent": "BabyAI-Core-VK-Publisher/1.3",
         },
         method="POST",
     )
@@ -179,7 +179,10 @@ def vk_api_call(method: str, params: dict[str, Any], token: str) -> Any:
     return result["response"]
 
 
-def _build_multipart_image(path: Path) -> tuple[bytes, str]:
+def _build_multipart_image(path: Path, field_name: str = "photo") -> tuple[bytes, str]:
+    if field_name not in {"photo", "file"}:
+        raise VkPublishError(f"Unsupported VK multipart field: {field_name}")
+
     boundary = f"----BabyAIVK{uuid.uuid4().hex}"
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
     safe_filename = path.name.replace('"', "_").replace("\r", "_").replace("\n", "_")
@@ -188,7 +191,7 @@ def _build_multipart_image(path: Path) -> tuple[bytes, str]:
     body = b"".join(
         [
             f"--{boundary}\r\n".encode("ascii"),
-            f'Content-Disposition: form-data; name="photo"; filename="{safe_filename}"\r\n'.encode("utf-8"),
+            f'Content-Disposition: form-data; name="{field_name}"; filename="{safe_filename}"\r\n'.encode("utf-8"),
             f"Content-Type: {content_type}\r\n\r\n".encode("ascii"),
             file_bytes,
             b"\r\n",
@@ -198,14 +201,14 @@ def _build_multipart_image(path: Path) -> tuple[bytes, str]:
     return body, boundary
 
 
-def _upload_image_bytes(upload_url: str, path: Path) -> dict[str, Any]:
-    body, boundary = _build_multipart_image(path)
+def _upload_image_bytes(upload_url: str, path: Path, field_name: str = "photo") -> dict[str, Any]:
+    body, boundary = _build_multipart_image(path, field_name=field_name)
     request = urllib.request.Request(
         upload_url,
         data=body,
         headers={
             "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "User-Agent": "BabyAI-Core-VK-Publisher/1.2",
+            "User-Agent": "BabyAI-Core-VK-Publisher/1.3",
         },
         method="POST",
     )
@@ -225,6 +228,8 @@ def _upload_image_bytes(upload_url: str, path: Path) -> dict[str, Any]:
     for key in ("server", "photo", "hash"):
         if key not in result:
             raise VkPublishError(f"VK image upload response is missing '{key}'")
+    if not result.get("photo"):
+        raise VkPublishError("VK image upload returned an empty 'photo' value")
     return result
 
 
@@ -252,7 +257,7 @@ def upload_message_image(path: Path, token: str) -> str:
     except (KeyError, TypeError) as exc:
         raise VkPublishError(f"Unexpected VK messages upload-server response: {upload_server}") from exc
 
-    uploaded = _upload_image_bytes(upload_url, path)
+    uploaded = _upload_image_bytes(upload_url, path, field_name="file")
     saved = vk_api_call(
         "photos.saveMessagesPhoto",
         {
