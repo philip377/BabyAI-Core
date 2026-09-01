@@ -1,0 +1,93 @@
+name: VK Publish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "social/vk/outbox/*.post.json"
+  workflow_dispatch:
+    inputs:
+      post_file:
+        description: "Path to one social/vk/outbox/*.post.json file"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vk-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve post files
+        id: posts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            post_file="${{ inputs.post_file }}"
+            case "$post_file" in
+              social/vk/outbox/*.post.json) ;;
+              *)
+                echo "post_file must match social/vk/outbox/*.post.json" >&2
+                exit 1
+                ;;
+            esac
+            if [[ ! -f "$post_file" ]]; then
+              echo "Post file does not exist: $post_file" >&2
+              exit 1
+            fi
+            files="$post_file"
+          else
+            before="${{ github.event.before }}"
+            if [[ "$before" == "0000000000000000000000000000000000000000" ]]; then
+              files="$(git show --pretty='' --name-only --diff-filter=AM "$GITHUB_SHA" -- 'social/vk/outbox/*.post.json')"
+            else
+              files="$(git diff --name-only --diff-filter=AM "$before" "$GITHUB_SHA" -- 'social/vk/outbox/*.post.json')"
+            fi
+          fi
+
+          if [[ -z "$files" ]]; then
+            echo "No VK post files to publish."
+            exit 0
+          fi
+
+          {
+            echo 'files<<EOF'
+            echo "$files"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish to VK
+        if: steps.posts.outputs.files != ''
+        env:
+          VK_ACCESS_TOKEN: ${{ secrets.VK_ACCESS_TOKEN }}
+          VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${VK_ACCESS_TOKEN:-}" ]]; then
+            echo "VK_ACCESS_TOKEN repository secret is not configured." >&2
+            exit 1
+          fi
+          if [[ -z "${VK_GROUP_ID:-}" ]]; then
+            echo "VK_GROUP_ID repository secret is not configured." >&2
+            exit 1
+          fi
+
+          while IFS= read -r post_file; do
+            [[ -z "$post_file" ]] && continue
+            echo "Publishing $post_file"
+            python scripts/social/vk_publish.py "$post_file"
+          done <<< "${{ steps.posts.outputs.files }}"
