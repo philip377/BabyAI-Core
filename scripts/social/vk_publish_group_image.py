@@ -130,7 +130,7 @@ def _message_photo_with_peer(path: Path, token: str) -> str:
             f"Unexpected VK messages upload-server response: {upload_server}"
         ) from exc
 
-    uploaded = VK._upload_image_bytes(upload_url, path, field_name="file")
+    uploaded = VK._upload_image_bytes(upload_url, path, field_name="photo")
     saved = VK.vk_api_call(
         "photos.saveMessagesPhoto",
         {
