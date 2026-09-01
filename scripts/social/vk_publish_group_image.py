@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -10,6 +11,9 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import vk_publish as VK
+
+
+RECENT_INCOMING_WINDOW_SECONDS = 30 * 60
 
 
 def _explicit_peer_id() -> int | None:
@@ -45,7 +49,8 @@ def _discover_single_writable_user_peer(token: str) -> int:
     if not isinstance(items, list):
         raise VK.VkPublishError(f"Unexpected VK conversations response: {response}")
 
-    peers: list[int] = []
+    dialogs: list[tuple[int, dict[str, object]]] = []
+    seen_peers: set[int] = set()
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -59,20 +64,48 @@ def _discover_single_writable_user_peer(token: str) -> int:
         if isinstance(can_write, dict) and can_write.get("allowed") is False:
             continue
         peer_id = peer.get("id")
-        if isinstance(peer_id, int) and peer_id > 0 and peer_id not in peers:
-            peers.append(peer_id)
+        if isinstance(peer_id, int) and peer_id > 0 and peer_id not in seen_peers:
+            seen_peers.add(peer_id)
+            dialogs.append((peer_id, item))
 
-    if not peers:
+    if not dialogs:
         raise VK.VkPublishError(
             "No writable user dialog is available for VK image upload. "
             "Send the community a private message first."
         )
-    if len(peers) > 1:
+    if len(dialogs) == 1:
+        return dialogs[0][0]
+
+    now = int(time.time())
+    recent_incoming: list[int] = []
+    for peer_id, item in dialogs:
+        last_message = item.get("last_message")
+        if not isinstance(last_message, dict):
+            continue
+        from_id = last_message.get("from_id")
+        date = last_message.get("date")
+        out = last_message.get("out")
+        if from_id != peer_id or not isinstance(date, int):
+            continue
+        if isinstance(out, int) and out != 0:
+            continue
+        age = now - date
+        if 0 <= age <= RECENT_INCOMING_WINDOW_SECONDS:
+            recent_incoming.append(peer_id)
+
+    if len(recent_incoming) == 1:
+        return recent_incoming[0]
+
+    if recent_incoming:
         raise VK.VkPublishError(
-            "More than one writable user dialog is available. "
+            "More than one recently active writable user dialog is available. "
             "Set VK_IMAGE_PEER_ID explicitly to avoid choosing the wrong person."
         )
-    return peers[0]
+
+    raise VK.VkPublishError(
+        "More than one writable user dialog is available and none has a unique recent incoming message. "
+        "Send the community a new private message or set VK_IMAGE_PEER_ID explicitly."
+    )
 
 
 def _resolve_peer_id(token: str) -> int:

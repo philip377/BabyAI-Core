@@ -87,6 +87,38 @@ def test_peer_discovery_uses_only_writable_user_dialog(
     assert MODULE._resolve_peer_id("group-token") == 123
 
 
+def test_peer_discovery_uses_unique_recent_incoming_dialog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("VK_IMAGE_PEER_ID", raising=False)
+    monkeypatch.setattr(MODULE.time, "time", lambda: 2_000_000)
+    monkeypatch.setattr(
+        MODULE.VK,
+        "vk_api_call",
+        lambda *_args, **_kwargs: {
+            "count": 2,
+            "items": [
+                {
+                    "conversation": {
+                        "peer": {"id": 123, "type": "user"},
+                        "can_write": {"allowed": True},
+                    },
+                    "last_message": {"from_id": 123, "date": 1_990_000, "out": 0},
+                },
+                {
+                    "conversation": {
+                        "peer": {"id": 456, "type": "user"},
+                        "can_write": {"allowed": True},
+                    },
+                    "last_message": {"from_id": 456, "date": 1_999_940, "out": 0},
+                },
+            ],
+        },
+    )
+
+    assert MODULE._resolve_peer_id("group-token") == 456
+
+
 def test_peer_discovery_fails_when_no_writable_user_dialog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -101,10 +133,44 @@ def test_peer_discovery_fails_when_no_writable_user_dialog(
         MODULE._resolve_peer_id("group-token")
 
 
-def test_peer_discovery_fails_closed_when_multiple_user_dialogs(
+def test_peer_discovery_fails_closed_when_multiple_recent_dialogs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("VK_IMAGE_PEER_ID", raising=False)
+    monkeypatch.setattr(MODULE.time, "time", lambda: 2_000_000)
+    monkeypatch.setattr(
+        MODULE.VK,
+        "vk_api_call",
+        lambda *_args, **_kwargs: {
+            "count": 2,
+            "items": [
+                {
+                    "conversation": {
+                        "peer": {"id": 123, "type": "user"},
+                        "can_write": {"allowed": True},
+                    },
+                    "last_message": {"from_id": 123, "date": 1_999_900, "out": 0},
+                },
+                {
+                    "conversation": {
+                        "peer": {"id": 456, "type": "user"},
+                        "can_write": {"allowed": True},
+                    },
+                    "last_message": {"from_id": 456, "date": 1_999_940, "out": 0},
+                },
+            ],
+        },
+    )
+
+    with pytest.raises(MODULE.VK.VkPublishError, match="recently active"):
+        MODULE._resolve_peer_id("group-token")
+
+
+def test_peer_discovery_fails_closed_when_multiple_stale_dialogs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("VK_IMAGE_PEER_ID", raising=False)
+    monkeypatch.setattr(MODULE.time, "time", lambda: 2_000_000)
     monkeypatch.setattr(
         MODULE.VK,
         "vk_api_call",
@@ -127,7 +193,7 @@ def test_peer_discovery_fails_closed_when_multiple_user_dialogs(
         },
     )
 
-    with pytest.raises(MODULE.VK.VkPublishError, match="More than one"):
+    with pytest.raises(MODULE.VK.VkPublishError, match="none has a unique recent incoming message"):
         MODULE._resolve_peer_id("group-token")
 
 
