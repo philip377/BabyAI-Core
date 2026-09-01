@@ -91,29 +91,22 @@ jobs:
             [[ -z "$post_file" ]] && continue
             echo "Publishing $post_file"
 
-            has_images="$(python - "$post_file" <<'PY'
-import json
-import sys
-from pathlib import Path
+            has_images="$(python -c 'import json,sys; from pathlib import Path; p=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")); x=p.get("image_paths"); x=[x] if isinstance(x,str) else x; print("1" if isinstance(x,list) and any(isinstance(i,str) and i.strip() for i in x) else "0")' "$post_file")"
 
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-images = payload.get("image_paths")
-if isinstance(images, str):
-    images = [images]
-print("1" if isinstance(images, list) and any(isinstance(item, str) and item.strip() for item in images) else "0")
-PY
-)"
-
-            if [[ "$has_images" == "1" ]]; then
-              if [[ -z "${VK_IMAGE_ACCESS_TOKEN:-}" ]]; then
-                echo "VK_IMAGE_ACCESS_TOKEN repository secret is required for posts with image_paths." >&2
-                exit 1
-              fi
+            if [[ "$has_images" == "1" && -n "${VK_IMAGE_ACCESS_TOKEN:-}" ]]; then
+              echo "Using dedicated VK image token."
               export VK_ACCESS_TOKEN="$VK_IMAGE_ACCESS_TOKEN"
+              python scripts/social/vk_publish.py "$post_file"
+            elif [[ "$has_images" == "1" ]]; then
+              echo "Using bounded community-token image fallback."
+              export VK_ACCESS_TOKEN="$VK_GROUP_ACCESS_TOKEN"
+              export VK_IMAGE_PEER_ID="-${VK_GROUP_ID#-}"
+              python scripts/social/vk_publish_group_image.py "$post_file"
+              unset VK_IMAGE_PEER_ID
             else
               export VK_ACCESS_TOKEN="$VK_GROUP_ACCESS_TOKEN"
+              python scripts/social/vk_publish.py "$post_file"
             fi
 
-            python scripts/social/vk_publish.py "$post_file"
             unset VK_ACCESS_TOKEN
           done <<< "${{ steps.posts.outputs.files }}"
