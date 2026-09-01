@@ -136,6 +136,18 @@ def test_photo_attachment_includes_access_key() -> None:
     )
 
 
+def test_multipart_image_uses_requested_field(tmp_path: Path) -> None:
+    image = tmp_path / "orb.jpg"
+    image.write_bytes(b"jpg")
+
+    wall_body, _ = VK._build_multipart_image(image)
+    message_body, _ = VK._build_multipart_image(image, field_name="file")
+
+    assert b'name="photo"' in wall_body
+    assert b'name="file"' in message_body
+    assert b'name="photo"' not in message_body
+
+
 def test_group_auth_error_falls_back_to_messages_photo(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -143,6 +155,7 @@ def test_group_auth_error_falls_back_to_messages_photo(
     image = tmp_path / "orb.jpg"
     image.write_bytes(b"jpg")
     calls: list[tuple[str, dict[str, object]]] = []
+    upload_calls: list[tuple[str, Path, str]] = []
 
     def fake_api(method: str, params: dict[str, object], token: str) -> object:
         assert token == "group-token"
@@ -155,16 +168,16 @@ def test_group_auth_error_falls_back_to_messages_photo(
             return [{"owner_id": -42, "id": 99, "access_key": "key"}]
         raise AssertionError(method)
 
-    monkeypatch.setattr(VK, "vk_api_call", fake_api)
-    monkeypatch.setattr(
-        VK,
-        "_upload_image_bytes",
-        lambda upload_url, path: {
+    def fake_upload(upload_url: str, path: Path, field_name: str = "photo") -> dict[str, object]:
+        upload_calls.append((upload_url, path, field_name))
+        return {
             "server": 1,
             "photo": "photo-json",
             "hash": "hash",
-        },
-    )
+        }
+
+    monkeypatch.setattr(VK, "vk_api_call", fake_api)
+    monkeypatch.setattr(VK, "_upload_image_bytes", fake_upload)
 
     attachment = VK.upload_wall_image(image, "42", "group-token")
 
@@ -174,6 +187,7 @@ def test_group_auth_error_falls_back_to_messages_photo(
         "photos.getMessagesUploadServer",
         "photos.saveMessagesPhoto",
     ]
+    assert upload_calls == [("https://upload.example/messages", image, "file")]
 
 
 def test_non_group_auth_error_does_not_fallback(
