@@ -12,15 +12,78 @@ if str(SCRIPT_DIR) not in sys.path:
 import vk_publish as VK
 
 
-def _message_photo_with_peer(path: Path, token: str) -> str:
+def _explicit_peer_id() -> int | None:
     raw_peer_id = os.environ.get("VK_IMAGE_PEER_ID", "").strip()
     if not raw_peer_id:
-        raise VK.VkPublishError("VK_IMAGE_PEER_ID is required for the group-token image fallback")
+        return None
 
     try:
         peer_id = int(raw_peer_id)
     except ValueError as exc:
         raise VK.VkPublishError("VK_IMAGE_PEER_ID must be an integer") from exc
+
+    if peer_id <= 0:
+        raise VK.VkPublishError("VK_IMAGE_PEER_ID must identify a user and be greater than zero")
+    return peer_id
+
+
+def _discover_single_writable_user_peer(token: str) -> int:
+    response = VK.vk_api_call(
+        "messages.getConversations",
+        {
+            "count": 20,
+            "filter": "all",
+            "extended": 0,
+        },
+        token,
+    )
+
+    if not isinstance(response, dict):
+        raise VK.VkPublishError(f"Unexpected VK conversations response: {response}")
+
+    items = response.get("items")
+    if not isinstance(items, list):
+        raise VK.VkPublishError(f"Unexpected VK conversations response: {response}")
+
+    peers: list[int] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        conversation = item.get("conversation")
+        if not isinstance(conversation, dict):
+            continue
+        peer = conversation.get("peer")
+        if not isinstance(peer, dict) or peer.get("type") != "user":
+            continue
+        can_write = conversation.get("can_write")
+        if isinstance(can_write, dict) and can_write.get("allowed") is False:
+            continue
+        peer_id = peer.get("id")
+        if isinstance(peer_id, int) and peer_id > 0 and peer_id not in peers:
+            peers.append(peer_id)
+
+    if not peers:
+        raise VK.VkPublishError(
+            "No writable user dialog is available for VK image upload. "
+            "Send the community a private message first."
+        )
+    if len(peers) > 1:
+        raise VK.VkPublishError(
+            "More than one writable user dialog is available. "
+            "Set VK_IMAGE_PEER_ID explicitly to avoid choosing the wrong person."
+        )
+    return peers[0]
+
+
+def _resolve_peer_id(token: str) -> int:
+    explicit = _explicit_peer_id()
+    if explicit is not None:
+        return explicit
+    return _discover_single_writable_user_peer(token)
+
+
+def _message_photo_with_peer(path: Path, token: str) -> str:
+    peer_id = _resolve_peer_id(token)
 
     upload_server = VK.vk_api_call(
         "photos.getMessagesUploadServer",
