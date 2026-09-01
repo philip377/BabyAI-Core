@@ -1,0 +1,7 @@
+{
+  "message": "UNIX — локальный ИИ. Тестируем публикацию изображения через VK-мост с community token.",
+  "guid": "unix-vk-first-image-smoke-4",
+  "image_paths": [
+    "social/vk/assets/unix-avatar-smoke.jpg"
+  ]
+}
