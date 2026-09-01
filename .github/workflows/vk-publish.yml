@@ -73,6 +73,7 @@ jobs:
         env:
           VK_GROUP_ACCESS_TOKEN: ${{ secrets.VK_ACCESS_TOKEN }}
           VK_IMAGE_ACCESS_TOKEN: ${{ secrets.VK_IMAGE_ACCESS_TOKEN }}
+          VK_IMAGE_PEER_ID: ${{ secrets.VK_IMAGE_PEER_ID }}
           VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
         shell: bash
         run: |
@@ -100,9 +101,7 @@ jobs:
             elif [[ "$has_images" == "1" ]]; then
               echo "Using bounded community-token image fallback."
               export VK_ACCESS_TOKEN="$VK_GROUP_ACCESS_TOKEN"
-              export VK_IMAGE_PEER_ID="-${VK_GROUP_ID#-}"
               python scripts/social/vk_publish_group_image.py "$post_file"
-              unset VK_IMAGE_PEER_ID
             else
               export VK_ACCESS_TOKEN="$VK_GROUP_ACCESS_TOKEN"
               python scripts/social/vk_publish.py "$post_file"
