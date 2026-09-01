@@ -128,6 +128,72 @@ def test_build_params_posts_as_group() -> None:
     assert params["guid"] == "test-guid"
 
 
+def test_photo_attachment_includes_access_key() -> None:
+    assert VK._photo_attachment({"owner_id": -42, "id": 99}) == "photo-42_99"
+    assert (
+        VK._photo_attachment({"owner_id": -42, "id": 99, "access_key": "abc"})
+        == "photo-42_99_abc"
+    )
+
+
+def test_group_auth_error_falls_back_to_messages_photo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image = tmp_path / "orb.jpg"
+    image.write_bytes(b"jpg")
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_api(method: str, params: dict[str, object], token: str) -> object:
+        assert token == "group-token"
+        calls.append((method, params))
+        if method == "photos.getWallUploadServer":
+            raise VK.VkApiError(27, "Group authorization failed")
+        if method == "photos.getMessagesUploadServer":
+            return {"upload_url": "https://upload.example/messages"}
+        if method == "photos.saveMessagesPhoto":
+            return [{"owner_id": -42, "id": 99, "access_key": "key"}]
+        raise AssertionError(method)
+
+    monkeypatch.setattr(VK, "vk_api_call", fake_api)
+    monkeypatch.setattr(
+        VK,
+        "_upload_image_bytes",
+        lambda upload_url, path: {
+            "server": 1,
+            "photo": "photo-json",
+            "hash": "hash",
+        },
+    )
+
+    attachment = VK.upload_wall_image(image, "42", "group-token")
+
+    assert attachment == "photo-42_99_key"
+    assert [method for method, _params in calls] == [
+        "photos.getWallUploadServer",
+        "photos.getMessagesUploadServer",
+        "photos.saveMessagesPhoto",
+    ]
+
+
+def test_non_group_auth_error_does_not_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    image = tmp_path / "orb.jpg"
+    image.write_bytes(b"jpg")
+
+    def fake_api(method: str, params: dict[str, object], token: str) -> object:
+        raise VK.VkApiError(5, "Authorization failed")
+
+    monkeypatch.setattr(VK, "vk_api_call", fake_api)
+
+    with pytest.raises(VK.VkApiError) as exc:
+        VK.upload_wall_image(image, "42", "token")
+
+    assert exc.value.code == 5
+
+
 def test_prepare_attachments_adds_uploaded_images(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assets = tmp_path / "social" / "vk" / "assets"
     assets.mkdir(parents=True)

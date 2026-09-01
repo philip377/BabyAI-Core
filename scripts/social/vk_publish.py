@@ -25,6 +25,13 @@ class VkPublishError(RuntimeError):
     pass
 
 
+class VkApiError(VkPublishError):
+    def __init__(self, code: int | str, message: str):
+        self.code = code
+        self.api_message = message
+        super().__init__(f"VK API error {code}: {message}")
+
+
 def normalize_group_id(value: str | int) -> int:
     try:
         group_id = int(value)
@@ -142,7 +149,7 @@ def vk_api_call(method: str, params: dict[str, Any], token: str) -> Any:
         data=urllib.parse.urlencode(request_params).encode("utf-8"),
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "BabyAI-Core-VK-Publisher/1.1",
+            "User-Agent": "BabyAI-Core-VK-Publisher/1.2",
         },
         method="POST",
     )
@@ -159,9 +166,13 @@ def vk_api_call(method: str, params: dict[str, Any], token: str) -> Any:
 
     if "error" in result:
         error = result["error"]
-        code = error.get("error_code", "unknown")
-        message = error.get("error_msg", "Unknown VK API error")
-        raise VkPublishError(f"VK API error {code}: {message}")
+        code: int | str = error.get("error_code", "unknown")
+        try:
+            code = int(code)
+        except (TypeError, ValueError):
+            code = str(code)
+        message = str(error.get("error_msg", "Unknown VK API error"))
+        raise VkApiError(code, message)
 
     if "response" not in result:
         raise VkPublishError(f"Unexpected VK response: {result}")
@@ -194,7 +205,7 @@ def _upload_image_bytes(upload_url: str, path: Path) -> dict[str, Any]:
         data=body,
         headers={
             "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "User-Agent": "BabyAI-Core-VK-Publisher/1.1",
+            "User-Agent": "BabyAI-Core-VK-Publisher/1.2",
         },
         method="POST",
     )
@@ -217,15 +228,66 @@ def _upload_image_bytes(upload_url: str, path: Path) -> dict[str, Any]:
     return result
 
 
+def _photo_attachment(photo: Any) -> str:
+    if not isinstance(photo, dict):
+        raise VkPublishError(f"Unexpected VK saved-photo object: {photo}")
+
+    try:
+        photo_owner_id = int(photo["owner_id"])
+        photo_id = int(photo["id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise VkPublishError(f"Unexpected VK saved-photo object: {photo}") from exc
+
+    attachment = f"photo{photo_owner_id}_{photo_id}"
+    access_key = photo.get("access_key")
+    if access_key:
+        attachment = f"{attachment}_{access_key}"
+    return attachment
+
+
+def upload_message_image(path: Path, token: str) -> str:
+    upload_server = vk_api_call("photos.getMessagesUploadServer", {}, token)
+    try:
+        upload_url = str(upload_server["upload_url"])
+    except (KeyError, TypeError) as exc:
+        raise VkPublishError(f"Unexpected VK messages upload-server response: {upload_server}") from exc
+
+    uploaded = _upload_image_bytes(upload_url, path)
+    saved = vk_api_call(
+        "photos.saveMessagesPhoto",
+        {
+            "server": uploaded["server"],
+            "photo": uploaded["photo"],
+            "hash": uploaded["hash"],
+        },
+        token,
+    )
+    if not isinstance(saved, list) or not saved:
+        raise VkPublishError(f"Unexpected VK save-messages-photo response: {saved}")
+
+    return _photo_attachment(saved[0])
+
+
 def upload_wall_image(path: Path, group_id: str | int, token: str) -> str:
     owner_id = normalize_group_id(group_id)
     positive_group_id = abs(owner_id)
 
-    upload_server = vk_api_call(
-        "photos.getWallUploadServer",
-        {"group_id": positive_group_id},
-        token,
-    )
+    try:
+        upload_server = vk_api_call(
+            "photos.getWallUploadServer",
+            {"group_id": positive_group_id},
+            token,
+        )
+    except VkApiError as exc:
+        if exc.code != 27:
+            raise
+        print(
+            "VK group token cannot use photos.getWallUploadServer; "
+            "falling back to messages photo upload.",
+            file=sys.stderr,
+        )
+        return upload_message_image(path, token)
+
     try:
         upload_url = str(upload_server["upload_url"])
     except (KeyError, TypeError) as exc:
@@ -245,14 +307,7 @@ def upload_wall_image(path: Path, group_id: str | int, token: str) -> str:
     if not isinstance(saved, list) or not saved:
         raise VkPublishError(f"Unexpected VK save-photo response: {saved}")
 
-    photo = saved[0]
-    try:
-        photo_owner_id = int(photo["owner_id"])
-        photo_id = int(photo["id"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise VkPublishError(f"Unexpected VK saved-photo object: {photo}") from exc
-
-    return f"photo{photo_owner_id}_{photo_id}"
+    return _photo_attachment(saved[0])
 
 
 def prepare_attachments(
