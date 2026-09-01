@@ -91,18 +91,7 @@ jobs:
             [[ -z "$post_file" ]] && continue
             echo "Publishing $post_file"
 
-            has_images="$(python - "$post_file" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-images = payload.get("image_paths")
-if isinstance(images, str):
-    images = [images]
-print("1" if isinstance(images, list) and any(isinstance(item, str) and item.strip() for item in images) else "0")
-PY
-)"
+            has_images="$(python -c 'import json,sys; from pathlib import Path; p=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")); x=p.get("image_paths"); x=[x] if isinstance(x,str) else x; print("1" if isinstance(x,list) and any(isinstance(i,str) and i.strip() for i in x) else "0")' "$post_file")"
 
             if [[ "$has_images" == "1" && -n "${VK_IMAGE_ACCESS_TOKEN:-}" ]]; then
               echo "Using dedicated VK image token."
