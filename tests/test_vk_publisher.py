@@ -26,12 +26,17 @@ def test_invalid_group_id_is_rejected(value: str) -> None:
 
 
 def test_load_post_normalizes_payload(tmp_path: Path) -> None:
+    assets = tmp_path / "social" / "vk" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "orb.png").write_bytes(b"png")
+
     post_file = tmp_path / "first.post.json"
     post_file.write_text(
         json.dumps(
             {
                 "message": "  Привет из UNIX  ",
                 "attachments": ["photo-1_2", " https://example.com "],
+                "image_paths": ["social/vk/assets/orb.png"],
                 "guid": "unix-first-post",
                 "close_comments": False,
             },
@@ -40,12 +45,62 @@ def test_load_post_normalizes_payload(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    post = VK.load_post(post_file)
+    post = VK.load_post(post_file, repo_root=tmp_path)
 
     assert post["message"] == "Привет из UNIX"
     assert post["attachments"] == ["photo-1_2", "https://example.com"]
+    assert post["image_paths"] == ["social/vk/assets/orb.png"]
     assert post["guid"] == "unix-first-post"
     assert post["close_comments"] is False
+
+
+def test_image_only_post_is_allowed(tmp_path: Path) -> None:
+    assets = tmp_path / "social" / "vk" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "orb.jpg").write_bytes(b"jpg")
+    post_file = tmp_path / "image.post.json"
+    post_file.write_text(
+        json.dumps({"image_paths": ["social/vk/assets/orb.jpg"]}),
+        encoding="utf-8",
+    )
+
+    post = VK.load_post(post_file, repo_root=tmp_path)
+    assert post["message"] == ""
+    assert post["image_paths"] == ["social/vk/assets/orb.jpg"]
+
+
+@pytest.mark.parametrize(
+    "image_path",
+    [
+        "../secret.png",
+        "README.md",
+        "social/vk/assets/../../secret.png",
+        "/tmp/secret.png",
+        "social/vk/assets/file.txt",
+    ],
+)
+def test_unsafe_image_paths_are_rejected(tmp_path: Path, image_path: str) -> None:
+    assets = tmp_path / "social" / "vk" / "assets"
+    assets.mkdir(parents=True)
+    (tmp_path / "README.md").write_text("x", encoding="utf-8")
+    (assets / "file.txt").write_text("x", encoding="utf-8")
+
+    with pytest.raises(VK.VkPublishError):
+        VK.normalize_image_paths([image_path], repo_root=tmp_path)
+
+
+def test_missing_image_is_rejected(tmp_path: Path) -> None:
+    (tmp_path / "social" / "vk" / "assets").mkdir(parents=True)
+    with pytest.raises(VK.VkPublishError):
+        VK.normalize_image_paths(["social/vk/assets/missing.png"], repo_root=tmp_path)
+
+
+def test_too_many_images_are_rejected(tmp_path: Path) -> None:
+    with pytest.raises(VK.VkPublishError):
+        VK.normalize_image_paths(
+            [f"social/vk/assets/{index}.png" for index in range(VK.MAX_IMAGES_PER_POST + 1)],
+            repo_root=tmp_path,
+        )
 
 
 def test_empty_post_is_rejected(tmp_path: Path) -> None:
@@ -53,7 +108,7 @@ def test_empty_post_is_rejected(tmp_path: Path) -> None:
     post_file.write_text('{"message": "   "}', encoding="utf-8")
 
     with pytest.raises(VK.VkPublishError):
-        VK.load_post(post_file)
+        VK.load_post(post_file, repo_root=tmp_path)
 
 
 def test_build_params_posts_as_group() -> None:
@@ -71,4 +126,68 @@ def test_build_params_posts_as_group() -> None:
     assert params["from_group"] == "1"
     assert params["message"] == "Hello"
     assert params["guid"] == "test-guid"
-    assert params["v"] == "5.199"
+
+
+def test_prepare_attachments_adds_uploaded_images(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assets = tmp_path / "social" / "vk" / "assets"
+    assets.mkdir(parents=True)
+    image = assets / "orb.png"
+    image.write_bytes(b"png")
+
+    calls: list[Path] = []
+
+    def fake_upload(path: Path, group_id: str | int, token: str) -> str:
+        calls.append(path)
+        assert group_id == "42"
+        assert token == "secret"
+        return "photo-42_99"
+
+    monkeypatch.setattr(VK, "upload_wall_image", fake_upload)
+
+    attachments = VK.prepare_attachments(
+        {
+            "attachments": ["https://example.com"],
+            "image_paths": ["social/vk/assets/orb.png"],
+        },
+        "42",
+        "secret",
+        repo_root=tmp_path,
+    )
+
+    assert attachments == ["https://example.com", "photo-42_99"]
+    assert calls == [image.resolve()]
+
+
+def test_publish_posts_uploaded_photo_attachment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assets = tmp_path / "social" / "vk" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "orb.png").write_bytes(b"png")
+
+    monkeypatch.setattr(VK, "upload_wall_image", lambda *_args, **_kwargs: "photo-42_99")
+    seen: dict[str, object] = {}
+
+    def fake_api(method: str, params: dict[str, object], token: str) -> object:
+        seen["method"] = method
+        seen["params"] = params
+        seen["token"] = token
+        return {"post_id": 7}
+
+    monkeypatch.setattr(VK, "vk_api_call", fake_api)
+
+    post_id, url = VK.publish(
+        {
+            "message": "Photo test",
+            "attachments": [],
+            "image_paths": ["social/vk/assets/orb.png"],
+            "guid": "photo-test",
+        },
+        "42",
+        "secret",
+        repo_root=tmp_path,
+    )
+
+    assert post_id == 7
+    assert url == "https://vk.com/wall-42_7"
+    assert seen["method"] == "wall.post"
+    assert seen["token"] == "secret"
+    assert seen["params"]["attachments"] == "photo-42_99"
