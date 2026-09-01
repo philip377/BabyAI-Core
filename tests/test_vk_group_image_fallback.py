@@ -14,7 +14,7 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
-def test_message_fallback_uses_explicit_peer_id_and_file_field(
+def test_message_fallback_uses_explicit_peer_id_and_photo_field(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -46,7 +46,7 @@ def test_message_fallback_uses_explicit_peer_id_and_file_field(
     assert attachment == "photo-42_99_key"
     assert api_calls[0] == ("photos.getMessagesUploadServer", {"peer_id": 42})
     assert api_calls[1][0] == "photos.saveMessagesPhoto"
-    assert upload_calls == [("https://upload.example/messages", image, "file")]
+    assert upload_calls == [("https://upload.example/messages", image, "photo")]
 
 
 def test_peer_discovery_uses_only_writable_user_dialog(
