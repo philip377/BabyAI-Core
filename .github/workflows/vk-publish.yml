@@ -71,15 +71,13 @@ jobs:
       - name: Publish to VK
         if: steps.posts.outputs.files != ''
         env:
-          VK_GROUP_ACCESS_TOKEN: ${{ secrets.VK_ACCESS_TOKEN }}
-          VK_IMAGE_ACCESS_TOKEN: ${{ secrets.VK_IMAGE_ACCESS_TOKEN }}
-          VK_IMAGE_PEER_ID: ${{ secrets.VK_IMAGE_PEER_ID }}
+          VK_ACCESS_TOKEN: ${{ secrets.VK_ACCESS_TOKEN }}
           VK_GROUP_ID: ${{ secrets.VK_GROUP_ID }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ -z "${VK_GROUP_ACCESS_TOKEN:-}" ]]; then
+          if [[ -z "${VK_ACCESS_TOKEN:-}" ]]; then
             echo "VK_ACCESS_TOKEN repository secret is not configured." >&2
             exit 1
           fi
@@ -90,22 +88,16 @@ jobs:
 
           while IFS= read -r post_file; do
             [[ -z "$post_file" ]] && continue
-            echo "Publishing $post_file"
+            echo "Processing $post_file"
 
             has_images="$(python -c 'import json,sys; from pathlib import Path; p=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")); x=p.get("image_paths"); x=[x] if isinstance(x,str) else x; print("1" if isinstance(x,list) and any(isinstance(i,str) and i.strip() for i in x) else "0")' "$post_file")"
 
-            if [[ "$has_images" == "1" && -n "${VK_IMAGE_ACCESS_TOKEN:-}" ]]; then
-              echo "Using dedicated VK image token."
-              export VK_ACCESS_TOKEN="$VK_IMAGE_ACCESS_TOKEN"
-              python scripts/social/vk_publish.py "$post_file"
-            elif [[ "$has_images" == "1" ]]; then
-              echo "Using bounded community-token image fallback."
-              export VK_ACCESS_TOKEN="$VK_GROUP_ACCESS_TOKEN"
-              python scripts/social/vk_publish_group_image.py "$post_file"
-            else
-              export VK_ACCESS_TOKEN="$VK_GROUP_ACCESS_TOKEN"
-              python scripts/social/vk_publish.py "$post_file"
+            if [[ "$has_images" == "1" ]]; then
+              python scripts/social/vk_publish.py "$post_file" --dry-run
+              echo "Manual VK handoff: this post contains image_paths, so it was NOT published automatically."
+              echo "Attach the desired image(s) in VK and publish the post manually."
+              continue
             fi
 
-            unset VK_ACCESS_TOKEN
+            python scripts/social/vk_publish.py "$post_file"
           done <<< "${{ steps.posts.outputs.files }}"
