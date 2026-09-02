@@ -2,32 +2,28 @@
 
 This is a deliberately small publishing bridge for the UNIX / BabyAI Core development community.
 
-The bridge publishes text, already-uploaded VK/link attachments, and bounded local image files through the VK community wall API. Tokens stay in GitHub Actions repository secrets and are never stored in post payloads or source files.
+The active publishing model is intentionally simple:
+
+- text-only posts are published automatically with the VK community token;
+- posts that contain local images are prepared but **not** published automatically;
+- the owner attaches the image in VK and publishes that post manually.
+
+This keeps normal devlog automation working without depending on the currently unreliable VK community-token photo upload path.
 
 ## One-time repository setup
 
 Create these GitHub Actions repository secrets:
 
-- `VK_ACCESS_TOKEN` — the VK community access token used for normal text/community-wall publication.
-- `VK_GROUP_ID` — the numeric community ID. It may be entered with or without a leading minus sign; the publisher always normalizes it to a negative `owner_id` for a community wall.
-- `VK_IMAGE_ACCESS_TOKEN` — a user access token belonging to a VK user who can administer/publish to the target community. This token is used only for posts containing `image_paths`, because VK currently rejects `photos.getWallUploadServer` with community authorization even when the community token has photo permissions.
+- `VK_ACCESS_TOKEN` — the VK community access token used for text/community-wall publication.
+- `VK_GROUP_ID` — the numeric community ID. It may be entered with or without a leading minus sign; the publisher normalizes it to a negative `owner_id` for a community wall.
 
 GitHub path:
 
 `Repository -> Settings -> Secrets and variables -> Actions -> New repository secret`
 
-Never paste either access token into an issue, pull request, post JSON file, chat message, source file, or commit.
+Never paste the access token into an issue, pull request, post JSON file, chat message, source file, or commit.
 
-## Why image posts use a separate token
-
-As of 2026, VK accepts community authorization for `wall.post`, but `photos.getWallUploadServer` can return API error 27 (`method is unavailable with group auth`) for a community token even when `photos` permission is enabled. The wall-photo upload flow works with user authorization.
-
-The bridge therefore keeps the least-privilege split:
-
-- text-only post -> `VK_ACCESS_TOKEN` (community token)
-- post containing `image_paths` -> `VK_IMAGE_ACCESS_TOKEN` (user token)
-
-The image token is selected only inside the GitHub Actions runner and is never written into the repository or post JSON.
+`VK_IMAGE_ACCESS_TOKEN` and `VK_IMAGE_PEER_ID` are not required by the active workflow. Older image-upload experiments remain in repository history/code for possible future work, but they are not part of the current publishing path.
 
 The bridge targets VK API `5.199`.
 
@@ -39,7 +35,7 @@ A new file matching:
 
 on `main` triggers `.github/workflows/vk-publish.yml`.
 
-Text-only example:
+### Text-only post
 
 ```json
 {
@@ -48,43 +44,62 @@ Text-only example:
 }
 ```
 
+Text-only posts are published automatically with `VK_ACCESS_TOKEN`.
+
 The `guid` is passed to VK as an idempotency identifier. Reusing the same `guid` helps avoid duplicate publication if the same post is retried.
 
-## Local images
+### Post with an image
 
-Images for automatic upload must be committed under:
+Images may be kept under:
 
 `social/vk/assets/`
 
-Example post:
+Example:
 
 ```json
 {
-  "message": "UNIX devlog: теперь наш VK-мост умеет публиковать изображения.",
-  "guid": "unix-vk-image-test",
+  "message": "UNIX devlog: обновили локального ассистента и подготовили новый интерфейс.",
+  "guid": "unix-vk-ui-update",
   "image_paths": [
-    "social/vk/assets/unix-avatar.png"
+    "social/vk/assets/unix-ui-update.jpg"
   ]
 }
 ```
 
-For an image post, the workflow selects `VK_IMAGE_ACCESS_TOKEN`, then the publisher uses the normal VK wall-photo flow:
+When `image_paths` is present, GitHub Actions validates the post and image paths, then stops before any VK publication call. The run prints a clear `Manual VK handoff` message.
 
-1. `photos.getWallUploadServer`
-2. multipart upload to the returned upload URL
-3. `photos.saveWallPhoto`
-4. attach the returned `photo<owner_id>_<id>` to `wall.post`
+Manual flow:
 
-Image safety rules:
+1. take the prepared post text;
+2. open the UNIX community in VK;
+3. create a new post;
+4. paste the text;
+5. attach the desired image(s);
+6. publish manually.
 
-- paths must remain inside `social/vk/assets/`
-- absolute paths and `..` traversal are rejected
-- supported extensions: `.png`, `.jpg`, `.jpeg`, `.webp`
-- maximum 10 local images per post
-- referenced files must exist before the VK API call begins
-- if `image_paths` is present but `VK_IMAGE_ACCESS_TOKEN` is missing, the workflow fails closed before publication
+This ensures the text is not accidentally published before the image is attached.
 
-A post may contain only images, or combine images with text and existing `attachments`.
+Image validation rules are still kept:
+
+- paths must remain inside `social/vk/assets/`;
+- absolute paths and `..` traversal are rejected;
+- supported extensions: `.png`, `.jpg`, `.jpeg`, `.webp`;
+- maximum 10 local images per post;
+- referenced files must exist before the handoff is accepted.
+
+## Existing VK attachments
+
+A post can still use already-uploaded VK attachment identifiers or supported links through `attachments` without local `image_paths`:
+
+```json
+{
+  "message": "Текст поста",
+  "guid": "stable-unique-id",
+  "attachments": ["photo-123_456", "https://example.com"]
+}
+```
+
+Those are treated as a normal automatic post because no local image upload is needed.
 
 ## Other optional fields
 
@@ -92,29 +107,27 @@ A post may contain only images, or combine images with text and existing `attach
 {
   "message": "Текст поста",
   "guid": "stable-unique-id",
-  "attachments": ["photo-123_456", "https://example.com"],
-  "image_paths": ["social/vk/assets/unix-cover.jpg"],
   "publish_date": 1788296400,
   "close_comments": false,
   "signed": false
 }
 ```
 
-`publish_date` is a Unix timestamp. Existing VK attachment identifiers and supported external links can still be passed through `attachments`.
+`publish_date` is a Unix timestamp.
 
 ## Safety boundary
 
 - No VK token is committed to Git.
 - The workflow has read-only repository permissions.
-- Text posts continue to use the narrower community token.
-- The more sensitive user token is selected only for payloads that actually contain local images.
-- Only new/modified post files under the dedicated outbox path trigger automatic publication.
-- Local files are uploadable only from the bounded `social/vk/assets/` directory.
-- The publisher exits on validation, upload, or VK API errors instead of pretending that a post was published.
-- Successful runs print the resulting VK wall URL into the GitHub Actions log.
+- Text posts use the narrower community token.
+- Local-image posts fail over to manual publication instead of attempting unreliable token/photo workarounds.
+- Only new/modified post files under the dedicated outbox path trigger the workflow.
+- Local image paths remain bounded to `social/vk/assets/`.
+- The publisher exits on validation or VK API errors instead of pretending that a post was published.
+- Successful automatic runs print the resulting VK wall URL into the GitHub Actions log.
 
 ## Manual test
 
-The workflow also supports `workflow_dispatch` with a repository path to an existing `social/vk/outbox/*.post.json` file.
+The workflow supports `workflow_dispatch` with a repository path to an existing `social/vk/outbox/*.post.json` file.
 
-For the normal ChatGPT-assisted flow, the assistant can add an image asset plus a new immutable post file through the connected GitHub repository. The merge to `main` becomes the publication trigger, while both VK tokens remain private in repository secrets.
+For the normal ChatGPT-assisted flow, the assistant can prepare the post JSON and image asset in the connected GitHub repository. Text-only posts can go live automatically after merge. Image posts are handed to the owner for the final VK attachment and publish click.
