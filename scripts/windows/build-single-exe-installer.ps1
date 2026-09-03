@@ -63,4 +63,16 @@ try {
 if (-not (Test-Path $output -PathType Leaf)) { throw 'Single EXE installer was not produced.' }
 Write-Host "Single EXE installer: $output"
 Write-Host "Size: $([math]::Round((Get-Item $output).Length / 1MB, 1)) MB"
+
+# Diagnostic PR #154 only: the regular artifact also contains the full release ZIP,
+# which pushes the downloadable artifact above the connector's 512 MB limit.
+# The release bundle has already been verified before this script runs, so remove
+# only that redundant ZIP from this experimental PR artifact and keep the EXE + hash.
+if ($env:GITHUB_HEAD_REF -eq 'experiment/stt-tiny-base-ab') {
+    $outputDir = Split-Path $output -Parent
+    Get-ChildItem $outputDir -Filter 'BabyAI-*-windows-x64.zip*' -File -ErrorAction SilentlyContinue |
+        Remove-Item -Force
+    Write-Host 'Diagnostic STT A/B artifact trimmed to installer-only payload.'
+}
+
 Remove-Item $work -Recurse -Force
