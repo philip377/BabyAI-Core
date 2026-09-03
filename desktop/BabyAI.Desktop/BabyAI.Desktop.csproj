@@ -36,4 +36,13 @@
           DestinationFolder="$(PublishDir)"
           SkipUnchangedFiles="true" />
   </Target>
+
+  <!-- Diagnostic branch only: keep #134 untouched while the owner compares the
+       exact same in-memory PCM with Whisper Tiny and Base. Release publish gets
+       the Base int8 files automatically; normal build does not download models. -->
+  <Target Name="BundleExperimentalSttBaseAfterPublish"
+          AfterTargets="Publish"
+          Condition="'$(RuntimeIdentifier)' == 'win-x64' and '$(Configuration)' == 'Release'">
+    <Exec Command="pwsh -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\windows\prepare-stt-ab-base.ps1&quot; -PublishDir &quot;$(PublishDir)&quot;" />
+  </Target>
 </Project>

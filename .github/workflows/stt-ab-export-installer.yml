@@ -1,0 +1,46 @@
+name: STT A/B Installer Export
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/stt-ab-export-installer.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  export-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Download completed diagnostic release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: BabyAI-Windows-Release-x64
+          path: release-artifact
+          github-token: ${{ github.token }}
+          repository: philip377/BabyAI-Core
+          run-id: 33728008612
+
+      - name: Locate diagnostic installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release-artifact -Filter "BabyAI-Setup-*.exe" -File -Recurse | Select-Object -First 1
+          if (-not $installer) { throw "Diagnostic installer was not found in the completed release artifact." }
+          New-Item -ItemType Directory -Force export | Out-Null
+          Copy-Item $installer.FullName "export/UNIX-PR154-STT-Tiny-vs-Base-Setup.exe" -Force
+          $hash = (Get-FileHash "export/UNIX-PR154-STT-Tiny-vs-Base-Setup.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content "export/UNIX-PR154-STT-Tiny-vs-Base-Setup.exe.sha256" "$hash  UNIX-PR154-STT-Tiny-vs-Base-Setup.exe" -Encoding ASCII
+          Write-Host "Installer bytes: $((Get-Item 'export/UNIX-PR154-STT-Tiny-vs-Base-Setup.exe').Length)"
+          Write-Host "Installer SHA256: $hash"
+
+      - name: Upload installer only
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNIX-PR154-STT-Tiny-vs-Base-Setup
+          path: |
+            export/UNIX-PR154-STT-Tiny-vs-Base-Setup.exe
+            export/UNIX-PR154-STT-Tiny-vs-Base-Setup.exe.sha256
+          if-no-files-found: error
+          compression-level: 0
