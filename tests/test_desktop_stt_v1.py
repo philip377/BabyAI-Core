@@ -17,11 +17,9 @@ def test_stt_is_replaceable_and_local_first() -> None:
     assert '<PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />' in project
     assert "interface ISpeechToTextProvider" in stt
     assert "class SherpaOnnxWhisperSpeechToTextProvider" in stt
-    assert 'Name => "sherpa-onnx-whisper-tiny"' in stt
+    assert 'DefaultModelName = "sherpa-onnx-whisper-tiny"' in stt
     assert "BABYAI_STT_MODEL_DIR" in stt
-    assert "sherpa-onnx-whisper-tiny" in stt
-    assert "tiny-encoder.int8.onnx" in stt
-    assert "tiny-decoder.int8.onnx" in stt
+    assert 'modelPrefix: "tiny"' in stt
     assert 'config.ModelConfig.Whisper.Language = "ru"' in stt
     assert "github.com/k2-fsa/sherpa-onnx/releases/download/asr-models" in workflow
     assert "BABYAI_STT_MODEL_SHA256" in workflow
@@ -40,11 +38,43 @@ def test_detected_utterance_stays_in_memory_and_is_bounded() -> None:
 
 def test_stt_output_reuses_normal_chat_send_path() -> None:
     _, _, voice, _ = _sources()
-    assert 'ReplyText.Text = "Распознаю речь…"' in voice
-    assert "_speechToText.TranscribeAsync" in voice
+    assert 'ReplyText.Text = "Распознаю речь · Tiny → Base…"' in voice
+    assert "SpeechToTextAbComparison.RunAsync" in voice
+    assert "var transcript = comparison.Tiny.Transcript" in voice
     assert "MessageBox.Text = transcript" in voice
     assert "SendButton_Click(VoiceButton, new RoutedEventArgs())" in voice
-    assert "Keep voice and keyboard on exactly the same conversational path" in voice
+    assert "only the Tiny transcript is submitted through the normal Send handler" in voice
+
+
+def test_stt_ab_compares_the_same_pcm_without_persisting_transcripts() -> None:
+    project, stt, voice, _ = _sources()
+    helper = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "windows"
+        / "prepare-stt-ab-base.ps1"
+    ).read_text(encoding="utf-8")
+
+    assert 'ComparisonModelName = "sherpa-onnx-whisper-base"' in stt
+    assert "BABYAI_STT_AB_BASE_MODEL_DIR" in stt
+    assert "SpeechSignalMetrics.FromPcm16(pcm16Mono, sampleRate)" in stt
+    assert "tiny.TranscribeAsync(pcm16Mono, sampleRate, cancellationToken)" in stt
+    assert "@base.TranscribeAsync(pcm16Mono, sampleRate, cancellationToken)" in stt
+    assert "RmsDbfs" in stt
+    assert "PeakDbfs" in stt
+    assert "ClippingPercent" in stt
+    assert "transcripts_logged=false; persistence=none" in voice
+    assert "comparison.Tiny.Transcript" in voice
+    assert "comparison.Base.Transcript" in voice
+    assert "BundleExperimentalSttBaseAfterPublish" in project
+    assert "prepare-stt-ab-base.ps1" in project
+    assert 'modelName = "sherpa-onnx-whisper-base"' in helper
+    assert "207557382L" in helper
+    assert "base-encoder.int8.onnx" in helper
+    assert "base-decoder.int8.onnx" in helper
+    assert "base-tokens.txt" in helper
+    assert "File.WriteAllBytes" not in stt
+    assert "WaveFileWriter" not in stt
 
 
 def test_stt_failure_is_visible_and_does_not_fake_a_transcript() -> None:
@@ -54,11 +84,11 @@ def test_stt_failure_is_visible_and_does_not_fake_a_transcript() -> None:
     assert "Локальная STT-модель не найдена" in stt
     assert "Локальная STT-модель неполная" in stt
     assert 'CoreStatusText.Text = "Core: STT недоступен"' in voice
-    assert "Не удалось разобрать фразу" in voice
+    assert "Tiny не разобрал фразу" in voice
     assert "StartupDiagnostics.Log(\"Local STT unavailable\"" in voice
 
 
-def test_release_bundle_contains_pinned_stt_model() -> None:
+def test_release_bundle_contains_pinned_shipping_stt_model() -> None:
     root = Path(__file__).resolve().parents[1]
     verify = (root / "scripts" / "windows" / "verify-release-bundle.ps1").read_text(
         encoding="utf-8"
