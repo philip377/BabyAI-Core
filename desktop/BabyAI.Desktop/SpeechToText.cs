@@ -258,18 +258,37 @@ internal static class SpeechToTextAbComparison
         ISpeechToTextProvider @base,
         CancellationToken cancellationToken = default)
     {
-        var metrics = SpeechSignalMetrics.FromPcm16(pcm16Mono, sampleRate);
+        var comparison = await SpeechDenoiseAbComparison.RunAsync(
+            pcm16Mono,
+            sampleRate,
+            tiny,
+            @base,
+            cancellationToken);
 
-        var stopwatch = Stopwatch.StartNew();
-        var tinyTranscript = await tiny.TranscribeAsync(pcm16Mono, sampleRate, cancellationToken);
-        stopwatch.Stop();
-        var tinyMeasurement = new SpeechToTextMeasurement(tiny.Name, tinyTranscript, stopwatch.ElapsedMilliseconds);
+        static string FormatDbfs(double value)
+            => double.IsNegativeInfinity(value) ? "−∞" : value.ToString("0.0");
+        static string FormatSnr(double value)
+            => double.IsPositiveInfinity(value) ? "∞" : value.ToString("0.0");
+        static string Show(string value)
+            => string.IsNullOrWhiteSpace(value) ? "<пусто>" : value;
 
-        stopwatch.Restart();
-        var baseTranscript = await @base.TranscribeAsync(pcm16Mono, sampleRate, cancellationToken);
-        stopwatch.Stop();
-        var baseMeasurement = new SpeechToTextMeasurement(@base.Name, baseTranscript, stopwatch.ElapsedMilliseconds);
+        var baseDisplay =
+            $"Noise floor≈{FormatDbfs(comparison.NoiseSuppression.NoiseFloorDbfs)} dBFS · " +
+            $"SNR≈{FormatSnr(comparison.NoiseSuppression.EstimatedSnrDb)} dB · " +
+            $"WebRTC NS {comparison.NoiseSuppression.ProcessingMilliseconds} мс\n" +
+            $"RAW · {comparison.BaseRaw.DecodeMilliseconds} мс: {Show(comparison.BaseRaw.Transcript)}\n" +
+            $"CLEAN · {comparison.BaseClean.DecodeMilliseconds} мс: {Show(comparison.BaseClean.Transcript)}";
 
-        return new SpeechToTextAbResult(metrics, tinyMeasurement, baseMeasurement);
+        var baseMeasurement = new SpeechToTextMeasurement(
+            comparison.BaseRaw.ProviderName,
+            baseDisplay,
+            comparison.BaseRaw.DecodeMilliseconds +
+            comparison.NoiseSuppression.ProcessingMilliseconds +
+            comparison.BaseClean.DecodeMilliseconds);
+
+        return new SpeechToTextAbResult(
+            comparison.RawSignal,
+            comparison.TinyRaw,
+            baseMeasurement);
     }
 }
