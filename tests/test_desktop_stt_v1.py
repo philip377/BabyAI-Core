@@ -48,18 +48,16 @@ def test_stt_output_reuses_normal_chat_send_path() -> None:
 
 def test_stt_ab_compares_the_same_pcm_without_persisting_transcripts() -> None:
     project, stt, voice, _ = _sources()
-    helper = (
-        Path(__file__).resolve().parents[1]
-        / "scripts"
-        / "windows"
-        / "prepare-stt-ab-base.ps1"
-    ).read_text(encoding="utf-8")
+    root = Path(__file__).resolve().parents[1]
+    helper = (root / "scripts" / "windows" / "prepare-stt-ab-base.ps1").read_text(encoding="utf-8")
+    denoise = (root / "desktop" / "BabyAI.Desktop" / "SpeechNoiseSuppression.cs").read_text(encoding="utf-8")
 
     assert 'ComparisonModelName = "sherpa-onnx-whisper-base"' in stt
     assert "BABYAI_STT_AB_BASE_MODEL_DIR" in stt
-    assert "SpeechSignalMetrics.FromPcm16(pcm16Mono, sampleRate)" in stt
-    assert "tiny.TranscribeAsync(pcm16Mono, sampleRate, cancellationToken)" in stt
-    assert "@base.TranscribeAsync(pcm16Mono, sampleRate, cancellationToken)" in stt
+    assert "SpeechDenoiseAbComparison.RunAsync" in stt
+    assert "SpeechSignalMetrics.FromPcm16(pcm16Mono, sampleRate)" in denoise
+    assert "tiny.TranscribeAsync(pcm16Mono, sampleRate, cancellationToken)" in denoise
+    assert "@base.TranscribeAsync(pcm16Mono, sampleRate, cancellationToken)" in denoise
     assert "RmsDbfs" in stt
     assert "PeakDbfs" in stt
     assert "ClippingPercent" in stt
@@ -73,8 +71,8 @@ def test_stt_ab_compares_the_same_pcm_without_persisting_transcripts() -> None:
     assert "base-encoder.int8.onnx" in helper
     assert "base-decoder.int8.onnx" in helper
     assert "base-tokens.txt" in helper
-    assert "File.WriteAllBytes" not in stt
-    assert "WaveFileWriter" not in stt
+    assert "File.WriteAllBytes" not in stt + denoise
+    assert "WaveFileWriter" not in stt + denoise
 
 
 def test_stt_failure_is_visible_and_does_not_fake_a_transcript() -> None:
