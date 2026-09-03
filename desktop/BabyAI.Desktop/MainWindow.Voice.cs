@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using NAudio.Wave;
 
 namespace BabyAI.Desktop;
@@ -9,6 +10,7 @@ public sealed partial class MainWindow
 {
     private MicrophoneVadService? _voiceCapture;
     private ISpeechToTextProvider? _speechToText;
+    private ISpeechToTextProvider? _speechToTextBase;
     private CancellationTokenSource? _sttCancellation;
     private bool _voiceListening;
 
@@ -128,7 +130,7 @@ public sealed partial class MainWindow
 
         _sttCancellation?.Cancel();
         _sttCancellation?.Dispose();
-        var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(45));
         _sttCancellation = cancellation;
         var handedToChat = false;
 
@@ -136,34 +138,45 @@ public sealed partial class MainWindow
         {
             SetBusy(true);
             ApplyState(OrbState.Thinking);
-            CoreStatusText.Text = "Core: распознаю речь";
-            ReplyText.Text = "Распознаю речь…";
+            CoreStatusText.Text = "Core: сравниваю STT";
+            ReplyText.Text = "Распознаю речь · Tiny → Base…";
 
             _speechToText ??= SpeechToTextProviderFactory.CreateDefault();
-            var transcript = await _speechToText.TranscribeAsync(
+            _speechToTextBase ??= SpeechToTextProviderFactory.CreateBaseComparison();
+            var comparison = await SpeechToTextAbComparison.RunAsync(
                 utterance.Pcm16,
                 utterance.SampleRate,
+                _speechToText,
+                _speechToTextBase,
                 cancellation.Token);
+            var transcript = comparison.Tiny.Transcript;
+
+            StartupDiagnostics.Log(
+                $"STT A/B completed: audio_ms={comparison.Signal.DurationMilliseconds}; " +
+                $"rms_dbfs={comparison.Signal.RmsDbfs:0.0}; peak_dbfs={comparison.Signal.PeakDbfs:0.0}; " +
+                $"clipped_pct={comparison.Signal.ClippingPercent:0.000}; " +
+                $"tiny_ms={comparison.Tiny.DecodeMilliseconds}; base_ms={comparison.Base.DecodeMilliseconds}; " +
+                $"tiny_chars={comparison.Tiny.Transcript.Length}; base_chars={comparison.Base.Transcript.Length}; " +
+                "transcripts_logged=false; persistence=none");
+
+            await ShowSpeechToTextAbResultAsync(comparison);
 
             if (string.IsNullOrWhiteSpace(transcript))
             {
                 CoreStatusText.Text = "Core: подключён";
-                ReplyText.Text = "Не удалось разобрать фразу · попробуйте сказать ещё раз.";
+                ReplyText.Text = "Tiny не разобрал фразу · результат Base показан в A/B-окне.";
                 ApplyState(OrbState.Idle);
                 return;
             }
 
-            StartupDiagnostics.Log(
-                $"STT completed: provider={_speechToText.Name}; chars={transcript.Length}; audio_ms={utterance.DurationMilliseconds}; persistence=none");
-
             MessageBox.Text = transcript;
             CoreStatusText.Text = "Core: подключён";
-            ReplyText.Text = "Речь распознана · отправляю…";
+            ReplyText.Text = "A/B завершён · отправляю результат Tiny…";
             SetBusy(false);
 
             // Keep voice and keyboard on exactly the same conversational path.
-            // The recognized text is submitted through the normal Send handler,
-            // preserving history, Workspace, Agent Runtime and streaming behavior.
+            // The diagnostic build compares the same in-memory PCM with Base,
+            // but only the Tiny transcript is submitted through the normal Send handler.
             SendButton_Click(VoiceButton, new RoutedEventArgs());
             handedToChat = true;
         }
@@ -189,6 +202,36 @@ public sealed partial class MainWindow
                     MessageBox.Focus(FocusState.Programmatic);
             }
         }
+    }
+
+    private async Task ShowSpeechToTextAbResultAsync(SpeechToTextAbResult comparison)
+    {
+        static string FormatDbfs(double value)
+            => double.IsNegativeInfinity(value) ? "−∞" : value.ToString("0.0");
+
+        var details =
+            $"Один и тот же PCM, {comparison.Signal.DurationMilliseconds} мс\n" +
+            $"RMS: {FormatDbfs(comparison.Signal.RmsDbfs)} dBFS · " +
+            $"Peak: {FormatDbfs(comparison.Signal.PeakDbfs)} dBFS · " +
+            $"Clipping: {comparison.Signal.ClippingPercent:0.000}%\n\n" +
+            $"Tiny int8 · {comparison.Tiny.DecodeMilliseconds} мс\n" +
+            $"{(string.IsNullOrWhiteSpace(comparison.Tiny.Transcript) ? "<пусто>" : comparison.Tiny.Transcript)}\n\n" +
+            $"Base int8 · {comparison.Base.DecodeMilliseconds} мс\n" +
+            $"{(string.IsNullOrWhiteSpace(comparison.Base.Transcript) ? "<пусто>" : comparison.Base.Transcript)}";
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Root.XamlRoot,
+            Title = "STT A/B · Tiny vs Base",
+            CloseButtonText = "Продолжить",
+            Content = new TextBlock
+            {
+                Text = details,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth = 560,
+            },
+        };
+        await dialog.ShowAsync();
     }
 
     private void VoiceCapture_TimedOut(object? sender, EventArgs e)
