@@ -10,8 +10,8 @@ namespace BabyAI.Desktop;
 
 public sealed partial class MainWindow
 {
-    private const double NavigationExpandedWidth = 218;
-    private const double NavigationCollapsedWidth = 72;
+    private const int NavigationExpandedWidth = 218;
+    private const int NavigationCollapsedWidth = 72;
 
     private bool _applyingAdaptiveLayout;
     private bool _composerDraftingReady;
