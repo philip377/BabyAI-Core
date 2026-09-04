@@ -10,12 +10,16 @@ namespace BabyAI.Desktop;
 
 public sealed partial class MainWindow
 {
+    private const double NavigationExpandedWidth = 218;
+    private const double NavigationCollapsedWidth = 72;
+
     private bool _applyingAdaptiveLayout;
     private bool _composerDraftingReady;
     private bool _orbPresenceReady;
     private bool _statusPresentationReady;
     private TextBlock? _elapsedText;
     private StackPanel? _quickPromptLayer;
+    private bool _navigationExpanded = true;
 
     private void Panel_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -249,7 +253,11 @@ public sealed partial class MainWindow
             var work = displayArea.WorkArea;
             var outer = displayArea.OuterBounds;
 
-            var panelWidth = Math.Clamp(work.Width - 220, 340, 430);
+            var navigationWidth = _navigationExpanded
+                ? NavigationExpandedWidth
+                : NavigationCollapsedWidth;
+            var conversationWidth = Math.Clamp(work.Width - 220 - navigationWidth, 340, 430);
+            var panelWidth = conversationWidth + navigationWidth;
             var windowWidth = panelWidth + 154;
             var windowHeight = Math.Clamp(work.Height - 120, 460, 580);
             var panelHeight = windowHeight - 20;
@@ -274,6 +282,51 @@ public sealed partial class MainWindow
         {
             _applyingAdaptiveLayout = false;
         }
+    }
+
+    private void NavigationToggleButton_Click(object sender, RoutedEventArgs e)
+    {
+        _navigationExpanded = !_navigationExpanded;
+        UpdateNavigationPresentation();
+        if (_expanded)
+            ApplyAdaptiveExpandedLayout();
+    }
+
+    private void UpdateNavigationPresentation()
+    {
+        NavigationColumn.Width = new GridLength(
+            _navigationExpanded ? NavigationExpandedWidth : NavigationCollapsedWidth);
+
+        var labelVisibility = _navigationExpanded
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        NavigationBrandMark.Visibility = labelVisibility;
+        NavigationHeaderLabel.Visibility = labelVisibility;
+        NewChatLabel.Visibility = labelVisibility;
+        ProjectsSectionLabel.Visibility = labelVisibility;
+        ProjectNameText.Visibility = labelVisibility;
+        RecentsSectionLabel.Visibility = labelVisibility;
+        RecentNameText.Visibility = labelVisibility;
+        ProfileLabel.Visibility = labelVisibility;
+        SettingsNavigationLabel.Visibility = labelVisibility;
+        VoiceNavigationLabel.Visibility = labelVisibility;
+
+        NavigationToggleButton.Content = _navigationExpanded ? "‹" : "›";
+        var tooltip = _navigationExpanded ? "Свернуть навигацию" : "Развернуть навигацию";
+        ToolTipService.SetToolTip(NavigationToggleButton, tooltip);
+        AutomationProperties.SetName(NavigationToggleButton, tooltip);
+    }
+
+    private void NewChatButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+            return;
+
+        _conversation.Clear();
+        RenderConversation();
+        MessageBox.Text = string.Empty;
+        ReplyText.Text = "Новый чат готов.";
+        MessageBox.Focus(FocusState.Programmatic);
     }
 
     private async void DetailsButton_Click(object sender, RoutedEventArgs e)

@@ -582,9 +582,13 @@ public sealed partial class MainWindow : Window
     private async Task ExpandPanelAsync()
     {
         Panel.Visibility = Visibility.Visible;
-        Panel.Width = 360;
-        PanelColumn.Width = new GridLength(372);
-        AppWindow.Resize(new SizeInt32(514, 440));
+        var navigationWidth = _navigationExpanded
+            ? NavigationExpandedWidth
+            : NavigationCollapsedWidth;
+        var panelWidth = 360 + navigationWidth;
+        Panel.Width = panelWidth;
+        PanelColumn.Width = new GridLength(panelWidth + 12);
+        AppWindow.Resize(new SizeInt32((int)panelWidth + 154, 440));
         await AnimateOpacityAsync(Panel, 0, 1, 150);
     }
 
