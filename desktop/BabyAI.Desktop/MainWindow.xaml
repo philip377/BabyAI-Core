@@ -4,6 +4,31 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <Grid x:Name="Root" Loaded="Root_Loaded_WithToolApproval" Background="Transparent" Padding="10">
+        <Grid.Resources>
+            <Style x:Key="IconButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="#12FFFFFF" />
+                <Setter Property="BorderBrush" Value="#20FFFFFF" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Foreground" Value="#F6FFFFFF" />
+            </Style>
+            <Style x:Key="PrimaryCircleButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="#FFF2F4FF" />
+                <Setter Property="BorderBrush" Value="#55FFFFFF" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Foreground" Value="#FF11131A" />
+            </Style>
+            <Style x:Key="NavigationButtonStyle" TargetType="Button">
+                <Setter Property="MinHeight" Value="40" />
+                <Setter Property="Padding" Value="11,8" />
+                <Setter Property="CornerRadius" Value="11" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Foreground" Value="#E8FFFFFF" />
+            </Style>
+        </Grid.Resources>
+
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition x:Name="PanelColumn" Width="0" />
@@ -22,49 +47,40 @@
                 PointerReleased="OrbButton_PointerReleased"
                 Padding="0"
                 Background="Transparent"
-                BorderBrush="#32FFFFFF"
+                BorderBrush="#26FFFFFF"
                 BorderThickness="1">
             <Grid>
-                <Ellipse Width="110"
-                         Height="110"
-                         Stroke="#20FFFFFF"
-                         StrokeThickness="1" />
-                <Ellipse x:Name="OrbGlow"
-                         Width="104"
-                         Height="104"
-                         Opacity="0.28"
-                         Fill="#7C8DFF" />
+                <Ellipse Width="110" Height="110" Fill="#130B0D13" Stroke="#24FFFFFF" StrokeThickness="1" />
+                <Ellipse x:Name="OrbGlow" Width="106" Height="106" Opacity="0.34" Fill="#697CFF" />
+                <Ellipse Width="98" Height="98" Opacity="0.45">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush Center="0.5,0.5" RadiusX="0.6" RadiusY="0.6">
+                            <GradientStop Color="#557F8CFF" Offset="0" />
+                            <GradientStop Color="#006F74FF" Offset="1" />
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
                 <Ellipse x:Name="OrbCore"
-                         Width="88"
-                         Height="88"
-                         Opacity="0.96"
+                         Width="84"
+                         Height="84"
+                         Opacity="0.98"
                          RenderTransformOrigin="0.5,0.5">
                     <Ellipse.RenderTransform>
                         <ScaleTransform x:Name="OrbScale" ScaleX="1" ScaleY="1" />
                     </Ellipse.RenderTransform>
                     <Ellipse.Fill>
-                        <RadialGradientBrush Center="0.38,0.32" GradientOrigin="0.38,0.32" RadiusX="0.7" RadiusY="0.7">
-                            <GradientStop x:Name="CenterStop" Color="#FFF7F9FF" Offset="0" />
-                            <GradientStop x:Name="MidStop" Color="#FFB8C8FF" Offset="0.55" />
-                            <GradientStop x:Name="EdgeStop" Color="#FF6D7CFF" Offset="1" />
+                        <RadialGradientBrush Center="0.35,0.3" GradientOrigin="0.32,0.27" RadiusX="0.78" RadiusY="0.78">
+                            <GradientStop x:Name="CenterStop" Color="#FFFDFEFF" Offset="0" />
+                            <GradientStop x:Name="MidStop" Color="#FFC7D1FF" Offset="0.46" />
+                            <GradientStop x:Name="EdgeStop" Color="#FF6673FF" Offset="1" />
                         </RadialGradientBrush>
                     </Ellipse.Fill>
                 </Ellipse>
-                <Ellipse Width="66"
-                         Height="66"
-                         Margin="-12,-16,0,0"
-                         HorizontalAlignment="Center"
-                         VerticalAlignment="Center"
-                         Fill="#16FFFFFF" />
-                <Ellipse x:Name="OrbRing"
-                         Width="54"
-                         Height="54"
-                         StrokeThickness="2"
-                         Stroke="#BFFFFFFF"
-                         Opacity="0.9" />
+                <Ellipse Width="62" Height="42" Margin="-18,-24,0,0" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="#1FFFFFFF" />
+                <Ellipse x:Name="OrbRing" Width="54" Height="54" StrokeThickness="1.5" Stroke="#CFFFFFFF" Opacity="0.88" />
                 <TextBlock x:Name="StateGlyph"
                            Text="•"
-                           FontSize="32"
+                           FontSize="30"
                            FontWeight="SemiBold"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
@@ -76,10 +92,10 @@
                 Grid.Column="1"
                 Width="0"
                 Height="420"
-                Margin="12,0,0,0"
-                CornerRadius="26"
-                Background="#E0141720"
-                BorderBrush="#30FFFFFF"
+                Margin="6,0,0,0"
+                CornerRadius="28"
+                Background="#E60E1016"
+                BorderBrush="#2BFFFFFF"
                 BorderThickness="1"
                 Opacity="0"
                 Visibility="Collapsed"
@@ -90,253 +106,416 @@
                 </TransitionCollection>
             </Border.Transitions>
 
-            <Grid Padding="16" RowSpacing="10">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="NavigationColumn" Width="218" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
 
-                <Grid Grid.Row="0" ColumnSpacing="7">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
+                <Border CornerRadius="28" Opacity="0.35">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                            <GradientStop Color="#162B3350" Offset="0" />
+                            <GradientStop Color="#00131822" Offset="0.45" />
+                            <GradientStop Color="#161C1830" Offset="1" />
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
 
-                    <StackPanel Grid.Column="0" Spacing="2">
-                        <TextBlock x:Name="IdentityText"
-                                   Text="BabyAI"
-                                   FontSize="21"
-                                   FontWeight="SemiBold"
-                                   Foreground="#FFF8FAFF" />
-                        <TextBlock x:Name="TaskText"
-                                   Text="Нет активной задачи"
-                                   FontSize="11"
-                                   Foreground="#9FFFFFFF"
-                                   TextWrapping="Wrap"
-                                   MaxLines="1" />
-                    </StackPanel>
+                <Border Grid.Column="0"
+                        Margin="6"
+                        Padding="4,9"
+                        CornerRadius="21"
+                        Background="#6507080D"
+                        BorderBrush="#16FFFFFF"
+                        BorderThickness="1">
+                    <Grid RowSpacing="9">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
-                    <Border Grid.Column="1"
-                            VerticalAlignment="Top"
-                            CornerRadius="13"
-                            Padding="9,5"
-                            Background="#18FFFFFF"
-                            BorderBrush="#22FFFFFF"
-                            BorderThickness="1">
-                        <TextBlock x:Name="BrainText"
-                                   Text="Brain: checking…"
-                                   FontSize="10"
-                                   Foreground="#DFFFFFFF"
-                                   MaxWidth="128"
-                                   TextTrimming="CharacterEllipsis" />
-                    </Border>
+                        <Grid Grid.Row="0" Height="38" ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0"
+                                        Orientation="Horizontal"
+                                        Spacing="8"
+                                        VerticalAlignment="Center">
+                                <Border x:Name="NavigationBrandMark"
+                                        Width="26"
+                                        Height="26"
+                                        CornerRadius="9"
+                                        Background="#257C8DFF"
+                                        BorderBrush="#38A2AEFF"
+                                        BorderThickness="1">
+                                    <TextBlock Text="✦"
+                                               FontSize="12"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock x:Name="NavigationHeaderLabel"
+                                           Text="UNIX"
+                                           FontSize="16"
+                                           FontWeight="SemiBold"
+                                           CharacterSpacing="45"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <Button x:Name="NavigationToggleButton"
+                                    Grid.Column="1"
+                                    Width="34"
+                                    Height="34"
+                                    Padding="0"
+                                    CornerRadius="10"
+                                    Content="‹"
+                                    FontSize="19"
+                                    Style="{StaticResource IconButtonStyle}"
+                                    Click="NavigationToggleButton_Click"
+                                    AutomationProperties.Name="Свернуть навигацию"
+                                    ToolTipService.ToolTip="Свернуть навигацию" />
+                        </Grid>
 
-                    <Button x:Name="DetailsButton"
-                            Grid.Column="2"
-                            Width="28"
-                            Height="28"
-                            Padding="0"
-                            CornerRadius="14"
-                            Content="⋯"
-                            FontSize="17"
-                            VerticalAlignment="Top"
-                            Click="DetailsButton_Click"
-                            ToolTipService.ToolTip="Диагностика" />
+                        <Button x:Name="NewChatButton"
+                                Grid.Row="1"
+                                Style="{StaticResource NavigationButtonStyle}"
+                                Click="NewChatButton_Click"
+                                AutomationProperties.Name="Новый чат">
+                            <StackPanel Orientation="Horizontal" Spacing="11">
+                                <TextBlock Text="＋" FontSize="18" Width="24" TextAlignment="Center" />
+                                <TextBlock x:Name="NewChatLabel"
+                                           Text="Новый чат"
+                                           FontSize="13"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
 
-                    <Button Grid.Column="3"
-                            Width="28"
-                            Height="28"
-                            Padding="0"
-                            CornerRadius="14"
-                            Content="‹"
-                            FontSize="18"
-                            VerticalAlignment="Top"
-                            Click="OrbButton_Click"
-                            ToolTipService.ToolTip="Свернуть" />
-                </Grid>
+                        <ScrollViewer Grid.Row="2"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Spacing="5">
+                                <TextBlock x:Name="ProjectsSectionLabel"
+                                           Text="ПРОЕКТЫ"
+                                           Margin="11,10,0,3"
+                                           FontSize="9"
+                                           CharacterSpacing="110"
+                                           Foreground="#72FFFFFF" />
+                                <Button Style="{StaticResource NavigationButtonStyle}"
+                                        AutomationProperties.Name="Проект BabyAI Core">
+                                    <StackPanel Orientation="Horizontal" Spacing="11">
+                                        <TextBlock Text="◇" FontSize="17" Width="24" TextAlignment="Center" />
+                                        <TextBlock x:Name="ProjectNameText"
+                                                   Text="BabyAI Core"
+                                                   FontSize="12"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
 
-                <Border Grid.Row="1"
-                        Background="#12FFFFFF"
-                        BorderBrush="#18FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="12"
-                        Padding="10,7">
-                    <Grid ColumnSpacing="8">
+                                <TextBlock x:Name="RecentsSectionLabel"
+                                           Text="НЕДАВНИЕ"
+                                           Margin="11,13,0,3"
+                                           FontSize="9"
+                                           CharacterSpacing="110"
+                                           Foreground="#72FFFFFF" />
+                                <Button x:Name="CurrentChatButton"
+                                        Style="{StaticResource NavigationButtonStyle}"
+                                        Background="#16FFFFFF"
+                                        AutomationProperties.Name="Текущий диалог">
+                                    <StackPanel Orientation="Horizontal" Spacing="11">
+                                        <TextBlock Text="◷" FontSize="16" Width="24" TextAlignment="Center" />
+                                        <TextBlock x:Name="RecentNameText"
+                                                   Text="Текущий диалог"
+                                                   FontSize="12"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <StackPanel Grid.Row="3" Spacing="3">
+                            <Rectangle Height="1" Margin="7,1,7,5" Fill="#18FFFFFF" />
+                            <Button x:Name="ProfileButton"
+                                    Style="{StaticResource NavigationButtonStyle}"
+                                    AutomationProperties.Name="Локальный профиль">
+                                <StackPanel Orientation="Horizontal" Spacing="11">
+                                    <Border Width="24" Height="24" CornerRadius="12" Background="#287C8DFF">
+                                        <TextBlock Text="U" FontSize="10" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel x:Name="ProfileLabel" VerticalAlignment="Center">
+                                        <TextBlock Text="Локальный профиль" FontSize="12" />
+                                        <TextBlock Text="На этом устройстве" FontSize="9" Foreground="#72FFFFFF" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="SettingsNavigationButton"
+                                    Style="{StaticResource NavigationButtonStyle}"
+                                    Click="SettingsButton_Click"
+                                    AutomationProperties.Name="Настройки">
+                                <StackPanel Orientation="Horizontal" Spacing="11">
+                                    <TextBlock Text="⚙" FontFamily="Segoe UI Symbol" FontSize="15" Width="24" TextAlignment="Center" />
+                                    <TextBlock x:Name="SettingsNavigationLabel" Text="Настройки" FontSize="12" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="VoiceNavigationButton"
+                                    Style="{StaticResource NavigationButtonStyle}"
+                                    Click="VoiceButton_Click"
+                                    IsEnabled="{Binding IsEnabled, ElementName=SendButton}"
+                                    AutomationProperties.Name="Голос">
+                                <StackPanel Orientation="Horizontal" Spacing="11">
+                                    <TextBlock Text="🎙" FontFamily="Segoe UI Emoji" FontSize="14" Width="24" TextAlignment="Center" />
+                                    <TextBlock x:Name="VoiceNavigationLabel" Text="Голос" FontSize="12" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Column="1" Padding="17,16,17,15" RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Spacing="3">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <Ellipse Width="7" Height="7" Fill="#FF8F9CFF" VerticalAlignment="Center" />
+                                <TextBlock Text="UNIX"
+                                           FontSize="21"
+                                           FontWeight="SemiBold"
+                                           CharacterSpacing="35"
+                                           Foreground="#FFF7F8FC" />
+                                <TextBlock x:Name="IdentityText" Text="BabyAI" Visibility="Collapsed" />
+                            </StackPanel>
+                            <TextBlock x:Name="TaskText"
+                                       Text="Нет активной задачи"
+                                       FontSize="11"
+                                       Foreground="#8FFFFFFF"
+                                       TextWrapping="Wrap"
+                                       MaxLines="1" />
+                        </StackPanel>
+
+                        <Button x:Name="DetailsButton"
+                                Grid.Column="1"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                CornerRadius="15"
+                                Content="⋯"
+                                FontSize="17"
+                                Style="{StaticResource IconButtonStyle}"
+                                VerticalAlignment="Top"
+                                Click="DetailsButton_Click"
+                                ToolTipService.ToolTip="Диагностика" />
+
+                        <Button Grid.Column="2"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                CornerRadius="15"
+                                Content="‹"
+                                FontSize="18"
+                                Style="{StaticResource IconButtonStyle}"
+                                VerticalAlignment="Top"
+                                Click="OrbButton_Click"
+                                ToolTipService.ToolTip="Свернуть" />
+                    </Grid>
+
+                    <Grid Grid.Row="1" ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Grid x:Name="ReplyActivityIndicator"
-                              Grid.Column="0"
-                              Width="14"
-                              Height="14"
-                              Visibility="Collapsed"
-                              VerticalAlignment="Center">
-                            <Ellipse Width="12"
-                                     Height="12"
-                                     Stroke="#BFFFFFFF"
-                                     StrokeThickness="2" />
-                            <Ellipse Width="4"
-                                     Height="4"
-                                     Fill="#FFF8FAFF" />
-                        </Grid>
+
+                        <Border Grid.Column="0"
+                                CornerRadius="13"
+                                Padding="8,5"
+                                Background="#13FFFFFF">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Grid x:Name="ReplyActivityIndicator" Width="12" Height="12" Visibility="Collapsed" VerticalAlignment="Center">
+                                    <Ellipse Width="10" Height="10" Stroke="#9FFFFFFF" StrokeThickness="1.5" />
+                                    <Ellipse Width="3" Height="3" Fill="#FFF7F8FC" />
+                                </Grid>
+                                <Ellipse Width="6" Height="6" Fill="#FF78D59A" VerticalAlignment="Center" />
+                                <TextBlock x:Name="BrainText"
+                                           Text="Brain: checking…"
+                                           FontSize="10"
+                                           Foreground="#BDFFFFFF"
+                                           MaxWidth="118"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Border>
+
                         <TextBlock x:Name="ReplyText"
                                    Grid.Column="1"
                                    Text="Готов к разговору."
                                    TextWrapping="Wrap"
                                    FontSize="11"
-                                   Foreground="#AFFFFFFF"
+                                   Foreground="#93FFFFFF"
                                    VerticalAlignment="Center" />
+
                         <Button x:Name="RetryButton"
                                 Grid.Column="2"
                                 Content="Повторить"
-                                FontSize="11"
-                                Padding="10,4"
-                                CornerRadius="10"
+                                FontSize="10"
+                                Padding="10,5"
+                                CornerRadius="11"
+                                Style="{StaticResource IconButtonStyle}"
                                 Click="RetryButton_Click"
                                 Visibility="Collapsed" />
                     </Grid>
-                </Border>
 
-                <Border Grid.Row="2"
-                        Background="#0BFFFFFF"
-                        BorderBrush="#12FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="18"
-                        Padding="10,10,6,10">
-                    <ScrollViewer x:Name="ConversationScroller"
-                                  VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel x:Name="ConversationStack"
-                                    Padding="1,2,5,2"
-                                    Spacing="2" />
-                    </ScrollViewer>
-                </Border>
+                    <Border Grid.Row="2"
+                            Background="#08000000"
+                            CornerRadius="19"
+                            Padding="10,10,6,10">
+                        <ScrollViewer x:Name="ConversationScroller"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel x:Name="ConversationStack"
+                                        Padding="2,2,6,2"
+                                        Spacing="4" />
+                        </ScrollViewer>
+                    </Border>
 
-                <Border Grid.Row="3"
-                        Background="#16FFFFFF"
-                        BorderBrush="#24FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="18"
-                        Padding="10,7,7,7">
-                    <Grid ColumnSpacing="7">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-
-                        <TextBox x:Name="MessageBox"
-                                 Grid.Column="0"
-                                 PlaceholderText="Напиши BabyAI..."
-                                 AcceptsReturn="True"
-                                 MinHeight="44"
-                                 MaxHeight="88"
-                                 Padding="2,7"
-                                 TextWrapping="Wrap"
-                                 Background="Transparent"
-                                 BorderThickness="0"
-                                 Foreground="#FFF8FAFF"
-                                 KeyDown="MessageBox_KeyDown" />
-
-                        <Button x:Name="VoiceButton"
-                                Grid.Column="1"
-                                Width="42"
-                                Height="42"
-                                Padding="0"
-                                CornerRadius="21"
-                                Content="🎙"
-                                FontFamily="Segoe UI Emoji"
-                                FontSize="17"
-                                Click="VoiceButton_Click"
-                                IsEnabled="{Binding IsEnabled, ElementName=SendButton}"
-                                AutomationProperties.Name="Голосовой ввод"
-                                ToolTipService.ToolTip="Голос · проверить микрофон и VAD" />
-
-                        <Button x:Name="SendButton"
-                                Grid.Column="2"
-                                Width="42"
-                                Height="42"
-                                Padding="0"
-                                CornerRadius="21"
-                                Content="↑"
-                                FontSize="20"
-                                FontWeight="SemiBold"
-                                Click="SendButton_Click"
-                                ToolTipService.ToolTip="Отправить · Enter" />
-                        <Button x:Name="StopButton"
-                                Grid.Column="3"
-                                Width="42"
-                                Height="42"
-                                Padding="0"
-                                CornerRadius="21"
-                                Content="■"
-                                FontSize="13"
-                                Click="StopButton_Click"
-                                ToolTipService.ToolTip="Остановить"
-                                Visibility="Collapsed" />
-                    </Grid>
-                </Border>
-
-                <Border x:Name="ApprovalCard"
-                        Grid.Row="4"
-                        Background="#1EFFB94A"
-                        BorderBrush="#55FFC66D"
-                        BorderThickness="1"
-                        CornerRadius="16"
-                        Padding="11,9"
-                        Visibility="Collapsed">
-                    <Grid RowSpacing="8">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <StackPanel Spacing="2">
-                            <TextBlock Text="ТРЕБУЕТСЯ РАЗРЕШЕНИЕ"
-                                       FontSize="9"
-                                       CharacterSpacing="90"
-                                       Foreground="#FFFFD89A" />
-                            <TextBlock x:Name="ApprovalDescriptionText"
-                                       Text="BabyAI приостановил локальное действие до вашего решения."
-                                       FontSize="11"
-                                       TextWrapping="Wrap"
-                                       Foreground="#DFFFFFFF" />
-                        </StackPanel>
-                        <Grid Grid.Row="1" ColumnSpacing="8">
+                    <Border Grid.Row="3"
+                            Background="#18FFFFFF"
+                            BorderBrush="#28FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="22"
+                            Padding="12,6,6,6">
+                        <Grid ColumnSpacing="6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <Button x:Name="ApproveButton"
-                                    Grid.Column="0"
-                                    Content="Разрешить один раз"
-                                    CornerRadius="12"
-                                    Click="ApproveButton_Click" />
-                            <Button x:Name="RejectButton"
+
+                            <TextBox x:Name="MessageBox"
+                                     Grid.Column="0"
+                                     PlaceholderText="Спроси UNIX..."
+                                     AcceptsReturn="True"
+                                     MinHeight="44"
+                                     MaxHeight="88"
+                                     Padding="0,7"
+                                     TextWrapping="Wrap"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     Foreground="#FFF8FAFF"
+                                     KeyDown="MessageBox_KeyDown" />
+
+                            <Button x:Name="VoiceButton"
                                     Grid.Column="1"
-                                    Content="Отклонить"
-                                    CornerRadius="12"
-                                    Click="RejectButton_Click" />
+                                    Width="40"
+                                    Height="40"
+                                    Padding="0"
+                                    CornerRadius="20"
+                                    Content="🎙"
+                                    FontFamily="Segoe UI Emoji"
+                                    FontSize="16"
+                                    Style="{StaticResource IconButtonStyle}"
+                                    Click="VoiceButton_Click"
+                                    IsEnabled="{Binding IsEnabled, ElementName=SendButton}"
+                                    AutomationProperties.Name="Голосовой ввод"
+                                    ToolTipService.ToolTip="Голосовой ввод" />
+
+                            <Button x:Name="SendButton"
+                                    Grid.Column="2"
+                                    Width="40"
+                                    Height="40"
+                                    Padding="0"
+                                    CornerRadius="20"
+                                    Content="↑"
+                                    FontSize="20"
+                                    FontWeight="SemiBold"
+                                    Style="{StaticResource PrimaryCircleButtonStyle}"
+                                    Click="SendButton_Click"
+                                    ToolTipService.ToolTip="Отправить · Enter" />
+
+                            <Button x:Name="StopButton"
+                                    Grid.Column="3"
+                                    Width="40"
+                                    Height="40"
+                                    Padding="0"
+                                    CornerRadius="20"
+                                    Content="■"
+                                    FontSize="12"
+                                    Style="{StaticResource IconButtonStyle}"
+                                    Click="StopButton_Click"
+                                    ToolTipService.ToolTip="Остановить"
+                                    Visibility="Collapsed" />
                         </Grid>
-                    </Grid>
-                </Border>
+                    </Border>
 
-                <TextBlock x:Name="ConversationText"
-                           Text="Чат готов. Напиши первое сообщение ниже."
-                           Visibility="Collapsed" />
+                    <Border x:Name="ApprovalCard"
+                            Grid.Row="4"
+                            Background="#1CF3B95F"
+                            BorderBrush="#4CF3C676"
+                            BorderThickness="1"
+                            CornerRadius="17"
+                            Padding="12,10"
+                            Visibility="Collapsed">
+                        <Grid RowSpacing="9">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Spacing="3">
+                                <TextBlock Text="ТРЕБУЕТСЯ РАЗРЕШЕНИЕ"
+                                           FontSize="9"
+                                           CharacterSpacing="110"
+                                           Foreground="#FFF5D59B" />
+                                <TextBlock x:Name="ApprovalDescriptionText"
+                                           Text="UNIX приостановил локальное действие до вашего решения."
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Foreground="#DFFFFFFF" />
+                            </StackPanel>
+                            <Grid Grid.Row="1" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="ApproveButton"
+                                        Grid.Column="0"
+                                        Content="Разрешить один раз"
+                                        CornerRadius="12"
+                                        Click="ApproveButton_Click" />
+                                <Button x:Name="RejectButton"
+                                        Grid.Column="1"
+                                        Content="Отклонить"
+                                        CornerRadius="12"
+                                        Click="RejectButton_Click" />
+                            </Grid>
+                        </Grid>
+                    </Border>
 
-                <StackPanel Visibility="Collapsed">
-                    <TextBlock x:Name="CoreStatusText" Text="Core: not checked" />
-                    <TextBlock x:Name="RuntimeText" Text="Runtime: unknown" />
-                    <TextBlock x:Name="StartupText" Text="Startup: checking…" />
-                </StackPanel>
+                    <TextBlock x:Name="ConversationText"
+                               Text="Чат готов. Напиши первое сообщение ниже."
+                               Visibility="Collapsed" />
+
+                    <StackPanel Visibility="Collapsed">
+                        <TextBlock x:Name="CoreStatusText" Text="Core: not checked" />
+                        <TextBlock x:Name="RuntimeText" Text="Runtime: unknown" />
+                        <TextBlock x:Name="StartupText" Text="Startup: checking…" />
+                    </StackPanel>
+                </Grid>
             </Grid>
         </Border>
     </Grid>
