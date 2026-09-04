@@ -309,7 +309,7 @@
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <StackPanel Spacing="3">
-                                <TextBlock Text="НУЖНО РАЗРЕШЕНИЕ"
+                                <TextBlock Text="ТРЕБУЕТСЯ РАЗРЕШЕНИЕ"
                                            FontSize="9"
                                            CharacterSpacing="110"
                                            Foreground="#FFF5D59B" />
