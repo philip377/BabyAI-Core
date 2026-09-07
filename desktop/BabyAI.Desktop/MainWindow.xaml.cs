@@ -42,6 +42,7 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new DesktopAcrylicBackdrop();
         RuntimeText.Text = BuildRuntimeLabel();
         ConfigureWindow();
+        InitializeWindowFrame();
         RestoreWindowPosition();
         ApplyState(OrbState.Idle);
         _tray = new TrayIconService(this);
@@ -195,6 +196,7 @@ public sealed partial class MainWindow : Window
         _historyEnabled = status.HistoryEnabled;
         _historyMessageCount = status.HistoryCount;
         ApplyState(status.RequiresApproval ? OrbState.Approval : OrbState.Idle);
+        await RefreshNavigationAsync();
     }
 
     private void MessageBox_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -431,6 +433,9 @@ public sealed partial class MainWindow : Window
     {
         _busy = busy;
         SendButton.IsEnabled = !busy;
+        NewChatButton.IsEnabled = !busy;
+        WorkspaceItems.IsHitTestVisible = !busy;
+        RecentChatItems.IsHitTestVisible = !busy;
         RetryButton.IsEnabled = !busy;
         ApproveButton.IsEnabled = !busy;
         RejectButton.IsEnabled = !busy;
@@ -582,13 +587,8 @@ public sealed partial class MainWindow : Window
     private async Task ExpandPanelAsync()
     {
         Panel.Visibility = Visibility.Visible;
-        var navigationWidth = _navigationExpanded
-            ? NavigationExpandedWidth
-            : NavigationCollapsedWidth;
-        var panelWidth = 360 + navigationWidth;
-        Panel.Width = panelWidth;
-        PanelColumn.Width = new GridLength(panelWidth + 12);
-        AppWindow.Resize(new SizeInt32((int)panelWidth + 154, 440));
+        SetExpandedWindowMode(true);
+        ApplyAdaptiveExpandedLayout();
         await AnimateOpacityAsync(Panel, 0, 1, 150);
     }
 
@@ -598,7 +598,7 @@ public sealed partial class MainWindow : Window
         Panel.Visibility = Visibility.Collapsed;
         Panel.Width = 0;
         PanelColumn.Width = new GridLength(0);
-        AppWindow.Resize(new SizeInt32(132, 132));
+        SetExpandedWindowMode(false);
     }
 
     private static Task AnimateOpacityAsync(UIElement target, double from, double to, int milliseconds)

@@ -119,6 +119,13 @@ public sealed class BabyAIBridgeClient : IDisposable
     public Task ClearHistoryAsync(string? project = null) =>
         ExecuteAsync("history.clear", JsonSerializer.Serialize(new { project }));
 
+    public async Task<JsonElement> NavigationAsync(string command, string? id = null)
+    {
+        var json = await ExecuteAsync(command, JsonSerializer.Serialize(new { id }));
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
     public void RestartWorker()
     {
         lock (_workerSync)

@@ -56,12 +56,45 @@ class WorkspaceDesktopCommands(DesktopCommands):
 
     def _session_store(self, workspace: WorkspaceRecord | None = None) -> SessionMemoryStore:
         workspace = self._active_workspace() if workspace is None else workspace
-        key = "__legacy__" if workspace is None else workspace.id
+        key = self._current_chat_id()
         store = self._session_memories.get(key)
         if store is None:
             store = SessionMemoryStore(max_records=48)
+            for message in self._history().chat_messages(key, limit=48):
+                store.add(message.role, message.content)
             self._session_memories[key] = store
         return store
+
+    def _chat_scope(self) -> str:
+        workspace = self._active_workspace()
+        return "__legacy__" if workspace is None else workspace.id
+
+    def _current_chat_id(self) -> str:
+        return super()._history().current_chat(self._chat_scope(), self._active_project())
+
+    def _history(self) -> ChatHistoryStore:
+        history = super()._history()
+        history.chat_id = self._current_chat_id()
+        return history
+
+    def _chat_snapshot(self) -> dict[str, object]:
+        chat_id = self._current_chat_id()
+        history = self._history()
+        messages = [asdict(item) for item in history.chat_messages(chat_id)]
+        # Disabled history keeps only the existing bounded in-process session.
+        if not history.is_enabled():
+            messages = [{"role": item.role, "content": item.content}
+                        for item in self._session_store().recent(limit=48)]
+        chats = history.chats(self._chat_scope())
+        if not history.is_enabled():
+            for chat in chats:
+                session = self._session_memories.get(chat["id"])
+                if session is not None:
+                    first = next((item for item in session.recent(limit=48) if item.role == "user"), None)
+                    if first is not None:
+                        chat["title"] = " ".join(first.content.split())[:64]
+        return {"active_chat_id": chat_id, "chats": chats,
+                "messages": messages, "history_enabled": history.is_enabled()}
 
     def _active_project(self) -> str:
         workspace = self._active_workspace()
@@ -184,6 +217,24 @@ class WorkspaceDesktopCommands(DesktopCommands):
 
     def execute(self, command: str, payload: dict[str, object] | None = None) -> dict[str, object]:
         payload = payload or {}
+
+        if command in {"chat.list", "chat.current", "chat.create", "chat.select"}:
+            if command in {"chat.create", "chat.select"}:
+                self._require_no_pending_action_for_workspace_switch()
+                history = self._history()
+                if command == "chat.create":
+                    history.create_chat(self._chat_scope(), self._active_project())
+                else:
+                    try:
+                        history.select_chat(self._chat_scope(), str(payload.get("id", "")))
+                    except ValueError as exc:
+                        raise DesktopCommandError(str(exc)) from exc
+            return {"ok": True, "command": command, **self._chat_snapshot()}
+
+        if command == "history.clear":
+            result = super().execute(command, payload)
+            self._session_memories.clear()
+            return result
 
         if command == "chat":
             message = str(payload.get("message", "")).strip()

@@ -128,9 +128,10 @@ def test_active_workspace_isolates_tasks_history_memory_and_session(tmp_path) ->
     assert any("beta-message" in item.content for item in beta_history)
     assert all("alpha-message" not in item.content for item in beta_history)
 
-    assert set(commands._session_memories) == {alpha["id"], beta["id"]}
-    alpha_session = commands._session_memories[alpha["id"]].recent(limit=20)
-    beta_session = commands._session_memories[beta["id"]].recent(limit=20)
+    alpha_session = commands._session_store().recent(limit=20)
+    commands.execute("workspace.select", {"id": beta["id"]})
+    beta_session = commands._session_store().recent(limit=20)
+    assert len(commands._session_memories) == 2
     assert any(item.content == "alpha-message" for item in alpha_session)
     assert all(item.content != "beta-message" for item in alpha_session)
     assert any(item.content == "beta-message" for item in beta_session)

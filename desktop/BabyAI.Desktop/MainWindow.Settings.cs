@@ -359,6 +359,8 @@ public sealed partial class MainWindow
             if (await confirmation.ShowAsync() != ContentDialogResult.Primary)
                 return;
             await _bridge.ClearHistoryAsync();
+            _chatDrafts.Clear();
+            await RefreshNavigationAsync(restoreTranscript: true);
             _historyMessageCount = 0;
             status.Text = "История очищена.";
         };
