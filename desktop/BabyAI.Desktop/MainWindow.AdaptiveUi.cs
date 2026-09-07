@@ -3,6 +3,9 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Hosting;
+using System.Numerics;
+using Windows.UI.ViewManagement;
 using Windows.Graphics;
 using Windows.UI;
 
@@ -10,8 +13,8 @@ namespace BabyAI.Desktop;
 
 public sealed partial class MainWindow
 {
-    private const int NavigationExpandedWidth = 218;
-    private const int NavigationCollapsedWidth = 72;
+    private const int NavigationExpandedWidth = 224;
+    private const int NavigationCollapsedWidth = 80;
 
     private bool _applyingAdaptiveLayout;
     private bool _composerDraftingReady;
@@ -256,7 +259,7 @@ public sealed partial class MainWindow
             var navigationWidth = _navigationExpanded
                 ? NavigationExpandedWidth
                 : NavigationCollapsedWidth;
-            var conversationWidth = Math.Clamp(work.Width - 220 - navigationWidth, 340, 430);
+            var conversationWidth = Math.Clamp(work.Width - 220 - navigationWidth, 360, 460);
             var panelWidth = conversationWidth + navigationWidth;
             var windowWidth = panelWidth + 154;
             var windowHeight = Math.Clamp(work.Height - 120, 460, 580);
@@ -290,6 +293,28 @@ public sealed partial class MainWindow
         UpdateNavigationPresentation();
         if (_expanded)
             ApplyAdaptiveExpandedLayout();
+
+        // Animate only the visual surface: layout and hit targets settle immediately.
+        // Restart safely on repeated toggles without changing the layout-owned Offset.
+        ElementCompositionPreview.SetIsTranslationEnabled(NavigationSurface, true);
+        var visual = ElementCompositionPreview.GetElementVisual(NavigationSurface);
+        visual.StopAnimation("Opacity");
+        visual.StopAnimation("Translation");
+        visual.Opacity = 1;
+        visual.Properties.InsertVector3("Translation", Vector3.Zero);
+        if (!new UISettings().AnimationsEnabled)
+            return;
+
+        var fade = visual.Compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(0, 0.65f);
+        fade.InsertKeyFrame(1, 1);
+        fade.Duration = TimeSpan.FromMilliseconds(160);
+        visual.StartAnimation("Opacity", fade);
+        var slide = visual.Compositor.CreateVector3KeyFrameAnimation();
+        slide.InsertKeyFrame(0, new Vector3(_navigationExpanded ? -6 : 6, 0, 0));
+        slide.InsertKeyFrame(1, Vector3.Zero);
+        slide.Duration = TimeSpan.FromMilliseconds(160);
+        visual.StartAnimation("Translation", slide);
     }
 
     private void UpdateNavigationPresentation()
@@ -311,6 +336,10 @@ public sealed partial class MainWindow
         SettingsNavigationLabel.Visibility = labelVisibility;
         VoiceNavigationLabel.Visibility = labelVisibility;
 
+        NavigationToggleButton.HorizontalAlignment = _navigationExpanded
+            ? HorizontalAlignment.Right : HorizontalAlignment.Center;
+        Grid.SetColumnSpan(NavigationToggleButton, _navigationExpanded ? 1 : 2);
+        Grid.SetColumn(NavigationToggleButton, _navigationExpanded ? 1 : 0);
         NavigationToggleButton.Content = _navigationExpanded ? "‹" : "›";
         var tooltip = _navigationExpanded ? "Свернуть навигацию" : "Развернуть навигацию";
         ToolTipService.SetToolTip(NavigationToggleButton, tooltip);
