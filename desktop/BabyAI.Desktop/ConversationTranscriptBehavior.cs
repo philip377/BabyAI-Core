@@ -14,7 +14,7 @@ public static class ConversationTranscriptBehavior
     private const string CodeFence = "```";
 
     private static readonly Regex MessagePattern = new(
-        @"(?:\A|\r?\n\r?\n)(You|Вы|BabyAI|System|Система): (.*?)(?=(?:\r?\n\r?\n)(?:You|Вы|BabyAI|System|Система): |\z)",
+        @"(?:\A|\r?\n\r?\n)(You|Вы|BabyAI|UNIX|System|Система): (.*?)(?=(?:\r?\n\r?\n)(?:You|Вы|BabyAI|UNIX|System|Система): |\z)",
         RegexOptions.Compiled | RegexOptions.Singleline);
 
     private static readonly Regex LanguagePattern = new(
@@ -85,8 +85,8 @@ public static class ConversationTranscriptBehavior
         {
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(18, 34, 18, 20),
-            Spacing = 6,
+            Margin = new Thickness(18, 36, 18, 22),
+            Spacing = 7,
             Children =
             {
                 new Border
@@ -94,32 +94,32 @@ public static class ConversationTranscriptBehavior
                     Width = 42,
                     Height = 42,
                     CornerRadius = new CornerRadius(21),
-                    Background = Brush(124, 141, 255, 22),
-                    BorderBrush = Brush(154, 174, 255, 42),
+                    Background = Brush(124, 141, 255, 18),
+                    BorderBrush = Brush(154, 174, 255, 34),
                     BorderThickness = new Thickness(1),
                     Child = new TextBlock
                     {
                         Text = "✦",
-                        FontSize = 21,
-                        Foreground = Brush(174, 190, 255, 235),
+                        FontSize = 19,
+                        Foreground = Brush(183, 194, 255, 225),
                         HorizontalAlignment = HorizontalAlignment.Center,
                         VerticalAlignment = VerticalAlignment.Center,
                     },
                 },
                 new TextBlock
                 {
-                    Text = "BabyAI готов",
+                    Text = "UNIX готов",
                     FontSize = 14,
                     FontWeight = FontWeights.SemiBold,
-                    Foreground = Brush(248, 250, 255, 235),
+                    Foreground = Brush(248, 250, 255, 232),
                     HorizontalAlignment = HorizontalAlignment.Center,
                     Margin = new Thickness(0, 3, 0, 0),
                 },
                 new TextBlock
                 {
-                    Text = "Напиши сообщение — начнём с него",
+                    Text = "Начни разговор или дай задачу",
                     FontSize = 11,
-                    Foreground = Brush(255, 255, 255, 125),
+                    Foreground = Brush(255, 255, 255, 112),
                     HorizontalAlignment = HorizontalAlignment.Center,
                 },
             },
@@ -138,30 +138,30 @@ public static class ConversationTranscriptBehavior
 
         var label = new TextBlock
         {
-            Text = isUser ? "ВЫ" : isSystem ? "СИСТЕМА" : "BABYAI",
+            Text = isUser ? "ВЫ" : isSystem ? "СИСТЕМА" : "UNIX",
             FontSize = 9,
-            CharacterSpacing = 95,
+            CharacterSpacing = 105,
             FontWeight = FontWeights.SemiBold,
             Foreground = isUser
-                ? Brush(184, 194, 255, 145)
-                : isSystem ? Brush(255, 255, 255, 90) : Brush(184, 200, 255, 150),
+                ? Brush(190, 198, 255, 126)
+                : isSystem ? Brush(255, 255, 255, 78) : Brush(190, 202, 255, 135),
             HorizontalAlignment = alignment,
-            Margin = new Thickness(7, 0, 7, 0),
+            Margin = new Thickness(8, 0, 8, 0),
         };
 
         var bubble = new Border
         {
-            MaxWidth = isSystem ? 320 : 352,
-            Padding = isSystem ? new Thickness(11, 7, 11, 7) : new Thickness(14, 11, 14, 11),
+            MaxWidth = isSystem ? 310 : 326,
+            Padding = isSystem ? new Thickness(11, 7, 11, 7) : new Thickness(13, 10, 13, 10),
             CornerRadius = isSystem
                 ? new CornerRadius(13)
-                : isUser ? new CornerRadius(19, 19, 6, 19) : new CornerRadius(19, 19, 19, 6),
+                : isUser ? new CornerRadius(18, 18, 7, 18) : new CornerRadius(18, 18, 18, 7),
             Background = isSystem
-                ? Brush(255, 255, 255, 13)
-                : isUser ? Brush(91, 112, 255, 150) : Brush(255, 255, 255, 30),
+                ? Brush(255, 255, 255, 10)
+                : isUser ? Brush(91, 106, 218, 105) : Brush(255, 255, 255, 19),
             BorderBrush = isSystem
-                ? Brush(255, 255, 255, 18)
-                : isUser ? Brush(151, 164, 255, 82) : Brush(171, 187, 255, 30),
+                ? Brush(255, 255, 255, 14)
+                : isUser ? Brush(151, 164, 255, 58) : Brush(171, 187, 255, 22),
             BorderThickness = new Thickness(1),
             Child = CreateMessageBody(text, isSystem),
             HorizontalAlignment = alignment,
@@ -169,10 +169,10 @@ public static class ConversationTranscriptBehavior
 
         var card = new StackPanel
         {
-            MaxWidth = isSystem ? 330 : 362,
+            MaxWidth = isSystem ? 320 : 336,
             HorizontalAlignment = alignment,
             Spacing = 4,
-            Margin = new Thickness(0, 0, 0, 9),
+            Margin = new Thickness(0, 0, 0, 10),
         };
         card.Children.Add(label);
         card.Children.Add(bubble);
@@ -217,8 +217,8 @@ public static class ConversationTranscriptBehavior
             FontSize = isSystem ? 11 : 13,
             TextWrapping = TextWrapping.Wrap,
             IsTextSelectionEnabled = true,
-            Foreground = Brush(248, 250, 255, isSystem ? (byte)170 : (byte)242),
-            LineHeight = isSystem ? 17 : 20,
+            Foreground = Brush(248, 250, 255, isSystem ? (byte)165 : (byte)238),
+            LineHeight = isSystem ? 17 : 19,
         };
     }
 
@@ -246,7 +246,7 @@ public static class ConversationTranscriptBehavior
                 Text = language.ToUpperInvariant(),
                 FontSize = 8,
                 CharacterSpacing = 85,
-                Foreground = Brush(170, 188, 255, 120),
+                Foreground = Brush(170, 188, 255, 112),
             });
         }
 
@@ -261,14 +261,14 @@ public static class ConversationTranscriptBehavior
                 FontSize = 11,
                 TextWrapping = TextWrapping.NoWrap,
                 IsTextSelectionEnabled = true,
-                Foreground = Brush(238, 242, 255, 230),
+                Foreground = Brush(238, 242, 255, 226),
             },
         });
 
         return new Border
         {
-            Background = Brush(7, 10, 18, 150),
-            BorderBrush = Brush(156, 174, 255, 28),
+            Background = Brush(7, 10, 18, 145),
+            BorderBrush = Brush(156, 174, 255, 24),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(9, 7, 9, 8),
@@ -283,11 +283,11 @@ public static class ConversationTranscriptBehavior
             Content = "Копировать",
             FontSize = 9,
             Padding = new Thickness(6, 1, 6, 1),
-            Margin = new Thickness(4, 0, 0, 0),
+            Margin = new Thickness(5, 0, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Left,
             Background = Brush(255, 255, 255, 0),
             BorderThickness = new Thickness(0),
-            Foreground = Brush(255, 255, 255, 105),
+            Foreground = Brush(255, 255, 255, 92),
         };
         ToolTipService.SetToolTip(button, "Копировать ответ");
         button.Click += (_, _) =>
