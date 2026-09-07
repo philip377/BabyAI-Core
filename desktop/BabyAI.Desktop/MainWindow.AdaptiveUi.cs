@@ -29,6 +29,11 @@ public sealed partial class MainWindow
         if (!_expanded || _applyingAdaptiveLayout)
             return;
 
+        if (Panel.ActualWidth < 620 && _navigationExpanded)
+        {
+            _navigationExpanded = false;
+            UpdateNavigationPresentation();
+        }
         ApplyStoredUiSettings();
         CompactBrainTextBehavior.SetEnabled(BrainText, true);
         FriendlyDesktopTextBehavior.SetEnabled(TaskText, true);
@@ -38,7 +43,6 @@ public sealed partial class MainWindow
         EnsureOrbPresence();
         EnsureComposerDrafting();
         EnsureStatusPresentation();
-        ApplyAdaptiveExpandedLayout();
     }
 
     private void EnsureElapsedIndicator()
@@ -249,42 +253,9 @@ public sealed partial class MainWindow
 
     private void ApplyAdaptiveExpandedLayout()
     {
-        _applyingAdaptiveLayout = true;
-        try
-        {
-            var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Nearest);
-            var work = displayArea.WorkArea;
-            var outer = displayArea.OuterBounds;
-
-            var navigationWidth = _navigationExpanded
-                ? NavigationExpandedWidth
-                : NavigationCollapsedWidth;
-            var conversationWidth = Math.Clamp(work.Width - 220 - navigationWidth, 360, 460);
-            var panelWidth = conversationWidth + navigationWidth;
-            var windowWidth = panelWidth + 154;
-            var windowHeight = Math.Clamp(work.Height - 120, 460, 580);
-            var panelHeight = windowHeight - 20;
-
-            Panel.Width = panelWidth;
-            Panel.Height = panelHeight;
-            PanelColumn.Width = new GridLength(panelWidth + 12);
-
-            var current = AppWindow.Position;
-            var localX = current.X - outer.X;
-            var localY = current.Y - outer.Y;
-            var maxX = Math.Max(work.X, work.X + work.Width - windowWidth);
-            var maxY = Math.Max(work.Y, work.Y + work.Height - windowHeight);
-            var x = Math.Clamp(localX, work.X, maxX);
-            var y = Math.Clamp(localY, work.Y, maxY);
-
-            AppWindow.MoveAndResize(
-                new RectInt32(x, y, windowWidth, windowHeight),
-                displayArea);
-        }
-        finally
-        {
-            _applyingAdaptiveLayout = false;
-        }
+        Panel.Width = double.NaN;
+        Panel.Height = double.NaN;
+        PanelColumn.Width = new GridLength(1, GridUnitType.Star);
     }
 
     private void NavigationToggleButton_Click(object sender, RoutedEventArgs e)
@@ -319,6 +290,7 @@ public sealed partial class MainWindow
 
     private void UpdateNavigationPresentation()
     {
+        UpdateNavigationItemLabels();
         NavigationColumn.Width = new GridLength(
             _navigationExpanded ? NavigationExpandedWidth : NavigationCollapsedWidth);
 
@@ -329,9 +301,9 @@ public sealed partial class MainWindow
         NavigationHeaderLabel.Visibility = labelVisibility;
         NewChatLabel.Visibility = labelVisibility;
         ProjectsSectionLabel.Visibility = labelVisibility;
-        ProjectNameText.Visibility = labelVisibility;
+
         RecentsSectionLabel.Visibility = labelVisibility;
-        RecentNameText.Visibility = labelVisibility;
+
         ProfileLabel.Visibility = labelVisibility;
         SettingsNavigationLabel.Visibility = labelVisibility;
         VoiceNavigationLabel.Visibility = labelVisibility;
@@ -346,16 +318,9 @@ public sealed partial class MainWindow
         AutomationProperties.SetName(NavigationToggleButton, tooltip);
     }
 
-    private void NewChatButton_Click(object sender, RoutedEventArgs e)
+    private async void NewChatButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_busy)
-            return;
-
-        _conversation.Clear();
-        RenderConversation();
-        MessageBox.Text = string.Empty;
-        ReplyText.Text = "Новый чат готов.";
-        MessageBox.Focus(FocusState.Programmatic);
+        await SwitchNavigationAsync("chat.create");
     }
 
     private async void DetailsButton_Click(object sender, RoutedEventArgs e)

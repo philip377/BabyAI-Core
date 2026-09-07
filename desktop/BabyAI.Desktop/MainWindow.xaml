@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <Grid x:Name="Root" Loaded="Root_Loaded_WithToolApproval" Background="Transparent" Padding="10">
+    <Grid x:Name="Root" Loaded="Root_Loaded_WithToolApproval" Background="#FF0E1016" RequestedTheme="Dark" Padding="10">
         <Grid.Resources>
             <!-- Shared interaction palette keeps the native focus and disabled states. -->
             <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#24AAB8FF" />
@@ -107,8 +107,8 @@
                 Margin="6,0,0,0"
                 CornerRadius="28"
                 Background="#E60E1016"
-                BorderBrush="#2BFFFFFF"
-                BorderThickness="1"
+                BorderBrush="Transparent"
+                BorderThickness="0"
                 Opacity="0"
                 Visibility="Collapsed"
                 SizeChanged="Panel_SizeChanged">
@@ -217,40 +217,18 @@
                                            FontSize="9"
                                            CharacterSpacing="110"
                                            Foreground="#FFA0A6B8" />
-                                <Button Style="{StaticResource NavigationButtonStyle}"
-                                        AutomationProperties.Name="Проект BabyAI Core" ToolTipService.ToolTip="Проект BabyAI Core">
-                                    <StackPanel Orientation="Horizontal" Spacing="11">
-                                        <FontIcon Glyph="&#xE8B7;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="24" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="ProjectNameText"
-                                                   Text="BabyAI Core"
-                                                   FontSize="12"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   VerticalAlignment="Center" />
-                                    </StackPanel>
-                                </Button>
-
+                                <StackPanel x:Name="WorkspaceItems" Spacing="3" />
+                                <TextBlock x:Name="ProjectNameText" Visibility="Collapsed" />
                                 <TextBlock x:Name="RecentsSectionLabel"
                                            Text="НЕДАВНИЕ"
                                            Margin="11,13,0,3"
                                            FontSize="9"
                                            CharacterSpacing="110"
                                            Foreground="#FFA0A6B8" />
-                                <Button x:Name="CurrentChatButton"
-                                        Style="{StaticResource NavigationButtonStyle}"
-                                        Background="#248293DA"
-                                        BorderBrush="#408FA3F0"
-                                        BorderThickness="1"
-                                        AutomationProperties.Name="Текущий диалог"
-                                        ToolTipService.ToolTip="Текущий диалог">
-                                    <StackPanel Orientation="Horizontal" Spacing="11">
-                                        <FontIcon Glyph="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="16" Width="24" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="RecentNameText"
-                                                   Text="Текущий диалог"
-                                                   FontSize="12"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   VerticalAlignment="Center" />
-                                    </StackPanel>
-                                </Button>
+                                <StackPanel x:Name="RecentChatItems" Spacing="3" />
+                                <TextBlock x:Name="HistoryModeText" FontSize="10" Foreground="#FFA0A6B8" TextWrapping="Wrap" Margin="10,6" />
+                                <Button x:Name="CurrentChatButton" Visibility="Collapsed" />
+                                <TextBlock x:Name="RecentNameText" Visibility="Collapsed" />
                             </StackPanel>
                         </ScrollViewer>
 
