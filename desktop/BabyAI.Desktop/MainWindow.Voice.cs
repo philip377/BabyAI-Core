@@ -8,6 +8,8 @@ namespace BabyAI.Desktop;
 public sealed partial class MainWindow
 {
     private MicrophoneVadService? _voiceCapture;
+    private ISpeechToTextProvider? _speechToText;
+    private CancellationTokenSource? _sttCancellation;
     private bool _voiceListening;
 
     private void VoiceButton_Click(object sender, RoutedEventArgs e)
@@ -102,19 +104,91 @@ public sealed partial class MainWindow
         });
     }
 
-    private void VoiceCapture_SpeechEnded(object? sender, EventArgs e)
+    private void VoiceCapture_SpeechEnded(object? sender, MicrophoneUtteranceEventArgs e)
     {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (!_voiceListening || !ReferenceEquals(_voiceCapture, sender))
-                return;
+        DispatcherQueue.TryEnqueue(() => _ = RecognizeAndSubmitVoiceAsync(sender, e));
+    }
 
-            StartupDiagnostics.Log("Voice VAD transition: speech_ended");
-            StopVoiceListening(updateUi: false);
+    private async Task RecognizeAndSubmitVoiceAsync(object? sender, MicrophoneUtteranceEventArgs utterance)
+    {
+        if (!_voiceListening || !ReferenceEquals(_voiceCapture, sender))
+            return;
+
+        StartupDiagnostics.Log(
+            $"Voice VAD transition: speech_ended; audio_ms={utterance.DurationMilliseconds}; bytes={utterance.Pcm16.Length}");
+        StopVoiceListening(updateUi: false);
+
+        if (utterance.Pcm16.Length == 0)
+        {
             CoreStatusText.Text = "Core: подключён";
-            ReplyText.Text = "Фраза закончилась · VAD сработал.";
-            ApplyState(OrbState.Done);
-        });
+            ReplyText.Text = "Фраза закончилась, но аудио не получено.";
+            ApplyState(OrbState.Idle);
+            return;
+        }
+
+        _sttCancellation?.Cancel();
+        _sttCancellation?.Dispose();
+        var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        _sttCancellation = cancellation;
+        var handedToChat = false;
+
+        try
+        {
+            SetBusy(true);
+            ApplyState(OrbState.Thinking);
+            CoreStatusText.Text = "Core: распознаю речь";
+            ReplyText.Text = "Распознаю речь…";
+
+            _speechToText ??= SpeechToTextProviderFactory.CreateDefault();
+            var transcript = await _speechToText.TranscribeAsync(
+                utterance.Pcm16,
+                utterance.SampleRate,
+                cancellation.Token);
+
+            if (string.IsNullOrWhiteSpace(transcript))
+            {
+                CoreStatusText.Text = "Core: подключён";
+                ReplyText.Text = "Не удалось разобрать фразу · попробуйте сказать ещё раз.";
+                ApplyState(OrbState.Idle);
+                return;
+            }
+
+            StartupDiagnostics.Log(
+                $"STT completed: provider={_speechToText.Name}; chars={transcript.Length}; audio_ms={utterance.DurationMilliseconds}; persistence=none");
+
+            MessageBox.Text = transcript;
+            CoreStatusText.Text = "Core: подключён";
+            ReplyText.Text = "Речь распознана · отправляю…";
+            SetBusy(false);
+
+            // Keep voice and keyboard on exactly the same conversational path.
+            // The recognized text is submitted through the normal Send handler,
+            // preserving history, Workspace, Agent Runtime and streaming behavior.
+            SendButton_Click(VoiceButton, new RoutedEventArgs());
+            handedToChat = true;
+        }
+        catch (OperationCanceledException)
+        {
+            CoreStatusText.Text = "Core: подключён";
+            ReplyText.Text = "Распознавание речи отменено.";
+            ApplyState(OrbState.Idle);
+        }
+        catch (Exception ex)
+        {
+            ShowSpeechToTextError(ex);
+        }
+        finally
+        {
+            if (ReferenceEquals(_sttCancellation, cancellation))
+                _sttCancellation = null;
+            cancellation.Dispose();
+            if (!handedToChat)
+            {
+                SetBusy(false);
+                if (_expanded)
+                    MessageBox.Focus(FocusState.Programmatic);
+            }
+        }
     }
 
     private void VoiceCapture_TimedOut(object? sender, EventArgs e)
@@ -148,6 +222,17 @@ public sealed partial class MainWindow
         ReplyText.Text = string.IsNullOrWhiteSpace(detail)
             ? "Не удалось открыть микрофон. Проверьте доступ Windows к микрофону."
             : $"Микрофон недоступен: {detail}";
+        ApplyState(OrbState.Error);
+    }
+
+    private void ShowSpeechToTextError(Exception exception)
+    {
+        var detail = exception.Message.Trim();
+        StartupDiagnostics.Log("Local STT unavailable", exception);
+        CoreStatusText.Text = "Core: STT недоступен";
+        ReplyText.Text = string.IsNullOrWhiteSpace(detail)
+            ? "Не удалось локально распознать речь."
+            : $"Распознавание речи недоступно: {detail}";
         ApplyState(OrbState.Error);
     }
 
@@ -272,15 +357,24 @@ internal sealed class VoiceActivityDetector
 internal sealed class MicrophoneVadService : IDisposable
 {
     private const int SampleRate = 16_000;
+    private const int BytesPerSample = sizeof(short);
     private const int MaxListeningMilliseconds = 20_000;
+    private const int PreRollMilliseconds = 300;
+    private const int MaxUtteranceMilliseconds = 18_000;
+    private const int MaxPreRollBytes = SampleRate * BytesPerSample * PreRollMilliseconds / 1000;
+    private const int MaxUtteranceBytes = SampleRate * BytesPerSample * MaxUtteranceMilliseconds / 1000;
+
     private readonly object _sync = new();
     private readonly VoiceActivityDetector _vad = new(SampleRate);
+    private readonly Queue<byte[]> _preRoll = new();
     private WaveInEvent? _capture;
     private Timer? _timeout;
+    private MemoryStream? _utterance;
+    private int _preRollBytes;
     private bool _disposed;
 
     public event EventHandler? SpeechStarted;
-    public event EventHandler? SpeechEnded;
+    public event EventHandler<MicrophoneUtteranceEventArgs>? SpeechEnded;
     public event EventHandler? TimedOut;
     public event EventHandler<MicrophoneCaptureFaultedEventArgs>? Faulted;
 
@@ -302,6 +396,7 @@ internal sealed class MicrophoneVadService : IDisposable
             capture.DataAvailable += Capture_DataAvailable;
             capture.RecordingStopped += Capture_RecordingStopped;
             _vad.Reset();
+            ResetAudioBuffers();
             _capture = capture;
 
             try
@@ -330,6 +425,7 @@ internal sealed class MicrophoneVadService : IDisposable
             _capture = null;
             timeout = _timeout;
             _timeout = null;
+            ResetAudioBuffers();
         }
 
         timeout?.Dispose();
@@ -353,11 +449,81 @@ internal sealed class MicrophoneVadService : IDisposable
         if (e.BytesRecorded <= 0)
             return;
 
-        var transition = _vad.ProcessPcm16(e.Buffer.AsSpan(0, e.BytesRecorded));
-        if (transition == VoiceActivityTransition.SpeechStarted)
+        var speechStarted = false;
+        MicrophoneUtteranceEventArgs? completed = null;
+
+        lock (_sync)
+        {
+            if (_capture is null || !ReferenceEquals(_capture, sender))
+                return;
+
+            var frame = new byte[e.BytesRecorded];
+            Buffer.BlockCopy(e.Buffer, 0, frame, 0, e.BytesRecorded);
+            var wasSpeech = _vad.IsSpeech;
+
+            if (!wasSpeech)
+                AddPreRollFrame(frame);
+
+            var transition = _vad.ProcessPcm16(frame);
+            if (transition == VoiceActivityTransition.SpeechStarted)
+            {
+                BeginUtteranceFromPreRoll();
+                speechStarted = true;
+            }
+            else if (wasSpeech)
+            {
+                AppendUtteranceFrame(frame);
+            }
+
+            if (transition == VoiceActivityTransition.SpeechEnded)
+            {
+                var pcm = _utterance?.ToArray() ?? [];
+                completed = new MicrophoneUtteranceEventArgs(pcm, SampleRate);
+                ResetAudioBuffers();
+            }
+        }
+
+        if (speechStarted)
             SpeechStarted?.Invoke(this, EventArgs.Empty);
-        else if (transition == VoiceActivityTransition.SpeechEnded)
-            SpeechEnded?.Invoke(this, EventArgs.Empty);
+        if (completed is not null)
+            SpeechEnded?.Invoke(this, completed);
+    }
+
+    private void AddPreRollFrame(byte[] frame)
+    {
+        _preRoll.Enqueue(frame);
+        _preRollBytes += frame.Length;
+        while (_preRollBytes > MaxPreRollBytes && _preRoll.Count > 0)
+        {
+            var removed = _preRoll.Dequeue();
+            _preRollBytes -= removed.Length;
+        }
+    }
+
+    private void BeginUtteranceFromPreRoll()
+    {
+        _utterance?.Dispose();
+        _utterance = new MemoryStream(capacity: Math.Min(MaxUtteranceBytes, Math.Max(_preRollBytes * 4, 32_768)));
+        while (_preRoll.Count > 0)
+            AppendUtteranceFrame(_preRoll.Dequeue());
+        _preRollBytes = 0;
+    }
+
+    private void AppendUtteranceFrame(byte[] frame)
+    {
+        if (_utterance is null || frame.Length == 0 || _utterance.Length >= MaxUtteranceBytes)
+            return;
+
+        var remaining = MaxUtteranceBytes - (int)_utterance.Length;
+        _utterance.Write(frame, 0, Math.Min(frame.Length, remaining));
+    }
+
+    private void ResetAudioBuffers()
+    {
+        _preRoll.Clear();
+        _preRollBytes = 0;
+        _utterance?.Dispose();
+        _utterance = null;
     }
 
     private void Capture_RecordingStopped(object? sender, StoppedEventArgs e)
@@ -369,6 +535,7 @@ internal sealed class MicrophoneVadService : IDisposable
             {
                 capture = candidate;
                 _capture = null;
+                ResetAudioBuffers();
             }
         }
 
@@ -401,6 +568,14 @@ internal sealed class MicrophoneVadService : IDisposable
         }
         Stop();
     }
+}
+
+internal sealed class MicrophoneUtteranceEventArgs(byte[] pcm16, int sampleRate) : EventArgs
+{
+    public byte[] Pcm16 { get; } = pcm16 ?? throw new ArgumentNullException(nameof(pcm16));
+    public int SampleRate { get; } = sampleRate;
+    public int DurationMilliseconds =>
+        SampleRate <= 0 ? 0 : (int)Math.Round(Pcm16.Length / (SampleRate * 2d) * 1000d);
 }
 
 internal sealed class MicrophoneCaptureFaultedEventArgs(Exception exception) : EventArgs

@@ -39,6 +39,10 @@ jobs:
       VULKAN_SDK_SHA256: "855b27ba05d2d8119c5114c5d4ff870ca38f2c632b11e1bb9923b9b7e6ecfe7b"
       SEVEN_ZIP_LZMA_VERSION: "26.02"
       SEVEN_ZIP_LZMA_SHA256: "2878c85f5f43a4a4e0952b1fd4e5fe097c1c143997a8047c7e1e788892aa9357"
+      BABYAI_STT_MODEL_NAME: "sherpa-onnx-whisper-tiny"
+      BABYAI_STT_MODEL_SHA256: "c46116994e539aa165266d96b325252728429c12535eb9d8b6a2b10f129e66b1"
+      BABYAI_STT_MODEL_SIZE: "116204861"
+      BABYAI_STT_MODEL_URL: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-tiny.tar.bz2"
 
     steps:
       - name: Checkout BabyAI
@@ -103,6 +107,41 @@ jobs:
           if (-not (Test-Path release-desktop/BabyAI.Desktop.exe -PathType Leaf)) {
             throw "BabyAI.Desktop.exe was not produced."
           }
+
+      - name: Bundle pinned local Whisper STT model
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "$env:BABYAI_STT_MODEL_NAME.tar.bz2"
+          $extractRoot = Join-Path $env:RUNNER_TEMP "babyai-stt-model"
+          Invoke-WebRequest -Uri $env:BABYAI_STT_MODEL_URL -OutFile $archive
+
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $env:BABYAI_STT_MODEL_SHA256) {
+            throw "STT model SHA256 mismatch: $actual"
+          }
+          if ((Get-Item $archive).Length -ne [long]$env:BABYAI_STT_MODEL_SIZE) {
+            throw "STT model size mismatch."
+          }
+
+          if (Test-Path $extractRoot) { Remove-Item $extractRoot -Recurse -Force }
+          New-Item -ItemType Directory -Force $extractRoot | Out-Null
+          & tar.exe -xjf $archive -C $extractRoot
+          if ($LASTEXITCODE -ne 0) { throw "Could not extract the Whisper STT model." }
+
+          $modelRoot = Join-Path $extractRoot $env:BABYAI_STT_MODEL_NAME
+          $requiredFiles = @("tiny-encoder.int8.onnx", "tiny-decoder.int8.onnx", "tiny-tokens.txt")
+          foreach ($file in $requiredFiles) {
+            if (-not (Test-Path (Join-Path $modelRoot $file) -PathType Leaf)) {
+              throw "Extracted STT model is incomplete: missing $file"
+            }
+          }
+
+          $destination = Join-Path $env:GITHUB_WORKSPACE "release-desktop\stt\$env:BABYAI_STT_MODEL_NAME"
+          New-Item -ItemType Directory -Force $destination | Out-Null
+          foreach ($file in $requiredFiles) {
+            Copy-Item (Join-Path $modelRoot $file) (Join-Path $destination $file) -Force
+          }
+          Write-Host "Bundled local STT model: $env:BABYAI_STT_MODEL_NAME (int8 encoder/decoder)"
 
       - name: Configure portable CPU native runtime
         shell: pwsh
