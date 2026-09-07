@@ -63,6 +63,15 @@ public sealed partial class MainWindow
     private nint FrameWindowProc(nint hwnd, uint message, nuint wParam, nint lParam, nuint id, nuint data)
     {
         const uint WmNcCalcSize = 0x0083, WmNcHitTest = 0x0084, WmGetMinMaxInfo = 0x0024;
+        if (message == 0x02E0) // WM_DPICHANGED: let WinUI update its scale first.
+        {
+            var result = DefSubclassProc(hwnd, message, wParam, lParam);
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_frameExpanded) SetExpandedWindowMode(false);
+            });
+            return result;
+        }
         if (message == WmNcCalcSize && wParam != 0) return 0;
         if (_frameExpanded && message == WmGetMinMaxInfo)
         {

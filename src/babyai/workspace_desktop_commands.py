@@ -85,7 +85,15 @@ class WorkspaceDesktopCommands(DesktopCommands):
         if not history.is_enabled():
             messages = [{"role": item.role, "content": item.content}
                         for item in self._session_store().recent(limit=48)]
-        return {"active_chat_id": chat_id, "chats": history.chats(self._chat_scope()),
+        chats = history.chats(self._chat_scope())
+        if not history.is_enabled():
+            for chat in chats:
+                session = self._session_memories.get(chat["id"])
+                if session is not None:
+                    first = next((item for item in session.recent(limit=48) if item.role == "user"), None)
+                    if first is not None:
+                        chat["title"] = " ".join(first.content.split())[:64]
+        return {"active_chat_id": chat_id, "chats": chats,
                 "messages": messages, "history_enabled": history.is_enabled()}
 
     def _active_project(self) -> str:
