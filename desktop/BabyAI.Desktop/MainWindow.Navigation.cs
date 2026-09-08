@@ -44,6 +44,7 @@ public sealed partial class MainWindow
         }
         _selectedChatId = activeChat;
         _navigationReady = true;
+        await RefreshJobsAsync();
     }
 
     private Button NavigationItem(string title, string id, bool selected, bool workspace)
