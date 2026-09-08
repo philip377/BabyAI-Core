@@ -10,8 +10,10 @@ from .durable_chat_desktop import DesktopCommands
 from .desktop_commands import DesktopCommandError
 from .runtime_trace import trace
 
-# Compatibility contract: DurableChatDesktopCommands remains layered over
-# AgentDesktopCommands and workspace_desktop_retrieval.WorkspaceDesktopCommands.
+# Compatibility contract: WorkspaceDesktopCommands as DesktopCommands remains
+# the workspace-aware base beneath AgentDesktopCommands and DurableChatDesktopCommands.
+# The worker now imports the durable wrapper without bypassing that inheritance chain.
+# workspace_desktop_retrieval.WorkspaceDesktopCommands remains authoritative below it.
 
 MAX_WORKER_REQUEST_CHARS = 1_048_576
 
