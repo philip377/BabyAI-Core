@@ -6,12 +6,12 @@ import time
 import traceback
 from typing import TextIO
 
-from .agent_desktop import DesktopCommands
+from .durable_chat_desktop import DesktopCommands
 from .desktop_commands import DesktopCommandError
 from .runtime_trace import trace
 
-# Compatibility contract: AgentDesktopCommands remains layered over
-# workspace_desktop_retrieval.WorkspaceDesktopCommands as DesktopCommands.
+# Compatibility contract: DurableChatDesktopCommands remains layered over
+# AgentDesktopCommands and workspace_desktop_retrieval.WorkspaceDesktopCommands.
 
 MAX_WORKER_REQUEST_CHARS = 1_048_576
 
@@ -149,15 +149,16 @@ def serve(
                         payload,
                         emit_stream_event,
                     )
-                    emit_v2(
-                        {
-                            "event": "done",
-                            "ok": True,
-                            "command": command,
-                            "reply": result["reply"],
-                            "metrics": result["metrics"],
-                        }
-                    )
+                    done_event: dict[str, object] = {
+                        "event": "done",
+                        "ok": True,
+                        "command": command,
+                        "reply": result["reply"],
+                        "metrics": result["metrics"],
+                    }
+                    if "job" in result:
+                        done_event["job"] = result["job"]
+                    emit_v2(done_event)
                 elif command == "worker.shutdown":
                     response = {
                         "id": request_id,
