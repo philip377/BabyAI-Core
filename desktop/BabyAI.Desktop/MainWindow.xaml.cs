@@ -277,16 +277,15 @@ public sealed partial class MainWindow : Window
             ReplyText.Text = "Думаю…";
             var result = await _bridge.ChatStreamAsync(
                 message,
-                async streamEvent =>
+                streamEvent =>
                 {
                     if (!IsCurrentChat())
-                        return;
+                        return ValueTask.CompletedTask;
 
                     if (streamEvent.Kind == DesktopChatEventKind.State)
                     {
                         ApplyChatStreamState(streamEvent.State);
-                        await RefreshJobsAsync();
-                        return;
+                        return ValueTask.CompletedTask;
                     }
 
                     responseBuffer.Append(streamEvent.Text);
@@ -300,7 +299,7 @@ public sealed partial class MainWindow : Window
                             $"Desktop chat first fragment displayed: generation={chatGeneration}; ttft_ms={streamEvent.ElapsedMilliseconds}");
                     }
                     FlushAssistantTurn(streamEvent.IsFirstDelta);
-                    return;
+                    return ValueTask.CompletedTask;
                 },
                 chatCancellation.Token);
 
