@@ -18,7 +18,8 @@ def test_voice_foundation_adds_microphone_control_and_listening_orb() -> None:
     assert 'AutomationProperties.Name="Голосовой ввод"' in xaml
     assert "ApplyState(OrbState.Listening)" in voice
     assert 'ReplyText.Text = "Слышу речь…"' in voice
-    assert 'ReplyText.Text = "Фраза закончилась · VAD сработал."' in voice
+    assert "SpeechEnded?.Invoke(this, completed)" in voice
+    assert "MicrophoneUtteranceEventArgs" in voice
 
 
 def test_voice_capture_is_bounded_and_memory_only() -> None:
@@ -27,6 +28,8 @@ def test_voice_capture_is_bounded_and_memory_only() -> None:
     assert "WaveInEvent" in voice
     assert "new WaveFormat(SampleRate, 16, 1)" in voice
     assert "MaxListeningMilliseconds = 20_000" in voice
+    assert "MaxUtteranceMilliseconds = 18_000" in voice
+    assert "PreRollMilliseconds = 300" in voice
     assert "BufferMilliseconds = 30" in voice
     assert 'persistence=none' in voice
     assert "WaveFileWriter" not in voice
