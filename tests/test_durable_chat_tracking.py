@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from babyai.config import BabyAIConfig
 from babyai.durable_chat_desktop import DurableChatDesktopCommands
+from babyai.agent_runtime import AgentObservation
 from babyai.tool_approval import PendingToolApproval, PendingToolApprovalStore
 
 
@@ -61,7 +62,18 @@ def test_conversational_stream_turn_does_not_create_job(tmp_path):
 
 def test_actionable_stream_turn_is_persisted_and_completed(tmp_path):
     commands = _commands(tmp_path)
-    commands._core = lambda: _StreamingCore("На рабочем столе есть notes.txt")  # type: ignore[method-assign]
+
+    def record_observation(_message: str) -> None:
+        commands._agent_runtime()._last_observation = AgentObservation(
+            tool="filesystem.list",
+            arguments={"path": "~/Desktop"},
+            result='["notes.txt", "photo.jpg"]',
+            activity="Проверяю рабочий стол…",
+        )
+
+    commands._core = lambda: _StreamingCore(  # type: ignore[method-assign]
+        "На рабочем столе есть notes.txt", record_observation
+    )
 
     result = commands.stream_chat(
         {"message": "Назови файл на моём рабочем столе"},
@@ -105,9 +117,30 @@ def test_actionable_turn_waits_on_same_durable_job_for_permission(tmp_path):
 
 def test_non_streaming_actionable_turn_uses_same_tracking_path(tmp_path):
     commands = _commands(tmp_path)
-    commands._core = lambda: _BlockingCore("Готово")  # type: ignore[method-assign]
+    def record_observation(_message: str) -> None:
+        commands._agent_runtime()._last_observation = AgentObservation(
+            tool="filesystem.list",
+            arguments={"path": "~/Desktop"},
+            result='["notes.txt"]',
+            activity="Проверяю рабочий стол…",
+        )
+
+    commands._core = lambda: _BlockingCore("Готово", record_observation)  # type: ignore[method-assign]
 
     result = commands.execute("chat", {"message": "Назови файл на моём рабочем столе"})
 
     assert result["job"]["status"] == "completed"
     assert result["job"]["result"] == "Готово"
+
+
+def test_actionable_turn_without_tool_observation_cannot_complete(tmp_path):
+    commands = _commands(tmp_path)
+    commands._core = lambda: _StreamingCore("Готово")  # type: ignore[method-assign]
+
+    result = commands.stream_chat(
+        {"message": "Назови файл на моём рабочем столе"},
+        lambda event: None,
+    )
+
+    assert result["job"]["status"] == "failed"
+    assert "trusted tool observation" in result["job"]["error"]

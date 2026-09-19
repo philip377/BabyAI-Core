@@ -25,6 +25,7 @@ class DurableChatDesktopCommands(AgentDesktopCommands):
         runtime = self._agent_runtime()
         if not runtime.requests_local_action(message):
             return None
+        runtime.reset_observation()
         # Do not stack a second tracked action on top of an unresolved global
         # one-shot approval. The desktop UI already blocks this path, while this
         # guard keeps direct protocol callers deterministic too.
@@ -49,6 +50,12 @@ class DurableChatDesktopCommands(AgentDesktopCommands):
             waiting = self._jobs.wait_for_permission(job.id, checkpoint=reply)
             self._jobs.set_pending_approval_owner(job.id)
             return waiting
+        runtime = self._agent_runtime()
+        if runtime.requests_local_action(job.goal) and not runtime.has_observation:
+            return self._jobs.fail(
+                job.id,
+                error="Actionable turn completed without a trusted tool observation",
+            )
         if current.cancel_requested:
             return self._jobs.cancel(job.id)
         return self._jobs.complete(job.id, result=reply)

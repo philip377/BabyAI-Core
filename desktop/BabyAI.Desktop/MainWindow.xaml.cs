@@ -277,15 +277,16 @@ public sealed partial class MainWindow : Window
             ReplyText.Text = "Думаю…";
             var result = await _bridge.ChatStreamAsync(
                 message,
-                streamEvent =>
+                async streamEvent =>
                 {
                     if (!IsCurrentChat())
-                        return ValueTask.CompletedTask;
+                        return;
 
                     if (streamEvent.Kind == DesktopChatEventKind.State)
                     {
                         ApplyChatStreamState(streamEvent.State);
-                        return ValueTask.CompletedTask;
+                        await RefreshJobsAsync();
+                        return;
                     }
 
                     responseBuffer.Append(streamEvent.Text);
@@ -299,7 +300,7 @@ public sealed partial class MainWindow : Window
                             $"Desktop chat first fragment displayed: generation={chatGeneration}; ttft_ms={streamEvent.ElapsedMilliseconds}");
                     }
                     FlushAssistantTurn(streamEvent.IsFirstDelta);
-                    return ValueTask.CompletedTask;
+                    return;
                 },
                 chatCancellation.Token);
 
@@ -314,6 +315,7 @@ public sealed partial class MainWindow : Window
             if (displayedTtftMs is long ttft)
                 ReplyText.Text = $"Готово · первый фрагмент {FormatLatency(ttft)}";
             SetBusy(true);
+            await RefreshJobsAsync();
             await RefreshStatusAsync();
             if (ApprovalCard.Visibility != Visibility.Visible)
                 ApplyState(OrbState.Done);

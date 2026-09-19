@@ -43,7 +43,7 @@ def test_model_decides_to_call_agent_before_permission_handoff(tmp_path) -> None
     provider = ScriptedProvider([
         '{"tool":"filesystem.list","arguments":{"path":"~/Desktop"}}',
     ])
-    primus = build_primus(tmp_path, provider, runtime)
+    primus = build_primus(tmp_path, provider, runtime, session)
 
     reply = primus.think("Какие файлы у меня на рабочем столе?")
 
@@ -95,14 +95,17 @@ def test_approved_agent_observation_returns_to_llm(tmp_path) -> None:
     permissions = PermissionStore(tmp_path / "permissions.json")
     approvals = PendingToolApprovalStore(tmp_path / "pending.json")
     runtime = AgentRuntime(ModelDrivenAgentExecutor(permissions), approvals)
+    session = SessionMemoryStore(max_records=48)
     provider = ScriptedProvider([
         '{"tool":"filesystem.list","arguments":{"path":"%s"}}' % folder.as_posix(),
         "В этой папке вижу price.xlsx и notes.txt.",
     ])
-    primus = build_primus(tmp_path, provider, runtime)
+    primus = build_primus(tmp_path, provider, runtime, session)
 
     first = primus.think("Какие файлы находятся в этой папке?")
     assert "разреш" in first.casefold()
+
+    session.add("babyai", "На рабочем столе нет файлов. BabyAI v0.1.")
 
     final = primus.approve_pending_tool()
 
@@ -114,6 +117,8 @@ def test_approved_agent_observation_returns_to_llm(tmp_path) -> None:
     assert "OBSERVATION:" in provider.prompts[-1]
     assert "price.xlsx" in provider.prompts[-1]
     assert "notes.txt" in provider.prompts[-1]
+    assert "нет файлов" not in provider.prompts[-1]
+    assert "BabyAI v0.1" not in provider.prompts[-1]
     assert provider.prompts[-1].rstrip().endswith(
         "USER: Какие файлы находятся в этой папке?"
     )
