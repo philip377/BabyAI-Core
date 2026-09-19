@@ -41,6 +41,8 @@ class AgentRuntimePrimusMixin:
 
         observation = runtime.observation_context()
         if not observation:
+            if runtime.requests_local_action(user_input):
+                return self._remove_stale_episodic_history(base)
             return base
 
         base = self._remove_stale_episodic_history(base)
