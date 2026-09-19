@@ -12,6 +12,7 @@ class PendingToolApproval:
     tool: str
     arguments: dict[str, Any]
     capability: str
+    completed_conversation: bool = False
 
 
 @dataclass(slots=True)
@@ -31,6 +32,7 @@ class PendingToolApprovalStore:
         tool = data.get("tool")
         arguments = data.get("arguments")
         capability = data.get("capability")
+        completed_conversation = data.get("completed_conversation", False)
         if not isinstance(user_input, str) or not user_input.strip():
             return None
         if not isinstance(tool, str) or not tool.strip():
@@ -39,11 +41,14 @@ class PendingToolApprovalStore:
             return None
         if not isinstance(capability, str) or not capability.strip():
             return None
+        if not isinstance(completed_conversation, bool):
+            return None
         return PendingToolApproval(
             user_input=user_input.strip(),
             tool=tool.strip(),
             arguments=arguments,
             capability=capability.strip(),
+            completed_conversation=completed_conversation,
         )
 
     def save(self, approval: PendingToolApproval) -> PendingToolApproval:
