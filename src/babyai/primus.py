@@ -264,6 +264,26 @@ class Primus:
         repaired = self.llm.generate(repair_prompt)
         return self.agent.parse_tool_call(repaired)
 
+    def _repair_required_local_action(self, base: str, user_input: str) -> ToolCall | None:
+        if not self.repair_tool_calls or self.agent is None:
+            return None
+        repair_prompt = (
+            base
+            + "\n\nThe current user message explicitly requires fresh local machine evidence, "
+            + "but your previous draft did not contain a valid tool call. Do not answer from memory "
+            + "or invent local state. Return exactly one JSON object now with fields tool and arguments, "
+            + "and nothing else. Choose the available tool that matches the user's explicit local request."
+        )
+        repaired = self.llm.generate(repair_prompt)
+        call = self.agent.parse_tool_call(repaired)
+        if call is None:
+            return None
+        if call.name not in self.agent.tool_names():
+            return None
+        if not self.agent.tool_compatible_with_intent(user_input, call.name):
+            return None
+        return call
+
     def _conversational_fast_response(self, user_input: str) -> str | None:
         """Answer a tiny set of identity/safety questions without native tool confusion."""
 
@@ -552,6 +572,16 @@ class Primus:
                     ):
                         call = None
                         blocked_tool_call = True
+
+                requires_fresh_local_action = self.agent.requests_local_action(user_input)
+                if (
+                    call is None
+                    and not blocked_tool_call
+                    and self.repair_tool_calls
+                    and requires_fresh_local_action
+                ):
+                    call = self._repair_required_local_action(base, user_input)
+
                 if call is not None:
                     compound_prefix = ""
                     if parsed_call is not None:
@@ -579,6 +609,12 @@ class Primus:
                                     )
                                 )
                         response = compound_prefix + "\n\n" + response
+                elif requires_fresh_local_action:
+                    response = (
+                        "Мне нужны свежие локальные данные для этой части запроса, "
+                        "но я не смог безопасно подготовить действие. Локальные данные из памяти я не использовал."
+                    )
+                    remember_response = False
                 elif (
                     not blocked_tool_call
                     and self.repair_tool_calls
