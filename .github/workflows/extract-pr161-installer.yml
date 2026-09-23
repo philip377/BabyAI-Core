@@ -1,0 +1,40 @@
+name: Extract PR161 Installer
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/extract-pr161-installer.yml"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download release artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -L --fail --retry 3 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/10587213647/zip" \
+            -o release-artifact.zip
+
+      - name: Extract setup only
+        shell: bash
+        run: |
+          mkdir -p setup-only
+          unzip -j release-artifact.zip 'BabyAI-Setup-*.exe' 'BabyAI-Setup-*.exe.sha256' -d setup-only
+          test -f setup-only/BabyAI-Setup-0.1.0.exe
+          test -f setup-only/BabyAI-Setup-0.1.0.exe.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BabyAI-PR161-Setup-only
+          path: setup-only/*
+          if-no-files-found: error
