@@ -212,17 +212,23 @@ def test_model_placeholder_path_is_canonicalized_only_for_explicit_desktop_reque
     approvals = PendingToolApprovalStore(tmp_path / "pending.json")
     runtime = AgentRuntime(ModelDrivenAgentExecutor(permissions), approvals)
 
-    runtime.invoke(
-        "Посмотри файлы на рабочем столе",
-        runtime.parse_request(
-            '{"tool":"filesystem.list","arguments":{"path":"/home/user/Desktop"}}'
-        ),
-    )
-    pending = approvals.load()
-    assert pending is not None
-    assert pending.arguments == {"path": "~/Desktop"}
+    for model_path in (
+        "/home/user/Desktop",
+        "/home/username/Desktop",
+        "/users/owner/Desktop",
+        "C:/Users/username/Desktop",
+    ):
+        runtime.invoke(
+            "Посмотри файлы на рабочем столе",
+            runtime.parse_request(
+                '{"tool":"filesystem.list","arguments":{"path":"%s"}}' % model_path
+            ),
+        )
+        pending = approvals.load()
+        assert pending is not None
+        assert pending.arguments == {"path": "~/Desktop"}
+        approvals.clear()
 
-    approvals.clear()
     runtime.invoke(
         "Посмотри файлы в этой папке",
         runtime.parse_request(
