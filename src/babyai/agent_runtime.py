@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -153,7 +154,11 @@ class AgentRuntime:
             "/users/user/desktop",
             "c:/users/user/desktop",
         }
-        if normalized not in desktop_aliases:
+        model_home_desktop = bool(
+            re.fullmatch(r"/(?:home|users)/[^/]+/desktop", normalized)
+            or re.fullmatch(r"[a-z]:/users/[^/]+/desktop", normalized)
+        )
+        if normalized not in desktop_aliases and not model_home_desktop:
             return call
         arguments = dict(call.arguments)
         arguments["path"] = "~/Desktop"
