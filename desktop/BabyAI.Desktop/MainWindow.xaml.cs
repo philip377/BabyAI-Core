@@ -314,6 +314,7 @@ public sealed partial class MainWindow : Window
             if (displayedTtftMs is long ttft)
                 ReplyText.Text = $"Готово · первый фрагмент {FormatLatency(ttft)}";
             SetBusy(true);
+            await RefreshJobsAsync();
             await RefreshStatusAsync();
             if (ApprovalCard.Visibility != Visibility.Visible)
                 ApplyState(OrbState.Done);

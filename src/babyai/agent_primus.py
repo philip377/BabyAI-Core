@@ -13,6 +13,23 @@ class AgentRuntimePrimusMixin:
 
     agent_runtime: AgentRuntime | None
 
+    @staticmethod
+    def _remove_stale_episodic_history(prompt: str) -> str:
+        marker = "\n\nRecent episodic memory:\n"
+        start = prompt.find(marker)
+        if start < 0:
+            return prompt
+        end_candidates = [
+            position
+            for position in (
+                prompt.find("\n\nAvailable tools:", start + len(marker)),
+                prompt.find("\n\nUSER:", start + len(marker)),
+            )
+            if position >= 0
+        ]
+        end = min(end_candidates) if end_candidates else len(prompt)
+        return prompt[:start] + prompt[end:]
+
     def _base_prompt(self, user_input: str, *, include_tool_catalog: bool | None = None) -> str:
         base = super()._base_prompt(  # type: ignore[misc]
             user_input,
@@ -25,6 +42,8 @@ class AgentRuntimePrimusMixin:
         observation = runtime.observation_context()
         if not observation:
             return base
+
+        base = self._remove_stale_episodic_history(base)
 
         marker = f"USER: {user_input}"
         if marker in base:

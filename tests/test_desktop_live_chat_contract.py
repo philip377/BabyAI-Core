@@ -21,6 +21,13 @@ def test_desktop_live_chat_exposes_transcript_runtime_and_stop_controls() -> Non
     assert 'CreateConversationTurn("BabyAI", text)' in window
     assert "ReplaceConversationTurn" in window
 
+    # Streaming callbacks run while BabyAIBridgeClient holds its request gate.
+    # A nested bridge request here would self-deadlock the live chat stream.
+    stream_callback = window.split("_bridge.ChatStreamAsync(", 1)[1].split(
+        "chatCancellation.Token);", 1
+    )[0]
+    assert "RefreshJobsAsync()" not in stream_callback
+
     assert "CancellationToken cancellationToken = default" in bridge
     assert "Func<DesktopChatEvent, ValueTask> onEvent" in bridge
     assert "CancellationTokenSource.CreateLinkedTokenSource" in bridge

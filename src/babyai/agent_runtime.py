@@ -89,6 +89,13 @@ class AgentRuntime:
         observation = self._last_observation
         return "" if observation is None else observation.as_context()
 
+    @property
+    def has_observation(self) -> bool:
+        return self._last_observation is not None
+
+    def reset_observation(self) -> None:
+        self._last_observation = None
+
     def invoke(
         self,
         user_input: str,
