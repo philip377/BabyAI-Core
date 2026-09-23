@@ -264,6 +264,26 @@ class Primus:
         repaired = self.llm.generate(repair_prompt)
         return self.agent.parse_tool_call(repaired)
 
+    def _repair_required_local_action(self, base: str, user_input: str) -> ToolCall | None:
+        if not self.repair_tool_calls or self.agent is None:
+            return None
+        repair_prompt = (
+            base
+            + "\n\nThe current user message explicitly requires fresh local machine evidence, "
+            + "but your previous draft did not contain a valid tool call. Do not answer from memory "
+            + "or invent local state. Return exactly one JSON object now with fields tool and arguments, "
+            + "and nothing else. Choose the available tool that matches the user's explicit local request."
+        )
+        repaired = self.llm.generate(repair_prompt)
+        call = self.agent.parse_tool_call(repaired)
+        if call is None:
+            return None
+        if call.name not in self.agent.tool_names():
+            return None
+        if not self.agent.tool_compatible_with_intent(user_input, call.name):
+            return None
+        return call
+
     def _conversational_fast_response(self, user_input: str) -> str | None:
         """Answer a tiny set of identity/safety questions without native tool confusion."""
 
@@ -389,7 +409,14 @@ class Primus:
         if response is None:
             response = self._completed_action_response(call)
         if response is None:
-            response = self.llm.generate(self._tool_followup(base, call, tool_result))
+            followup = self._tool_followup(base, call, tool_result)
+            if pending.completed_conversation:
+                followup += (
+                    "\n\nThe non-local conversational parts of this same user turn were already "
+                    "answered before permission. Do not repeat those earlier answers; continue only "
+                    "with the requested result that depends on the tool result."
+                )
+            response = self.llm.generate(followup)
 
         self._remember_episode("babyai", response)
         return response
@@ -433,7 +460,11 @@ class Primus:
                         on_delta(delta)
             return StreamReply(reply=reply, metrics=metrics)
 
-        conversational_response = self._conversational_fast_response(user_input)
+        conversational_response = (
+            None
+            if self.agent is not None and self.agent.requests_local_action(user_input)
+            else self._conversational_fast_response(user_input)
+        )
         if conversational_response is not None:
             self._remember_episode("user", user_input)
             self._remember_episode("babyai", conversational_response)
@@ -522,7 +553,8 @@ class Primus:
         ):
             try:
                 blocked_tool_call = False
-                call = self.agent.parse_tool_call(first)
+                parsed_call = self.agent.parse_tool_call(first)
+                call = parsed_call
                 if (
                     call is not None
                     and call.name in self.agent.tool_names()
@@ -540,13 +572,49 @@ class Primus:
                     ):
                         call = None
                         blocked_tool_call = True
+
+                requires_fresh_local_action = self.agent.requests_local_action(user_input)
+                if (
+                    call is None
+                    and not blocked_tool_call
+                    and self.repair_tool_calls
+                    and requires_fresh_local_action
+                ):
+                    call = self._repair_required_local_action(base, user_input)
+
                 if call is not None:
+                    compound_prefix = ""
+                    if parsed_call is not None:
+                        compound_prefix = self.agent.visible_prefix_before_tool_call(first)
+                        if compound_prefix and self._contains_internal_tool_output(compound_prefix):
+                            compound_prefix = ""
+
                     response = self._execute_or_request_approval(
                         base,
                         user_input,
                         call,
                         on_state=on_state,
                     )
+                    if compound_prefix:
+                        if self.tool_approvals is not None:
+                            pending = self.tool_approvals.load()
+                            if pending is not None:
+                                self.tool_approvals.save(
+                                    PendingToolApproval(
+                                        user_input=pending.user_input,
+                                        tool=pending.tool,
+                                        arguments=pending.arguments,
+                                        capability=pending.capability,
+                                        completed_conversation=True,
+                                    )
+                                )
+                        response = compound_prefix + "\n\n" + response
+                elif requires_fresh_local_action:
+                    response = (
+                        "Мне нужны свежие локальные данные для этой части запроса, "
+                        "но я не смог безопасно подготовить действие. Локальные данные из памяти я не использовал."
+                    )
+                    remember_response = False
                 elif (
                     not blocked_tool_call
                     and self.repair_tool_calls

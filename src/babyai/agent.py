@@ -76,9 +76,13 @@ class AgentExecutor:
             "For the Windows desktop, use exactly ~/Desktop when the user says 'desktop' or "
             "'рабочий стол'; never use placeholder paths such as /home/user/Desktop or "
             "C:\\Users\\user\\Desktop. "
-            "To call a tool, output exactly one JSON object as the entire response and put nothing before it: "
-            '{"tool":"tool.name","arguments":{...}}. '
-            "A fenced ```json block containing only that object is also accepted. "
+            "For a request that only needs a local action, output exactly one JSON object as the entire "
+            "response: " '{"tool":"tool.name","arguments":{...}}. '
+            "For a mixed request that asks for ordinary conversation before a local action, first answer "
+            "only those non-local parts in natural language, then put exactly one tool JSON object as the "
+            "final block. Do not mention internal tool names or permission mechanics in that visible text. "
+            "Do not put natural-language text after the tool JSON; the host continues the turn after the "
+            "local action. A fenced ```json block containing only the final object is also accepted. "
             "If no tool is needed, answer normally."
         )
 
@@ -196,6 +200,31 @@ class AgentExecutor:
                 raise ToolProtocolError("Tool arguments must be a JSON object")
             return ToolCall(name=name.strip(), arguments=arguments)
         return None
+
+    def visible_prefix_before_tool_call(self, text: str) -> str:
+        """Return candidate user-visible prose placed before the final tool request."""
+
+        stripped = text.strip()
+        unwrapped = self._unwrap_json_block(stripped)
+        if unwrapped != stripped and self.parse_tool_call(unwrapped) is not None:
+            return ""
+
+        decoder = json.JSONDecoder()
+        starts: list[int] = []
+        for index, char in enumerate(stripped):
+            if char != "{":
+                continue
+            try:
+                value, _ = decoder.raw_decode(stripped[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict) and "tool" in value:
+                starts.append(index)
+        if not starts:
+            return ""
+
+        prefix = stripped[: starts[-1]].strip()
+        return re.sub(r"\s*```(?:json)?\s*$", "", prefix, flags=re.IGNORECASE).strip()
 
     def mentioned_tool(self, text: str) -> str | None:
         lower = text.lower()

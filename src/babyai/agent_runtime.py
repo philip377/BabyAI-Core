@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -24,15 +25,25 @@ class AgentObservation:
     arguments: dict[str, Any]
     result: str
     activity: str
+    continuation_only: bool = False
 
     def as_context(self) -> str:
+        continuation = (
+            " The non-local conversational parts of this same user turn were already answered before "
+            "permission. Do not repeat them; continue only with the requested result that depends on "
+            "this observation."
+            if self.continuation_only
+            else ""
+        )
         return (
             "Recent trusted agent observation (local machine evidence).\n"
             "Use it when it is relevant to the user's current request. Do not invent local files, "
             "processes, windows, system state, or action results beyond this observation. The "
             "requested local action has already completed: answer the current user directly from "
             "OBSERVATION and do not output another tool call or ask for permission again. If a "
-            "later user request needs different or newer evidence, the agent may be requested then.\n"
+            "later user request needs different or newer evidence, the agent may be requested then."
+            + continuation
+            + "\n"
             f"AGENT_ACTION: {self.tool}\n"
             f"ARGUMENTS: {json.dumps(self.arguments, ensure_ascii=False, separators=(',', ':'))}\n"
             f"OBSERVATION:\n{self.result}"
@@ -143,7 +154,11 @@ class AgentRuntime:
             "/users/user/desktop",
             "c:/users/user/desktop",
         }
-        if normalized not in desktop_aliases:
+        model_home_desktop = bool(
+            re.fullmatch(r"/(?:home|users)/[^/]+/desktop", normalized)
+            or re.fullmatch(r"[a-z]:/users/[^/]+/desktop", normalized)
+        )
+        if normalized not in desktop_aliases and not model_home_desktop:
             return call
         arguments = dict(call.arguments)
         arguments["path"] = "~/Desktop"
@@ -168,7 +183,12 @@ class AgentRuntime:
 
         # Consume before execution so a cancelled/crashed worker cannot replay the same grant.
         self.approvals.clear()
-        observation = self._execute(call, on_activity=on_activity, once=True)
+        observation = self._execute(
+            call,
+            on_activity=on_activity,
+            once=True,
+            continuation_only=pending.completed_conversation,
+        )
         return pending.user_input, observation
 
     def reject_pending(self) -> None:
@@ -182,6 +202,7 @@ class AgentRuntime:
         *,
         on_activity: Callable[[str], None] | None,
         once: bool,
+        continuation_only: bool = False,
     ) -> AgentObservation:
         activity = self.activity_text(call)
         if on_activity is not None:
@@ -192,6 +213,7 @@ class AgentRuntime:
             arguments=dict(call.arguments),
             result=result,
             activity=activity,
+            continuation_only=continuation_only,
         )
         self._last_observation = observation
         return observation

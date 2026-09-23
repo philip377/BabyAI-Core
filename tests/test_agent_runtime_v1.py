@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from collections import deque
 
+import pytest
+
 from babyai.agent_primus import AgentPrimus
 from babyai.agent_desktop import AgentDesktopCommands
 from babyai.agent_runtime import AgentRuntime, ModelDrivenAgentExecutor
 from babyai.config import BabyAIConfig
+from babyai.durable_chat_desktop import DurableChatDesktopCommands
 from babyai.identity import Identity
 from babyai.llm import LLMProvider
 from babyai.memory import SQLiteMemoryStore, SessionMemoryStore
@@ -54,7 +57,152 @@ def test_model_decides_to_call_agent_before_permission_handoff(tmp_path) -> None
     assert pending is not None
     assert pending.tool == "filesystem.list"
     assert pending.arguments == {"path": "~/Desktop"}
+    assert pending.completed_conversation is False
     assert not permissions.is_granted(Capability.FILESYSTEM_LIST)
+
+
+@pytest.mark.parametrize(
+    ("message", "prefix"),
+    [
+        (
+            "привет, как у тебя дела? что расскажешь о математике и еще сможешь посмотреть какие файлы есть у меня на рабочем столе",
+            "Привет! Всё нормально. Математика помогает описывать закономерности и решать задачи.",
+        ),
+        (
+            "просто расскажи о себе а потом проверь файлы на рабочем столе",
+            "Я локальный помощник, который может разговаривать и по явному запросу работать с данными компьютера.",
+        ),
+        (
+            "расскажи коротко про математику, потом посмотри рабочий стол и после этого скажи что нашёл",
+            "Коротко: математика изучает числа, структуры, формы и закономерности.",
+        ),
+    ],
+)
+def test_compound_chat_answers_before_permission_then_continues_from_observation(
+    tmp_path,
+    message: str,
+    prefix: str,
+) -> None:
+    folder = tmp_path / "Desktop"
+    folder.mkdir()
+    (folder / "notes.txt").write_text("x", encoding="utf-8")
+
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    approvals = PendingToolApprovalStore(tmp_path / "pending.json")
+    runtime = AgentRuntime(ModelDrivenAgentExecutor(permissions), approvals)
+    session = SessionMemoryStore(max_records=48)
+    provider = ScriptedProvider([
+        prefix
+        + "\n\n```json\n"
+        + '{"tool":"filesystem.list","arguments":{"path":"%s"}}' % folder.as_posix()
+        + "\n```",
+        "На рабочем столе вижу notes.txt.",
+    ])
+    primus = build_primus(tmp_path, provider, runtime, session)
+
+    first = primus.think(message)
+
+    assert first.startswith(prefix)
+    assert "разреш" in first.casefold()
+    pending = approvals.load()
+    assert pending is not None
+    assert pending.completed_conversation is True
+
+    final = primus.approve_pending_tool()
+
+    assert "notes.txt" in final
+    assert prefix not in final
+    assert "already answered before permission" in provider.prompts[-1]
+    assert "OBSERVATION:" in provider.prompts[-1]
+    assert approvals.load() is None
+
+
+def test_compound_desktop_turn_keeps_same_durable_job_through_permission(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    desktop = tmp_path / "real-desktop"
+    desktop.mkdir()
+    (desktop / "owner-notes.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(
+        "babyai.tools._resolve_local_path",
+        lambda path: desktop if str(path) == "~/Desktop" else path,
+    )
+
+    provider = ScriptedProvider([
+        "Математика полезна для описания закономерностей.\n\n"
+        '{"tool":"filesystem.list","arguments":{"path":"~/Desktop"}}',
+        "На рабочем столе вижу owner-notes.txt.",
+    ])
+    commands = DurableChatDesktopCommands(
+        BabyAIConfig(data_dir=tmp_path / "data", provider="native"),
+        persistent=True,
+    )
+    commands._provider_instance = provider
+
+    first = commands.stream_chat(
+        {
+            "message": (
+                "расскажи коротко про математику, потом посмотри рабочий стол "
+                "и после этого скажи что нашёл"
+            )
+        },
+        lambda event: None,
+    )
+
+    assert first["reply"].startswith("Математика полезна")
+    assert "разреш" in first["reply"].casefold()
+    assert first["job"]["status"] == "waiting_permission"
+    job_id = first["job"]["id"]
+
+    approved = commands.execute("approval.approve")
+
+    assert approved["job"]["id"] == job_id
+    assert approved["job"]["status"] == "completed"
+    assert "owner-notes.txt" in approved["reply"]
+    assert "already answered before permission" in provider.prompts[-1]
+
+
+def test_fresh_desktop_request_never_uses_stale_episode_without_tool_call(tmp_path) -> None:
+    folder = tmp_path / "Desktop"
+    folder.mkdir()
+    (folder / "fresh-now.txt").write_text("x", encoding="utf-8")
+
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    approvals = PendingToolApprovalStore(tmp_path / "pending.json")
+    runtime = AgentRuntime(ModelDrivenAgentExecutor(permissions), approvals)
+    session = SessionMemoryStore(max_records=48)
+    session.add(
+        "babyai",
+        "На рабочем столе вижу stale-old.txt и old-shortcut.lnk.",
+    )
+    provider = ScriptedProvider([
+        "Привет! На рабочем столе вижу stale-old.txt и old-shortcut.lnk.",
+        '{"tool":"filesystem.list","arguments":{"path":"%s"}}' % folder.as_posix(),
+        "Сейчас вижу fresh-now.txt.",
+    ])
+    primus = build_primus(tmp_path, provider, runtime, session)
+
+    first = primus.think(
+        "привет, как дела? что можешь рассказать? какие файлы на рабочем столе у меня есть?"
+    )
+
+    assert "разреш" in first.casefold()
+    assert "stale-old.txt" not in first
+    assert "old-shortcut.lnk" not in first
+    assert len(provider.prompts) == 2
+    assert "stale-old.txt" not in provider.prompts[0]
+    assert "old-shortcut.lnk" not in provider.prompts[0]
+    assert "fresh local machine evidence" in provider.prompts[1]
+    pending = approvals.load()
+    assert pending is not None
+    assert pending.tool == "filesystem.list"
+
+    final = primus.approve_pending_tool()
+
+    assert "fresh-now.txt" in final
+    assert "stale-old.txt" not in final
+    assert approvals.load() is None
 
 
 def test_model_placeholder_path_is_canonicalized_only_for_explicit_desktop_request(
@@ -64,17 +212,23 @@ def test_model_placeholder_path_is_canonicalized_only_for_explicit_desktop_reque
     approvals = PendingToolApprovalStore(tmp_path / "pending.json")
     runtime = AgentRuntime(ModelDrivenAgentExecutor(permissions), approvals)
 
-    runtime.invoke(
-        "Посмотри файлы на рабочем столе",
-        runtime.parse_request(
-            '{"tool":"filesystem.list","arguments":{"path":"/home/user/Desktop"}}'
-        ),
-    )
-    pending = approvals.load()
-    assert pending is not None
-    assert pending.arguments == {"path": "~/Desktop"}
+    for model_path in (
+        "/home/user/Desktop",
+        "/home/username/Desktop",
+        "/users/owner/Desktop",
+        "C:/Users/username/Desktop",
+    ):
+        runtime.invoke(
+            "Посмотри файлы на рабочем столе",
+            runtime.parse_request(
+                '{"tool":"filesystem.list","arguments":{"path":"%s"}}' % model_path
+            ),
+        )
+        pending = approvals.load()
+        assert pending is not None
+        assert pending.arguments == {"path": "~/Desktop"}
+        approvals.clear()
 
-    approvals.clear()
     runtime.invoke(
         "Посмотри файлы в этой папке",
         runtime.parse_request(
