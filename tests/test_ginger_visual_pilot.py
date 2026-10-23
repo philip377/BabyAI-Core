@@ -22,7 +22,7 @@ def _frame(status="possible_match", title="BRUNO BANANI MAN INTENSE EDP 30ML", c
 
 
 def test_existing_candidate_requires_exact_identity_not_auto_link():
-    result = interpret_ginger_frame(_frame())
+    result = interpret_ginger_frame(_frame(candidates=("BRUNO BANANI INTENSE (муж) EDP 30ML",)))
     assert result.state == "review_existing"
     assert result.next_step == "verify_exact_catalogue_identity"
     assert result.read_only
@@ -43,7 +43,7 @@ def test_unreadable_unselected_or_contradictory_frame_pauses():
 
 
 def test_ambiguous_flanker_is_never_linked():
-    result = interpret_ginger_frame(_frame("ambiguous"))
+    result = interpret_ginger_frame(_frame("ambiguous", candidates=("BRUNO BANANI INTENSE EDP 30ML",)))
     assert result.state == "review_ambiguity"
     assert result.next_step == "do_not_link_similar_variants"
 
@@ -170,3 +170,22 @@ def test_local_vision_start_script_is_loopback_and_manual_only():
     assert "Invoke-RestMethod" not in script
     assert "Start-Process" not in script
     assert "Ginger4" not in script
+
+
+def test_intense_source_cannot_match_base_even_if_vlm_says_possible_match():
+    result = interpret_ginger_frame(_frame())
+    assert result.state == "template_discovery_only"
+    assert result.next_step == "find_exact_flanker_or_propose_new_sku"
+    assert "intense" in " ".join(result.warnings)
+    assert result.as_dict()["ginger_updated"] is False
+
+
+def test_qahwa_source_cannot_match_plain_khamrah():
+    result = interpret_ginger_frame(
+        _frame(
+            title="LATTAFA KHAMRAH QAHWA EDP 100ML",
+            candidates=("LATTAFA KHAMRAH EDP 100ML",),
+        )
+    )
+    assert result.state == "template_discovery_only"
+    assert result.read_only
