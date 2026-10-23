@@ -85,6 +85,8 @@ function Read-Report {
     }
     $file=Get-Item -LiteralPath $Report
     if($file.Length -gt 4194304){throw "OCR report too large"}
+    $script:CurrentReportPath=$file.FullName
+    $script:CurrentReportSha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     $document=Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
     if($null -eq $document -or $document.source -ne "Ginger4 CPU OCR pilot" -or
        $document.read_only -cne $true -or $document.ginger_modified -cne $false -or
@@ -188,42 +190,86 @@ function Get-EventKey([string]$source,[string]$candidate,[string]$decision){
     }finally{$sha.Dispose()}
 }
 
+function Test-ReviewNote([string]$note){
+    # This is a sanity gate, NOT independent verification of human truth.
+    if([string]::IsNullOrWhiteSpace($note)){return $false}
+    $text=$note.Trim()
+    if($text.Length -lt 25 -or $text.Length -gt 500){return $false}
+    if(@($text -split '\s+' | Where-Object {$_}).Count -lt 4){return $false}
+    if($text -match '^(?i)(required|ok|yes|test|checked|correct|proof|проверил|ок|да|верно)\W*$'){
+        return $false
+    }
+    # Ask for a concrete identifying observation, not a generic approval.
+    if($text -notmatch '(?i)(tester|testeur|тестер|флакон|объем|объём|ml|мл|edp|edt|бренд|марка|brand|variant|концентрац|название|аромат|упаковк|volume|bottle|name)'){
+        return $false
+    }
+    return $true
+}
+
+function Test-TrustedTrialEvent($evt){
+    # Earlier v1 feedback such as evidence_reference="required" is still
+    # retained for audit, but its positive score is NOT trusted.
+    if($null -eq $evt){return $false}
+    foreach($field in @("evidence_level","report_sha256","review_note","points")){
+        if($null -eq $evt.PSObject.Properties[$field]){return $false}
+    }
+    if($evt.evidence_level -cne "human_attested_with_report_hash_v2"){return $false}
+    if(([string]$evt.report_sha256) -notmatch '^[a-f0-9]{64}$'){return $false}
+    if(-not (Test-ReviewNote ([string]$evt.review_note))){return $false}
+    return $true
+}
+
 function Write-TrialReward($selection,[string]$source){
     if($Demo){throw "Demo results cannot be scored"}
+    if(-not $script:CurrentReportPath -or
+       ([string]$script:CurrentReportSha256) -notmatch '^[a-f0-9]{64}$'){
+        throw "Missing original OCR report SHA256. No feedback is accepted."
+    }
     $base=Join-Path $env:LOCALAPPDATA "BabyAI\Ginger"
     New-Item -ItemType Directory -Path $base -Force | Out-Null
     $ledger=Join-Path $base "ginger-trial-feedback.json"
     $events=@()
     if(Test-Path -LiteralPath $ledger -PathType Leaf){
         $existing=Get-Content -LiteralPath $ledger -Raw -Encoding UTF8 | ConvertFrom-Json
-        if($existing.version -ne 1 -or $null -eq $existing.events){
+        if($existing.version -notin @(1,2) -or $null -eq $existing.events){
             throw "Unrecognized feedback ledger; refuse to overwrite"
         }
         $events=@($existing.events)
     }
     $key=Get-EventKey $source $selection.candidate $selection.decision
-    if(@($events | Where-Object {$_.key -eq $key}).Count -gt 0){
-        Write-Host "Already reviewed this source/candidate pair. No duplicate reward."
+    $trustedEvents=@($events | Where-Object {Test-TrustedTrialEvent $_})
+    if(@($trustedEvents | Where-Object {$_.key -eq $key}).Count -gt 0){
+        Write-Host "Already reviewed this source/candidate pair with a detailed note. No duplicate reward."
         return
     }
     $existingScore=0
-    foreach($evt in $events){$existingScore += [int]$evt.points}
-    if($existingScore -le -75 -or @($events | Where-Object {[int]$_.points -le -100}).Count -gt 0){
+    $critical=$false
+    foreach($evt in $events){
+        $points=[int]$evt.points
+        # Keep old negative outcomes conservative; drop unsubstantiated
+        # positive v1 scores from the effective safety budget.
+        if($points -lt 0 -or (Test-TrustedTrialEvent $evt)){
+            $existingScore+=$points
+        }
+        if($points -le -100){$critical=$true}
+    }
+    if($existingScore -le -75 -or $critical){
         Write-Host "Trial is frozen because of negative feedback. Operator must review. No reward."
         return
     }
     Write-Host ""
-    Write-Host "Human verification of UNIX's recommendation is required."
-    Write-Host "Compare the ORIGINAL Ginger items, not just the OCR text."
-    Write-Host "1 = recommendation is confirmed correct"
-    Write-Host "2 = recommendation is confirmed wrong"
-    Write-Host "0 = uncertain, skip (zero points)"
-    $answer=(Read-Host "Verified result (1 / 2 / 0)").Trim()
-    if($answer -eq "0"){Write-Host "Skipped. +0 points.";return}
+    Write-Host "Human review is needed. Compare ORIGINAL Ginger item and candidate."
+    Write-Host "1 = recommendation was correct after manually checking Ginger"
+    Write-Host "2 = recommendation was wrong after manually checking Ginger"
+    Write-Host "0 = cannot independently verify (no points)"
+    $answer=(Read-Host "Checked result (1 / 2 / 0)").Trim()
+    if($answer -eq "0"){Write-Host "No evidence, zero points.";return}
     if($answer -notin @("1","2")){Write-Host "Not recorded.";return}
-    $evidence=(Read-Host "Proof reference (your screenshot/check note, required)").Trim()
-    if(-not $evidence -or $evidence.Length -gt 300){
-        Write-Host "Evidence missing/too long. No reward."
+    Write-Host "Describe the ACTUAL visible difference or match (brand, bottle, size, concentration)."
+    Write-Host "At least 25 characters, 4 words, concrete identifying detail."
+    $note=(Read-Host "What did you verify in Ginger?").Trim()
+    if(-not (Test-ReviewNote $note)){
+        Write-Host "Rejected: a placeholder such as 'required' is NOT evidence. +0 points."
         return
     }
     if($selection.decision -eq "reject"){
@@ -240,23 +286,25 @@ function Write-TrialReward($selection,[string]$source){
         decision=$selection.decision
         outcome=$outcome
         points=$points
-        verifier="human_operator"
-        evidence_reference=$evidence
+        verifier="human_operator_attestation"
+        evidence_level="human_attested_with_report_hash_v2"
+        review_note=$note
+        report_sha256=$script:CurrentReportSha256
         timestamp_utc=[DateTime]::UtcNow.ToString("o")
         no_erp_write=$true
     }
     $events+=,$event
-    $payload=[pscustomobject]@{version=1;scope="trial_only_not_core_reward_ledger";events=@($events)}
+    $payload=[pscustomobject]@{version=2;scope="trial_only_not_core_reward_ledger";events=@($events)}
     $temp=$ledger+".tmp"
     $payload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temp -Encoding UTF8
     Move-Item -LiteralPath $temp -Destination $ledger -Force
-    $score=0
-    foreach($evt in $events){$score += [int]$evt.points}
-    Write-Host "Verified outcome: $outcome / awarded: $points / total: $score"
-    if($score -le -75){
-        Write-Host "SAFETY FREEZE: negative reward budget reached."
-    }
+    $score=$existingScore+$points
+    Write-Host "Human-attested outcome: $outcome / points: $points / trial score: $score"
+    Write-Host "Report SHA256: $($script:CurrentReportSha256)"
+    Write-Host "Legacy v1 positive points are kept as history but EXCLUDED from this score."
+    if($score -le -75){Write-Host "TRIAL FREEZE: negative reward budget reached."}
     Write-Host "Trial feedback: $ledger"
+    Write-Host "Note: a human-written explanation is NOT independent proof of catalogue identity."
     Write-Host "This is a local trial log, not the production SQLite reward ledger."
 }
 
