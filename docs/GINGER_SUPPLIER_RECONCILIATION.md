@@ -136,3 +136,24 @@ supervised Windows test.
 No live Ginger GUI automation, accessibility-tree inspection, SQL access,
 imports, mass commits, or background job processing is included. These
 require owner-supervised tests on the actual Windows machine.
+
+
+### Read-only inspection command (Windows)
+
+From a local checkout of the feature branch with the supplier price list
+visible in Ginger4, run:
+
+~~~powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\ginger-uia-probe.ps1 |
+  Out-File -FilePath .\ginger-uia-tree.json -Encoding utf8
+~~~
+
+The output lists UI Automation control types, IDs, classes and screen bounds,
+with NO control names by default. It makes no mouse/keyboard calls, changes no
+stars, and creates no mappings. Sharing the generated JSON still warrants a
+quick privacy check for window/process metadata. Do not enable -IncludeNames
+unless you explicitly agree to reveal UI element names.
+
+This inspection is not a working Ginger automation adapter. Some custom
+controls may show only as opaque panes; in that case, a supervised alternative
+is needed rather than making blind coordinate clicks.
