@@ -4,8 +4,9 @@
 # Run in a local Windows PowerShell session with Ginger4 already open.
 [CmdletBinding()]
 param(
-    [ValidateRange(1, 12)][int]$MaxDepth = 7,
-    [ValidateRange(1, 2000)][int]$MaxElements = 500,
+    [ValidateRange(1, 32)][int]$MaxDepth = 24,
+    [ValidateRange(1, 2500)][int]$MaxElements = 1200,
+    [ValidateSet("Both", "Control", "Raw")][string]$View = "Both",
     [switch]$IncludeNames
 )
 
@@ -35,7 +36,7 @@ if ($null -eq $root) {
 
 $script:found = 0
 $script:rows = [System.Collections.Generic.List[object]]::new()
-$walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+$script:walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 
 function Read-GingerElement {
     param(
@@ -71,25 +72,47 @@ function Read-GingerElement {
     }
 
     if ($Depth -ge $MaxDepth -or $script:found -ge $MaxElements) { return }
-    try { $child = $walker.GetFirstChild($Node) } catch { return }
+    try { $child = $script:walker.GetFirstChild($Node) } catch { return }
     while ($null -ne $child -and $script:found -lt $MaxElements) {
         Read-GingerElement -Node $child -Depth ($Depth + 1)
-        try { $child = $walker.GetNextSibling($child) } catch { break }
+        try { $child = $script:walker.GetNextSibling($child) } catch { break }
     }
 }
 
-Read-GingerElement -Node $root -Depth 0
+# Scan both control and raw UIA trees. Many custom WinForms components
+# expose container-only nodes in ControlView but deeper children in RawView.
+# Independent caps prevent runaway enumeration on a busy business app.
+$scans = [System.Collections.Generic.List[object]]::new()
+$viewNames = if ($View -eq "Both") { @("Control", "Raw") } else { @($View) }
+
+foreach ($viewName in $viewNames) {
+    $script:found = 0
+    $script:rows = [System.Collections.Generic.List[object]]::new()
+    $script:walker = if ($viewName -eq "Raw") {
+        [System.Windows.Automation.TreeWalker]::RawViewWalker
+    } else {
+        [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    }
+    Read-GingerElement -Node $root -Depth 0
+    $depthReached = if ($script:rows.Count -gt 0) {
+        ($script:rows | Measure-Object -Property depth -Maximum).Maximum
+    } else { 0 }
+    $scans.Add([pscustomobject]@{
+        view = $viewName
+        elements_seen = $script:found
+        deepest_recorded = [int]$depthReached
+        max_depth_hit = ($depthReached -ge $MaxDepth)
+        max_elements_hit = ($script:found -ge $MaxElements)
+        elements = $script:rows.ToArray()
+    })
+}
 
 [pscustomobject]@{
     source = "Ginger UI Automation read-only inspection"
     process_name = $gingerProcess.ProcessName
     max_depth = $MaxDepth
-    max_elements = $MaxElements
+    max_elements_per_view = $MaxElements
     names_included = [bool]$IncludeNames
-    elements_seen = $script:found
-    truncated = ($script:found -ge $MaxElements)
-    warning = "No product linking performed. Names are hidden by default."
-    # Windows PowerShell 5.1 can throw ArgumentException with @($list).
-    # ToArray() avoids the binder bug and keeps JSON serialization stable.
-    elements = $script:rows.ToArray()
-} | ConvertTo-Json -Depth 6
+    warning = "No input, clicks, SQL calls, or product linking performed."
+    views = $scans.ToArray()
+} | ConvertTo-Json -Depth 8
