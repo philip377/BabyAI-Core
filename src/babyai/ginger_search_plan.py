@@ -59,12 +59,14 @@ def plan_ginger_word_search(
     catalogue: Sequence[CatalogPosition],
     *,
     visible_words: Sequence[str] | None = None,
+    visible_search_columns: Sequence[str] | None = None,
     max_stars: int = 4,
 ) -> GingerWordSearchPlan:
     """Prioritize distinctive search words without assuming star click behavior.
 
-    The UI adapter should read visible_words from Ginger's word table. When it
-    cannot, tokens derived from the supplier title are only a preview.
+    The UI adapter should read visible_words and visible_search_columns from
+    Ginger's «Слово / Поиск» table. When unavailable, derived tokens are
+    only a preview.
     It must never click a word using inferred indices without checking the UI.
     """
     if not position.title.strip() or not position.supplier_id.strip():
@@ -75,6 +77,8 @@ def plan_ginger_word_search(
     raw = split_supplier_words(position.title) if visible_words is None else list(visible_words)
     if len(raw) > 128:
         raise ValueError("Too many visible Ginger search words")
+    if visible_search_columns is not None and len(visible_search_columns) != len(raw):
+        raise ValueError("Search-column text must align with visible Ginger word rows")
 
     docs: list[set[str]] = [
         set(normalize_text(item.title + " " + item.brand).split())
@@ -94,7 +98,19 @@ def plan_ginger_word_search(
                 or (norm.isdigit() and len(norm) <= 4) or len(norm) < 2):
             continue
         seen.add(norm)
-        frequency = document_frequency[norm]
+        alternatives = {norm}
+        if visible_search_columns is not None:
+            search_text = visible_search_columns[index]
+            if not isinstance(search_text, str) or len(search_text) > 4096:
+                raise ValueError("Ginger search-column entries must be bounded text")
+            # The right-hand «Поиск» cell may contain Ginger's own synonyms
+            # for this word; reuse them rather than assuming exact spelling.
+            alternatives.update(normalize_text(search_text).split())
+        frequencies = [
+            document_frequency[token] for token in alternatives
+            if token not in _SEARCH_NOISE and document_frequency[token] > 0
+        ]
+        frequency = min(frequencies) if frequencies else 0
         possible.append((index, norm, frequency, frequency > 0))
 
     # First prefer words actually present in the canonical catalogue. Among
