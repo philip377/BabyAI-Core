@@ -63,6 +63,13 @@ jobs:
             if ($result.Length -ne 2 -or $result[0] -ne 75 -or $result[1] -ne 18) {
               throw "Blue row not found correctly: $($result -join ',')"
             }
+            # Ginger's wide blue bottom dock must NOT count as a second row.
+            $graphics.FillRectangle($blue, 0, 365, 1200, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $withDock = [GingerSelectionBand]::Detect($path)
+            if ($withDock.Length -ne 2 -or $withDock[0] -ne 75 -or $withDock[1] -ne 18) {
+              throw "Blue bottom dock was mistaken for a selected row"
+            }
             $graphics.FillRectangle($blue, 40, 140, 260, 18)
             $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
             $ambiguous = [GingerSelectionBand]::Detect($path)
