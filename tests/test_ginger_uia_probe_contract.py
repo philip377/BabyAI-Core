@@ -61,3 +61,34 @@ def test_ginger_listview_probe_does_not_write_or_click():
     assert "invoke-sqlcmd" not in script
     assert "lvm_setitem" not in script
     assert "postmessage" not in script
+
+
+
+MSAA_PROBE = (
+    Path(__file__).resolve().parents[1]
+    / "scripts" / "windows" / "ginger-msaa-probe.ps1"
+)
+
+
+def test_ginger_msaa_probe_reads_accessible_children_only():
+    code = MSAA_PROBE.read_text(encoding="utf-8")
+    assert 'AccessibleObjectFromWindow' in code
+    assert 'get_accName(id)' in code
+    assert 'get_accRole(id)' in code
+    assert 'accChildCount' in code
+    assert 'SysListView32' in code
+    assert '[switch]$IncludeNames' in code
+    assert 'if (includeNames)' in code
+
+
+def test_ginger_msaa_probe_has_bounds_and_no_unsafe_input():
+    code = MSAA_PROBE.read_text(encoding="utf-8").lower()
+    assert 'maxsamplerows = 12' in code
+    assert 'maxvisited = 600' in code
+    assert 'remote' not in code.replace('no remote memory allocation', '')
+    assert 'writeprocessmemory' not in code
+    assert 'sendinput' not in code
+    assert 'sendkeys' not in code
+    assert 'setforegroundwindow' not in code
+    assert 'invoke-sqlcmd' not in code
+    assert 'postmessage' not in code
