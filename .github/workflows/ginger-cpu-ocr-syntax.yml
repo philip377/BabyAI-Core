@@ -52,8 +52,8 @@ jobs:
           $path = Join-Path $env:TEMP "ginger-selection-test.png"
           $bmp = New-Object System.Drawing.Bitmap(1200, 400)
           $graphics = [System.Drawing.Graphics]::FromImage($bmp)
-          $yellow = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,255,225))
-          $blue = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(173,216,230))
+          $yellow = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255,255,225))
+          $blue = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(173,216,230))
           try {
             $graphics.Clear([System.Drawing.Color]::White)
             $graphics.FillRectangle($yellow, 40, 30, 260, 340)
