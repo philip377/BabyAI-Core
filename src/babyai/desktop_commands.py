@@ -24,6 +24,7 @@ from .primus import Primus
 from .resident_native_brain import ResidentNativeBrainProvider
 from .runtime_trace import process_memory_metrics, trace
 from .ginger_local_vision import LocalGingerVision, LocalVisionError
+from .ginger_visual_pilot import GingerPilotError, observe_ginger_once
 from .screen_vision import ScreenCaptureStore
 from .tool_approval import PendingToolApproval, PendingToolApprovalStore
 from .windows_actions import APPLICATIONS
@@ -391,6 +392,18 @@ class DesktopCommands:
             if not store.delete(observation_id):
                 raise DesktopCommandError(f"Screen observation {observation_id} does not exist")
             return {"ok": True, "command": command, "observation_id": observation_id}
+
+        if command == "ginger.observe":
+            port = payload.get("port", 8080)
+            store = ScreenCaptureStore(
+                self.config.screen_captures_dir,
+                PermissionStore(self.config.permissions_file),
+            )
+            try:
+                result = observe_ginger_once(store, port=port)
+            except (GingerPilotError, LocalVisionError) as exc:
+                raise DesktopCommandError(str(exc)) from exc
+            return {"ok": True, "command": command, "ginger": result.as_dict()}
 
         if command == "vision.analyze.local":
             observation_id = str(payload.get("observation_id", "")).strip()
