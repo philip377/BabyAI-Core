@@ -197,6 +197,7 @@ if($CaptureSupplierGrid){
     $supplierGridLines=@(Run-Ocr $supplierGridImage (Join-Path $folder "supplier-grid") $lang 11)
 }
 $warnings=[System.Collections.Generic.List[string]]::new()
+$warnings.Add("OCR results are unverified; candidate names may contain look-alike Cyrillic/Latin characters and truncated sizes.")
 if($CaptureSupplierGrid){
     $warnings.Add("Supplier grid OCR lines are NOT a verified selected product row; visual confirmation required.")
     if($supplierGridLines.Count -eq 0){
@@ -239,6 +240,7 @@ $report=[ordered]@{
     supplier_grid_lines=$supplierGridLines
     supplier_grid_image_local=$supplierGridImage
     selected_supplier_row_verified=$false
+    safe_for_automatic_matching=$false
     warnings=$warnings.ToArray()
     images_local=@($leftPng,$rightPng)
     recommendation="review_only_no_linking"
