@@ -20,6 +20,7 @@ babyai-desktop-bridge = "babyai.desktop_bridge_cli:app"
 babyai-desktop = "babyai.desktop_commands_cli:app"
 babyai-workspace = "babyai.workspace_cli:app"
 babyai-retrieval = "babyai.workspace_retrieval_cli:app"
+babyai-ginger-reward = "babyai.ginger_reward_cli:app"
 
 [build-system]
 requires = ["hatchling"]
