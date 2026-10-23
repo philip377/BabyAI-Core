@@ -85,3 +85,17 @@ def test_cpu_ocr_detects_russian_training_data_and_upscales():
     assert "image_upscale_factor=2" in code
     assert '@ocrArgs' in code
     assert "--tessdata-dir" in code
+
+
+
+def test_cpu_ocr_can_inspect_upper_supplier_grid_without_guessing_selected_row():
+    code = SCRIPT.read_text(encoding="utf-8")
+    assert '[switch]$CaptureSupplierGrid' in code
+    assert 'if($CaptureSupplierGrid)' in code
+    assert 'supplier-grid.png' in code
+    assert 'supplier_grid_lines=$supplierGridLines' in code
+    assert 'supplier_grid_ocr_requested=[bool]$CaptureSupplierGrid' in code
+    assert 'selected_supplier_row_verified=$false' in code
+    assert 'Run-Ocr $supplierGridImage (Join-Path $folder "supplier-grid") $lang 11' in code
+    assert 'Ginger changed during supplier-grid capture' in code
+    assert 'NOT a verified selected product row' in code
