@@ -24,3 +24,13 @@ def test_ginger_uia_probe_remains_read_only():
     assert "sendkeys" not in script
     assert "mouse_event" not in script
     assert "invoke-sqlcmd" not in script
+
+
+def test_ginger_uia_probe_inspects_deep_raw_and_control_trees():
+    script = PROBE.read_text(encoding="utf-8")
+    assert '[ValidateRange(1, 32)][int]$MaxDepth = 24' in script
+    assert '[ValidateSet("Both", "Control", "Raw")]' in script
+    assert 'TreeWalker]::RawViewWalker' in script
+    assert 'TreeWalker]::ControlViewWalker' in script
+    assert 'views = $scans.ToArray()' in script
+    assert "max_depth_hit" in script
