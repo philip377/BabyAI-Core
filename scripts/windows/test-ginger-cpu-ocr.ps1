@@ -72,12 +72,21 @@ function Save-Region([System.Drawing.Rectangle]$Region,[string]$Path){
     $gfx=[System.Drawing.Graphics]::FromImage($bmp)
     try{
         $gfx.CopyFromScreen($clip.Location,[System.Drawing.Point]::Empty,$clip.Size)
-        $bmp.Save($Path,[System.Drawing.Imaging.ImageFormat]::Png)
+        # Scale 2x for the small 8-10pt text in WinForms listviews.
+        $scaled=New-Object System.Drawing.Bitmap(($clip.Width*2),($clip.Height*2))
+        $drawing=[System.Drawing.Graphics]::FromImage($scaled)
+        try {
+            $drawing.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $drawing.DrawImage($bmp,0,0,$scaled.Width,$scaled.Height)
+            $scaled.Save($Path,[System.Drawing.Imaging.ImageFormat]::Png)
+        } finally { $drawing.Dispose(); $scaled.Dispose() }
     }finally{$gfx.Dispose();$bmp.Dispose()}
 }
 function Run-Ocr([string]$Image,[string]$OutputBase,[string]$Language){
     # Tesseract writes UTF-8 on disk; avoids Windows PowerShell native encoding issues.
-    & $tesseract $Image $OutputBase "-l" $Language "--psm" "6" 2>$null | Out-Null
+    $ocrArgs=@($Image,$OutputBase,"-l",$Language,"--psm","6")
+    if($customTessdata){$ocrArgs+=@("--tessdata-dir",$customTessdata)}
+    & $tesseract @ocrArgs 2>$null | Out-Null
     if($LASTEXITCODE -ne 0){throw "Tesseract failed for $Image"}
     $raw=[System.IO.File]::ReadAllText(($OutputBase+".txt"),[System.Text.Encoding]::UTF8)
     return @($raw -split "\r?\n" | Where-Object {-not [string]::IsNullOrWhiteSpace($_)} | Select-Object -First 60)
@@ -94,7 +103,16 @@ if(-not $tesseract){
 if(-not $tesseract -or -not (Test-Path -LiteralPath $tesseract -PathType Leaf)){
     throw "Tesseract missing. Install: winget install -e --id UB-Mannheim.TesseractOCR; include Russian language (rus)."
 }
-$languages=@(& $tesseract "--list-langs" 2>&1 | ForEach-Object {"$_".Trim().ToLowerInvariant()})
+# Prefer language data in the user's profile. The setup helper installs
+# eng+rus there without administrator access to Program Files.
+$customTessdata=Join-Path $env:LOCALAPPDATA "BabyAI\Tesseract\tessdata"
+if(-not ((Test-Path -LiteralPath (Join-Path $customTessdata "eng.traineddata") -PathType Leaf) -and
+          (Test-Path -LiteralPath (Join-Path $customTessdata "rus.traineddata") -PathType Leaf))){
+    $customTessdata=""
+}
+$listArgs=@("--list-langs")
+if($customTessdata){$listArgs+=@("--tessdata-dir",$customTessdata)}
+$languages=@(& $tesseract @listArgs 2>&1 | ForEach-Object {"$_".Trim().ToLowerInvariant()})
 if($LASTEXITCODE -ne 0 -or $languages -notcontains "eng"){throw "Tesseract must have English OCR data (eng)."}
 $lang="eng"
 if($languages -contains "rus"){$lang="eng+rus"}
@@ -173,6 +191,8 @@ if($SupplierTitle){$hint=$SupplierTitle}
 $report=[ordered]@{
     source="Ginger4 CPU OCR pilot"
     engine="Tesseract CPU"
+    image_upscale_factor=2
+    language_data_directory=if($customTessdata){$customTessdata}else{"installed_default"}
     read_only=$true
     ginger_modified=$false
     local_only=$true
