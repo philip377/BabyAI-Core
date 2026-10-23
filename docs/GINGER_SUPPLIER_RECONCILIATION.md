@@ -294,3 +294,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\ginger-msaa-probe.ps1" -M
   scoped Win32 ListView text retrieval adapter or supervised visual path;
   never treat raw row indices as business item identity.
 - No existing UI or file is altered by this probe.
+
+
+### Follow-up: a 0-listview MSAA scan does not prove loss of native access
+
+Owner's ginger-msaa-report.json (23 October 2026) identified process Ginger4
+and visited 149 UI Automation controls, but matched **zero** ListView controls.
+The earlier ginger-listview-report.json found two native SysListView32 controls,
+with 5 and 8 items respectively. Therefore no MSAA text was actually sampled
+in this run.
+
+Possible explanations: Ginger was showing a different active tab/form;
+the traversal path differed; or nested WinForms controls temporarily changed.
+The report cannot distinguish these cases.
+
+The MSAA probe has been updated to enumerate *native child HWNDs* directly
+using Win32 EnumChildWindows/GetClassNameW. This does not rely on UIA ControlView
+tree depth. Its output includes:
+- native_child_windows_seen, class histogram, and listview_count;
+- each identified SysListView32 rectangle and native item count;
+- MSAA status / accessible child count / optional row-label sample.
+
+Always open the "Прайс-лист поставщика" matching page and leave the bottom
+two matching tables visible during the inspection. If listview_count is still
+zero, compare top_window_classes and capture a fresh owner screenshot of the
+current window; do not assume MSAA or the Ginger installation is defective.
