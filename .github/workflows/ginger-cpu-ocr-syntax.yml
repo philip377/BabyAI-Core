@@ -116,3 +116,55 @@ jobs:
             throw "Demo mode failed: $demo"
           }
           Write-Host "Ginger CPU-only noninteractive and demo test passed"
+
+      - name: Check CaptureFresh does not contaminate returned OCR JSON
+        shell: powershell
+        run: |
+          $sample = Join-Path $env:TEMP "ginger-fresh-report.json"
+          $data = @{
+            source = "Ginger4 CPU OCR pilot"
+            read_only = $true
+            ginger_modified = $false
+            local_only = $true
+            selected_row_color_band_detected = $true
+            selected_row_visual_candidate = "Bois 1920 Oro Rosso edp 100 mi"
+            right_catalogue_candidates = @("Bois 1920 ORO ROSSO edp 100ml TESTER")
+          }
+          $data | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $sample -Encoding UTF8
+          $env:GINGER_FAKE_REPORT = $sample
+          function global:powershell.exe {
+            $global:LASTEXITCODE = 0
+            Write-Output "CPU OCR completed: $env:GINGER_FAKE_REPORT"
+            Write-Output "Read-only: no clicks or catalogue writes"
+          }
+          $out = & "scripts/windows/test-ginger-trial.ps1" -CaptureFresh -NonInteractive 2>&1 | Out-String
+          if ($out -notmatch "Selected supplier OCR: Bois 1920 Oro Rosso" -or
+              $out -notmatch "tester_mismatch" -or
+              $out -notmatch "CPU OCR completed:") {
+            throw "Fresh report polluted by subprocess stdout: $out"
+          }
+          Write-Host "Fresh report was parsed and child logs shown separately."
+          $env:GINGER_FAKE_REPORT = ""
+          $wasDenied = $false
+          try {
+            & "scripts/windows/test-ginger-trial.ps1" -CaptureFresh -NonInteractive | Out-Null
+          } catch {
+            if ($_.Exception.Message -match "Refusing to use an older report") {
+              $wasDenied = $true
+            } else { throw }
+          }
+          if (-not $wasDenied) { throw "Missing new report must never use an old file" }
+          $broken = Join-Path $env:TEMP "ginger-old-schema.json"
+          $data.Remove("selected_row_visual_candidate")
+          $data | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $broken -Encoding UTF8
+          $missingDenied = $false
+          try {
+            & "scripts/windows/test-ginger-trial.ps1" -Report $broken -NonInteractive | Out-Null
+          } catch {
+            if ($_.Exception.Message -match "lacks 'selected_row_visual_candidate'") {
+              $missingDenied = $true
+            } else { throw }
+          }
+          if (-not $missingDenied) { throw "Old schema must be rejected clearly" }
+          Remove-Item function:\powershell.exe -ErrorAction SilentlyContinue
+          Write-Host "Old reports and missing properties are rejected safely"
