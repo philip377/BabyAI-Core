@@ -137,7 +137,7 @@ jobs:
             Write-Output "CPU OCR completed: $env:GINGER_FAKE_REPORT"
             Write-Output "Read-only: no clicks or catalogue writes"
           }
-          $out = & "scripts/windows/test-ginger-trial.ps1" -CaptureFresh -NonInteractive 2>&1 | Out-String
+          $out = & "scripts/windows/test-ginger-trial.ps1" -CaptureFresh -NonInteractive 6>&1 2>&1 | Out-String
           if ($out -notmatch "Selected supplier OCR: Bois 1920 Oro Rosso" -or
               $out -notmatch "tester_mismatch" -or
               $out -notmatch "CPU OCR completed:") {
