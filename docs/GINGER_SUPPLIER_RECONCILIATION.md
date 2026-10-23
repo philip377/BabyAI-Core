@@ -455,3 +455,54 @@ action journal. First supervised search-only star toggles with fresh visual
 verification, then linking with strict product ID/variant checks. New product
 creation stays behind an additional approval gate. The native text brain must
 never silently approve vision-only source-to-SKU mappings.
+
+
+## CPU-only acceptance test on low-power Windows workstations
+
+A separate self-contained PowerShell script provides a real read-only
+Ginger OCR test without installing the UNIX desktop release or using GPU:
+scripts/windows/test-ginger-cpu-ocr.ps1.
+
+Dependencies: Tesseract OCR local Windows executable and English and
+(recommended) Russian OCR language data. The script does not download models
+or software. It does not touch the Ginger SQL Server.
+
+Install the OCR engine with explicit owner action if it is missing:
+
+~~~powershell
+winget install -e --id UB-Mannheim.TesseractOCR
+~~~
+
+Include eng and rus training data during Windows installation. The script
+searches PATH and the standard Program Files install location. Without rus,
+the script records a warning and Cyrillic may be unreadable.
+
+Open Ginger4 on the SUPPLIER PRICE LIST matching page and download the script
+via GitHub Raw into Downloads. Run:
+
+~~~powershell
+cd "$env:USERPROFILE\Downloads"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\test-ginger-cpu-ocr.ps1" -SupplierTitle "Bruno Banani Man Intense edP 30ml"
+~~~
+
+The optional SupplierTitle flags absent variant tokens such as INTENSE and
+QAHWA in the candidate panel, but NEVER authorizes a mapping.
+
+The script verifies the real foreground process is Ginger4, enumerates native
+SysListView32 child windows (up to 30000 enumeration attempts), selects the
+two largest lower listviews, and crops only their on-screen rectangles.
+If the tables are not discoverable, it uses an approximate bottom window
+crop and flags this explicitly.
+
+It uses local Tesseract to OCR the PNG crops and creates a timestamped folder
+in Downloads with ginger-cpu-report.json, matching-left.png,
+catalogue-right.png and OCR text files. The JSON shows readable lines from
+both tables, chosen OCR language, warnings, and read-only flags. Nothing is
+clicked or written in Ginger. No network request is made.
+
+Review JSON for business-sensitive information before sharing it. No files
+or screenshots are uploaded automatically. A Windows PowerShell 5.1 syntax
+CI workflow checks parseability of the standalone test script.
+
+Next acceptance gate: compare recognized titles against the same screen.
+Only then build a strictly scoped and approval-gated click/verify loop.
