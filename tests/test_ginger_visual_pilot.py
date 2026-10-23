@@ -113,3 +113,60 @@ def test_no_implicit_screen_grant_in_pilot_source():
     assert "grant(" not in source
     assert "click" not in source
     assert "send_input" not in source
+
+
+
+def test_desktop_bridge_command_returns_observation_without_linking(tmp_path, monkeypatch):
+    from babyai.config import BabyAIConfig
+    from babyai.desktop_commands import DesktopCommands
+    from babyai.ginger_visual_pilot import GingerPilotObservation
+
+    def fake_observe(store, port):
+        assert port == 8077
+        assert store.directory == tmp_path / "screen_captures"
+        return GingerPilotObservation(
+            capture_id="a" * 32,
+            supplier_title="BRUNO BANANI MAN INTENSE",
+            words=("BRUNO", "INTENSE"),
+            candidates=("BRUNO BANANI",),
+            state="review_existing",
+            next_step="verify_exact_catalogue_identity",
+            warnings=(),
+        )
+
+    monkeypatch.setattr("babyai.desktop_commands.observe_ginger_once", fake_observe)
+    config = BabyAIConfig(data_dir=tmp_path, provider="echo")
+    result = DesktopCommands(config).execute("ginger.observe", {"port": 8077})
+    assert result["ok"] is True
+    assert result["ginger"]["supplier_title"] == "BRUNO BANANI MAN INTENSE"
+    assert result["ginger"]["read_only"] is True
+    assert result["ginger"]["ginger_updated"] is False
+
+
+def test_desktop_bridge_command_fails_closed_when_ginger_is_not_foreground(tmp_path, monkeypatch):
+    from babyai.config import BabyAIConfig
+    from babyai.desktop_commands import DesktopCommands, DesktopCommandError
+
+    def refused(store, port):
+        raise GingerPilotError("Activate Ginger4.exe before inspection")
+
+    monkeypatch.setattr("babyai.desktop_commands.observe_ginger_once", refused)
+    with pytest.raises(DesktopCommandError, match="Activate Ginger4.exe"):
+        DesktopCommands(BabyAIConfig(data_dir=tmp_path, provider="echo")).execute(
+            "ginger.observe"
+        )
+
+
+def test_local_vision_start_script_is_loopback_and_manual_only():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    script = (root / "scripts" / "windows" / "start-ginger-vision.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert '"127.0.0.1"' in script
+    assert '"local-vision"' in script
+    assert "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF:Q4_K_M" in script
+    assert "Invoke-WebRequest" not in script
+    assert "Invoke-RestMethod" not in script
+    assert "Start-Process" not in script
+    assert "Ginger4" not in script
