@@ -132,7 +132,7 @@ class LocalGingerVision:
         if observation is None:
             raise LocalVisionError("Existing capture not found")
         target = Path(observation.path)
-        if target.parent.resolve() != self.store.directory.resolve():
+        if target.is_symlink() or target.resolve().parent != self.store.directory.resolve():
             raise LocalVisionError("Capture escaped its directory")
         if target.name != observation_id + ".bmp":
             raise LocalVisionError("Unexpected capture path")
