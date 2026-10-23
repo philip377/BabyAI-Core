@@ -227,3 +227,38 @@ A user-approved bulk policy can eventually allow handling straightforward,
 verified EXISTING positions; creating NEW products remains approval-gated
 until an actual Ginger owner acceptance test establishes safe rollback and
 duplicate prevention.
+
+
+## October 23 UIA tree diagnosis and next read-only check
+
+The owner's ginger-uia-tree-v2.json was generated successfully:
+- ControlView: 152 elements, deepest 24 (depth limit reached).
+- RawView: 152 elements, deepest 24 (depth limit reached).
+- Both view trees report the same hierarchy; their control types are panes
+  rather than useful DataGrid/ListItem typed providers.
+- Crucially, **two real native SysListView32 controls** were found at the
+  bottom matching area of the Ginger4 window (2560 x 1440 screen):
+  - at x=0, y=1116, width=1280, height=302: the left search-word/synonym table;
+  - at x=1284, y=1092, width=1276, height=326: the right candidate catalogue.
+- The main supplier price list spans x~2 to 2558, y~374 to 1040 in the
+  recorded UI tree, but appeared as generic nested WinForms panes. The UIA
+  file does NOT expose source row text or identity.
+
+Read-only follow-up: scripts/windows/ginger-listview-probe.ps1.
+This specifically discovers native listviews and reports UIA supported pattern
+names, Win32 HWND availability and the number of visible list items via the
+non-mutating LVM_GETITEMCOUNT message with a 250 ms timeout. It does not read
+product/customer text or perform input or SQL operations.
+
+Run with Ginger4 showing the same supplier reconciliation page:
+
+~~~powershell
+cd "$env:USERPROFILE\Downloads"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\ginger-listview-probe.ps1" |
+  Out-File ".\ginger-listview-report.json" -Encoding utf8
+~~~
+
+The script needs to be downloaded from this branch first. If item counts or UIA
+patterns are missing, use that result to determine whether a supervised Win32
+or MSAA inspection is necessary. Do not fall back to blind fixed-coordinate
+clicking or assume that a pane exposes the underlying supplier's item IDs.
