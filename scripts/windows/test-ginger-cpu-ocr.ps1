@@ -328,9 +328,16 @@ if($CaptureSupplierGrid){
         $fullImage=[System.Drawing.Bitmap]::FromFile($supplierGridImage)
         try{
             $cropX=[int]($fullImage.Width*0.008)
-            $cropY=[math]::Max(0,($selectedRowBandY-5))
+            # Include ONLY the interior of the blue row. +/-5 px padding
+            # used to include bits of adjacent rows and made PSM 7 return
+            # empty OCR despite finding the correct selection highlight.
+            $cropY=[int]($selectedRowBandY+4)
             $cropW=[int]($fullImage.Width*0.168)
-            $cropH=[math]::Min(($fullImage.Height-$cropY),($selectedRowBandHeight+10))
+            $cropH=[int]($selectedRowBandHeight-8)
+            if($cropY -lt 0 -or $cropH -lt 14 -or
+               ($cropY+$cropH) -gt $fullImage.Height){
+                throw "Detected supplier row is too short or outside the captured image"
+            }
             $rectangle=[System.Drawing.Rectangle]::new(
                 [int]$cropX,[int]$cropY,[int]$cropW,[int]$cropH)
             $singleRow=$fullImage.Clone($rectangle,$fullImage.PixelFormat)
@@ -349,6 +356,8 @@ if($CaptureSupplierGrid){
     $warnings.Add("Supplier-grid selection is based on a blue pixel band, not a confirmed Ginger item ID.")
     if($null -eq $selectedRowBandY){
         $warnings.Add("No unique LightBlue selected NAME cell detected; cannot identify selected supplier row.")
+    } elseif([string]::IsNullOrWhiteSpace($selectedRowVisualCandidate)){
+        $warnings.Add("Selected LightBlue row detected, but OCR of its isolated name cell returned no title.")
     }
     if($supplierGridLines.Count -eq 0){
         $warnings.Add("No text could be recognized in the supplier grid.")
