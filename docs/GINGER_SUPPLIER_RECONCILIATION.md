@@ -319,3 +319,62 @@ Always open the "Прайс-лист поставщика" matching page and lea
 two matching tables visible during the inspection. If listview_count is still
 zero, compare top_window_classes and capture a fresh owner screenshot of the
 current window; do not assume MSAA or the Ginger installation is defective.
+
+
+## Optional local computer vision (new in PR #163, no clicks)
+
+The current BabyAI native text brain cannot analyze screenshot pixels.
+The already existing screen.capture tool saves BMP observations on Windows,
+behind user-controlled screen-capture permission.
+
+Added ginger_local_vision.LocalGingerVision and trusted desktop command
+vision.analyze.local. They send a previously captured BMP to a SEPARATE local
+multimodal model, never to a remote/cloud host. The model returns a validated
+object containing supplier-row title, starred search words, visible catalogue
+candidates, status and warnings. Executable action fields are rejected.
+
+This feature can use only 127.0.0.1:8080 or another explicitly supplied
+numeric loopback port in range 1024..65535. It disables proxies and redirects.
+No catalogue linking, editing, clicks or SQL access exist in this code.
+
+### Local model installation option
+
+llama.cpp's llama-server supports OpenAI-compatible base64/BMP multimodal
+requests. An example model for initial Windows experiments is a small
+Qwen2.5-VL 3B instruct quantized GGUF with multimodal projection support.
+With suitable llama.cpp executable, run:
+
+~~~powershell
+llama-server.exe -hf ggml-org/Qwen2.5-VL-3B-Instruct-GGUF:Q4_K_M --alias local-vision --host 127.0.0.1 --port 8080 -ngl 20
+~~~
+
+This downloads model files separately. BabyAI does not install the model
+or start llama.cpp automatically. On a GPU with 8GB VRAM, tune the number
+of GPU layers down if another model is using video memory. Do not start
+a cloud provider for business ERP screenshots. This setup is an example,
+not a verified working install on the user's Windows PC.
+
+### Trusted bridge command
+
+After the existing permissioned screen.capture generated an observation ID,
+submit its exact ID to the desktop bridge:
+
+~~~json
+{
+  "command": "vision.analyze.local",
+  "payload": {"observation_id": "paste-32-character-capture-id", "port": 8080}
+}
+~~~
+
+It returns a result whose vision.analysis_status is local_vision_read_only
+and vision.automated_linking is false. This is a trusted desktop command,
+not a free-form model-executable computer-action tool.
+
+### Full Ginger autonomy remains future work
+
+Perception is only one component. A supervised GUI driver must be created,
+with narrowly scoped keyboard/mouse primitives, process/window checks,
+snapshot-before-and-after validation, and journaling. Linking an existing
+product requires verifying actual product identity (brand, variant, type,
+volume and exact selected Ginger row), not only visual name similarity.
+Creating a NEW Ginger product remains separately approval-gated.
