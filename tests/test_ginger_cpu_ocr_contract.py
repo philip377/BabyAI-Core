@@ -131,3 +131,14 @@ def test_visual_selected_supplier_cell_is_single_unique_blue_band_not_guess():
     assert 'selected_supplier_row_verified=$false' in code
     assert 'safe_for_automatic_matching=$false' in code
     assert "No unique LightBlue selected NAME cell" in code
+
+
+
+def test_spatial_tesseract_does_not_need_external_tsv_config_file():
+    script = SCRIPT.read_text(encoding="utf-8")
+    # A per-user tessdata directory contains eng/rus weights but no configs/tsv.
+    assert '"-c","tessedit_create_tsv=1"' in script
+    assert '"-c","tessedit_create_txt=0"' in script
+    assert '$argsList+="tsv"' not in script
+    assert 'Read-Grid-OcrSegments' in script
+    assert '($OutputBase+".tsv")' in script
