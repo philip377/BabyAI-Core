@@ -142,6 +142,8 @@ if($SupplierTitle){
         }
     }
 }
+$hint=$null
+if($SupplierTitle){$hint=$SupplierTitle}
 $report=[ordered]@{
     source="Ginger4 CPU OCR pilot"
     engine="Tesseract CPU"
@@ -151,7 +153,7 @@ $report=[ordered]@{
     language=$lang
     capture_mode=$mode
     native_listviews_found=$views.Count
-    supplier_title_hint=if($SupplierTitle){$SupplierTitle}else{$null}
+    supplier_title_hint=$hint
     left_search_words=$leftLines
     right_catalogue_candidates=$rightLines
     warnings=$warnings.ToArray()
