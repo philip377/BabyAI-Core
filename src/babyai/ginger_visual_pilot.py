@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .ginger_local_vision import GingerVisualObservation, LocalGingerVision
+from .ginger_supplier_matcher import normalize_text
 from .screen_vision import ScreenCaptureStore
 
 
@@ -89,8 +90,28 @@ def interpret_ginger_frame(frame: GingerVisualObservation) -> GingerPilotObserva
     """Interpret model text conservatively: never resolve SKU from pixels alone."""
     state = "pause"
     next_step = "inspect_screenshot_manually"
+    warnings = list(frame.warnings)
     if frame.selected_supplier:
-        if frame.status == "possible_match" and frame.visible_catalog_candidates:
+        # Hard guard: high-impact variants cannot be treated as their base
+        # perfume just because the vision model says "possible_match".
+        protected_variants = {"intense", "qahwa", "elixir", "extreme", "absolu"}
+        source_tokens = set(normalize_text(frame.selected_supplier).split())
+        source_variants = source_tokens & protected_variants
+        candidate_tokens = [
+            set(normalize_text(title).split())
+            for title in frame.visible_catalog_candidates
+        ]
+        missing_variants = {
+            variant for variant in source_variants
+            if candidate_tokens and all(variant not in candidate for candidate in candidate_tokens)
+        }
+        if missing_variants:
+            state, next_step = "template_discovery_only", "find_exact_flanker_or_propose_new_sku"
+            warnings.append(
+                "Different fragrance variant: " + ", ".join(sorted(missing_variants))
+                + " is missing in all visible candidate titles"
+            )
+        elif frame.status == "possible_match" and frame.visible_catalog_candidates:
             state, next_step = "review_existing", "verify_exact_catalogue_identity"
         elif frame.status == "no_visible_candidates" and not frame.visible_catalog_candidates:
             state, next_step = "research_missing", "check_aliases_and_perfumery_sources"
@@ -104,7 +125,7 @@ def interpret_ginger_frame(frame: GingerVisualObservation) -> GingerPilotObserva
         candidates=frame.visible_catalog_candidates,
         state=state,
         next_step=next_step,
-        warnings=frame.warnings,
+        warnings=tuple(warnings),
     )
 
 
