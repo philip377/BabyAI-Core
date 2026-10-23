@@ -26,10 +26,10 @@ _TESTER_RE = re.compile(r"\b(?:tester|testeur|тестер|тест)\b", re.I)
 _SET_RE = re.compile(r"\b(?:set|gift\s+set|набор|комплект|kit)\b", re.I)
 _CONCENTRATIONS = (
     ("extrait", r"\b(?:extrait(?:\s+de\s+parfum)?|экстракт\s+духов)\b"),
-    ("parfum", r"\b(?:pure\s+parfum|духи|parfum|perfume)\b"),
     ("edp", r"\b(?:eau\s+de\s+parfum|парфюмированная\s+вода|парфюмерная\s+вода|edp|пв)\b"),
     ("edt", r"\b(?:eau\s+de\s+toilette|туалетная\s+вода|edt|тв)\b"),
     ("edc", r"\b(?:eau\s+de\s+cologne|одеколон|edc)\b"),
+    ("parfum", r"\b(?:pure\s+parfum|духи|parfum|perfume)\b"),
 )
 # Only the packaging descriptions below are discarded; flankers and product
 # names (Intense, Qahwa, Elixir, etc.) must remain distinguishable.
@@ -178,7 +178,7 @@ def _similarity(source: _Features, target: _Features) -> float:
     if source.volume_ml is None or target.volume_ml is None:
         score = min(score, 0.87)
     if not source.concentration or not target.concentration:
-        score = min(score, 0.89)
+        score = min(score, 0.94)
     return score
 
 
