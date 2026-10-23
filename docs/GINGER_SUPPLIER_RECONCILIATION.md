@@ -378,3 +378,80 @@ snapshot-before-and-after validation, and journaling. Linking an existing
 product requires verifying actual product identity (brand, variant, type,
 volume and exact selected Ginger row), not only visual name similarity.
 Creating a NEW Ginger product remains separately approval-gated.
+
+
+## 23 October: one-command UNIX visual pilot (read-only, not yet acceptance-tested)
+
+The pilot is now connected to the *existing* Windows screen-capture permission
+and to UNIX's trusted desktop bridge. It is also included as the optional
+read-only tool in the conversational AgentExecutor catalog:
+
+- "ginger.observe" (by chat: "посмотри Ginger").
+- Required capability: SCREEN_CAPTURE, handled by the existing permission
+  approval flow; the pilot never grants permission itself.
+- First inspect the active HWND's actual process executable path:
+  only an active process named Ginger4.exe is accepted, not a spoofed title.
+- Take a *fresh* active-window BMP with the existing ScreenCaptureStore.
+- Check the same Ginger foreground handle still owns focus after capture.
+  On focus change, discard the unexpected capture and stop.
+- Pass the BMP to the already implemented local-only VLM HTTP endpoint at
+  127.0.0.1:8080 (or explicitly selected loopback port).
+- Return source title, starred words, catalogue candidates, and a read-only
+  recommended next step.
+- A visible source INTENSE, QAHWA, ELIXIR, EXTREME or ABSOLU is protected:
+  if none of the shown catalogue titles contains that variant, the result
+  becomes "template_discovery_only", NOT an existing-product match.
+- A missing candidate remains "research_missing" (not automatically
+  authorization to create a SKU). Unreadable or contradictory screens pause.
+
+No mouse/keyboard clicks, no Ginger writes, no SQL access, no automated product
+linking, and no model-driven action coordinates are included.
+
+### Manual installation and first test
+
+1. Download trusted Windows llama.cpp binaries which contain llama-server.exe.
+   Model weights are not included in the BabyAI installer.
+2. Download scripts/windows/start-ginger-vision.ps1 from this PR branch.
+   Launch it from a PowerShell window:
+
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-ginger-vision.ps1 -LlamaServer "C:\path\to\llama-server.exe" -Port 8080 -GpuLayers 12
+~~~
+
+The script binds only 127.0.0.1, uses model repo
+ggml-org/Qwen2.5-VL-3B-Instruct-GGUF:Q4_K_M and alias local-vision.
+The first run may download several GB of model and projector weights.
+VRAM usage is unmeasured on the user's computer; if it doesn't fit, lower
+GpuLayers or try -CpuVisionProjector. Keep the separate console open for the
+pilot test and press Ctrl+C to stop.
+
+3. Open Ginger4 and explicitly select the SUPPLIER PRICE-LIST MATCHING window.
+   The active foreground application must be Ginger4.exe.
+4. Start UNIX/BabyAI with this branch. In chat, ask "посмотри Ginger",
+   then approve its normal screen-capture permission request.
+5. Alternatively, for trusted local CLI testing with a deliberately granted
+   screen capability, use:
+
+~~~powershell
+babyai permissions grant screen.capture
+babyai-desktop exec ginger.observe
+~~~
+
+   Revoke afterwards if the user does not want persistent capture access:
+
+~~~powershell
+babyai permissions revoke screen.capture
+~~~
+
+6. Verify that returned supplier text and the two bottom tables match the
+   screen and that the model did NOT suggest merging a variant with a base.
+   This command is currently a smoke test; it cannot click stars or link
+   products. Capture and visual processing may take time on an 8GB GPU.
+
+### Next implementation
+
+Build verified click/keyboard primitives *scoped to Ginger4 only* and an
+action journal. First supervised search-only star toggles with fresh visual
+verification, then linking with strict product ID/variant checks. New product
+creation stays behind an additional approval gate. The native text brain must
+never silently approve vision-only source-to-SKU mappings.
