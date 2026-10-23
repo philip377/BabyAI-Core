@@ -4,11 +4,13 @@ on:
   push:
     paths:
       - "scripts/windows/test-ginger-cpu-ocr.ps1"
+      - "scripts/windows/test-ginger-trial.ps1"
       - "scripts/windows/setup-ginger-russian-ocr.ps1"
       - ".github/workflows/ginger-cpu-ocr-syntax.yml"
   pull_request:
     paths:
       - "scripts/windows/test-ginger-cpu-ocr.ps1"
+      - "scripts/windows/test-ginger-trial.ps1"
       - "scripts/windows/setup-ginger-russian-ocr.ps1"
       - ".github/workflows/ginger-cpu-ocr-syntax.yml"
 
@@ -22,7 +24,7 @@ jobs:
         run: |
           $tokens = $null
           $parseErrors = $null
-          foreach ($relative in @("scripts/windows/test-ginger-cpu-ocr.ps1", "scripts/windows/setup-ginger-russian-ocr.ps1")) {
+          foreach ($relative in @("scripts/windows/test-ginger-cpu-ocr.ps1", "scripts/windows/test-ginger-trial.ps1", "scripts/windows/setup-ginger-russian-ocr.ps1")) {
             $parseErrors = $null
             $file = (Resolve-Path $relative).Path
             [System.Management.Automation.Language.Parser]::ParseFile(
@@ -84,3 +86,33 @@ jobs:
             $bmp.Dispose()
             Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
           }
+
+      - name: Trial feedback walkthrough with synthetic OCR report
+        shell: powershell
+        run: |
+          $path = Join-Path $env:TEMP "ginger-test-feedback.json"
+          $report = @{
+            source = "Ginger4 CPU OCR pilot"
+            read_only = $true
+            ginger_modified = $false
+            local_only = $true
+            selected_row_color_band_detected = $true
+            selected_row_visual_candidate = "Bois 1920 Oro Rosso edp 100 mi"
+            right_catalogue_candidates = @(
+              "Bois 1920 OVO ROSSO edp 100ml",
+              "Bois 1920 ORO ROSSO edp 100ml TESTER",
+              "Paolo ... OVO ROSSA edp 100ml"
+            )
+          }
+          $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $path -Encoding UTF8
+          $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/windows/test-ginger-trial.ps1" -Report $path -NonInteractive 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Trial smoke test failed: $output" }
+          if ($output -notmatch "tester_mismatch" -or $output -notmatch "different_brand" -or $output -notmatch "No buttons clicked") {
+            throw "Trial classification not demonstrated: $output"
+          }
+          Write-Host $output
+          $demo = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/windows/test-ginger-trial.ps1" -Demo 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0 -or $demo -notmatch "DEMO DATA ONLY") {
+            throw "Demo mode failed: $demo"
+          }
+          Write-Host "Ginger CPU-only noninteractive and demo test passed"
