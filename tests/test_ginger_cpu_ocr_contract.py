@@ -142,3 +142,13 @@ def test_spatial_tesseract_does_not_need_external_tsv_config_file():
     assert '$argsList+="tsv"' not in script
     assert 'Read-Grid-OcrSegments' in script
     assert '($OutputBase+".tsv")' in script
+
+
+
+def test_blue_row_detector_rejects_full_width_dock_but_not_name_cell():
+    code = SCRIPT.read_text(encoding="utf-8")
+    assert "guardX0 = (int)(img.Width * 0.245)" in code
+    assert "guardX1 = (int)(img.Width * 0.305)" in code
+    assert "int maxY = (int)(img.Height * 0.95)" in code
+    assert "guardMatches * 100 <= guardCount * 20" in code
+    assert "if (bands.Count != 1) return new int[0]" in code
