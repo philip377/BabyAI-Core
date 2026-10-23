@@ -115,3 +115,19 @@ def test_upper_grid_tsv_preserves_word_coordinates_for_visual_row_review():
     assert 'supplier_grid_segment_coordinates="relative_to_2x_supplier_grid_png"' in script
     assert 'selected_supplier_row_verified=$false' in script
     assert 'safe_for_automatic_matching=$false' in script
+
+
+
+def test_visual_selected_supplier_cell_is_single_unique_blue_band_not_guess():
+    code = SCRIPT.read_text(encoding="utf-8")
+    assert "GingerSelectionBand" in code
+    assert "LightBlue" in code
+    assert "if (bands.Count != 1) return new int[0]" in code
+    assert "px.G > px.R + 22 && px.B > px.G + 5" in code
+    assert "[ValidateSet(6,7,11)]" in code
+    assert 'selected-supplier-row.png' in code
+    assert 'selected_row_visual_candidate=$selectedRowVisualCandidate' in code
+    assert 'selected_row_color_band_detected=($null -ne $selectedRowBandY)' in code
+    assert 'selected_supplier_row_verified=$false' in code
+    assert 'safe_for_automatic_matching=$false' in code
+    assert "No unique LightBlue selected NAME cell" in code
