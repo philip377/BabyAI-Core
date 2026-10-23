@@ -91,3 +91,32 @@ def test_invalid_plan_arguments_fail_closed():
         plan_ginger_word_search(row, [], visible_words=[10])
     with pytest.raises(ValueError, match="Too many"):
         plan_ginger_word_search(row, [], visible_words=["A"] * 129)
+
+
+
+def test_ginger_search_column_synonyms_help_find_differently_spelled_name():
+    # UI left: Lazur / CORAL / RAY; Ginger's Поиск expansion knows LAZURE.
+    # Canonical Ginger catalogue spells the brand/name as LAZURE.
+    source = SupplierPosition("supplier", "Lazur CORAL RAY 80ml EDP TESTER")
+    catalogue = [CatalogPosition(
+        "sku", "LAZURE CORAL RAY 80ml EDP TESTER", brand="LAZURE",
+    )]
+    words = ["Lazur", "CORAL", "RAY", "80", "ml", "EDP", "TESTER"]
+    search = ['"LAZUR", "LAZURE"', '"CORAL"', '"RAY"', '"80"', '"ml"', '"edp"', '"tester"']
+    plan = plan_ginger_word_search(
+        source, catalogue, visible_words=words, visible_search_columns=search,
+    )
+    assert "Lazur" in plan.starred_words()
+    assert "CORAL" in plan.starred_words()
+    assert "RAY" in plan.starred_words()
+    assert "EDP" not in plan.starred_words()
+
+
+def test_misaligned_or_oversized_ginger_synonym_cells_fail_closed():
+    row = SupplierPosition("vendor", "AROMA EDP 50ml")
+    with pytest.raises(ValueError, match="align"):
+        plan_ginger_word_search(row, [], visible_words=["AROMA"], visible_search_columns=[])
+    with pytest.raises(ValueError, match="bounded"):
+        plan_ginger_word_search(
+            row, [], visible_words=["AROMA"], visible_search_columns=["a" * 4097],
+        )
