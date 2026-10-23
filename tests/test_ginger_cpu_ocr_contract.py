@@ -38,7 +38,7 @@ def test_cpu_ocr_pilot_never_automates_erp_or_calls_cloud():
 def test_cpu_ocr_pilot_does_not_use_captured_text_as_commands():
     code = SCRIPT.read_text(encoding="utf-8")
     assert 'No buttons clicked' not in code or 'ginger_modified=$false' in code
-    assert 'if($owner.ProcessName -ine "Ginger4")' in code
+    assert 'Get-Process -Name "Ginger4"' in code
     assert 'ActiveHandle() -ne $start.Hwnd' in code
     assert 'Remove-Item -LiteralPath $leftPng,$rightPng' in code
     assert '"intense","qahwa","elixir","extreme","absolu"' in code
@@ -55,3 +55,33 @@ def test_cpu_ocr_auto_activates_ginger_when_launched_from_terminal():
     assert 'Start-Sleep -Seconds 4' in code
     assert 'Ginger4 did not become active' in code
     assert 'More than one Ginger4 main window' in code
+
+
+
+SETUP = (
+    Path(__file__).resolve().parents[1] / "scripts" / "windows"
+    / "setup-ginger-russian-ocr.ps1"
+)
+
+
+def test_user_scope_russian_data_installer():
+    code = SETUP.read_text(encoding="utf-8")
+    assert "tesseract-ocr/tessdata_fast/main/rus.traineddata" in code
+    assert "Join-Path $env:LOCALAPPDATA" in code
+    assert "eng.traineddata" in code
+    assert "rus.traineddata" in code
+    assert "--list-langs" in code
+    assert "Invoke-WebRequest" in code
+    assert "Ginger4" not in code
+    assert "Start-Process" not in code
+    assert "Program Files" not in code or "Copy-Item" in code
+
+
+def test_cpu_ocr_detects_russian_training_data_and_upscales():
+    code = SCRIPT.read_text(encoding="utf-8")
+    assert "BabyAI\\Tesseract\\tessdata" in code
+    assert "2x for the small" in code
+    assert "language_data_directory=$dataDirLabel" in code
+    assert "image_upscale_factor=2" in code
+    assert '@ocrArgs' in code
+    assert "--tessdata-dir" in code
