@@ -73,7 +73,7 @@ function Save-Region([System.Drawing.Rectangle]$Region,[string]$Path){
     try{
         $gfx.CopyFromScreen($clip.Location,[System.Drawing.Point]::Empty,$clip.Size)
         # Scale 2x for the small 8-10pt text in WinForms listviews.
-        $scaled=New-Object System.Drawing.Bitmap(($clip.Width*2),($clip.Height*2))
+        $scaled=[System.Drawing.Bitmap]::new([int]($clip.Width*2),[int]($clip.Height*2))
         $drawing=[System.Drawing.Graphics]::FromImage($scaled)
         try {
             $drawing.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
