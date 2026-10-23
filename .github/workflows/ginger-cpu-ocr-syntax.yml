@@ -168,3 +168,59 @@ jobs:
           if (-not $missingDenied) { throw "Old schema must be rejected clearly" }
           Remove-Item function:\powershell.exe -ErrorAction SilentlyContinue
           Write-Host "Old reports and missing properties are rejected safely"
+
+      - name: Reject placeholder rewards; bind human trial note to OCR hash
+        shell: powershell
+        run: |
+          $oldLocalAppData = $env:LOCALAPPDATA
+          $env:LOCALAPPDATA = Join-Path $env:TEMP "ginger-trial-ci-v2"
+          New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
+          $reportPath = Join-Path $env:LOCALAPPDATA "synthetic-ginger-report.json"
+          $fake = @{
+            source = "Ginger4 CPU OCR pilot"
+            read_only = $true
+            ginger_modified = $false
+            local_only = $true
+            selected_row_color_band_detected = $true
+            selected_row_visual_candidate = "Bois 1920 Oro Rosso edp 100 mi"
+            right_catalogue_candidates = @(
+              "Bois 1920 OVO ROSSO edp 100ml",
+              "Bois 1920 ORO ROSSO edp 100ml TESTER"
+            )
+          }
+          $fake | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $reportPath -Encoding UTF8
+          $feedbackPath = Join-Path $env:LOCALAPPDATA "BabyAI\Ginger\ginger-trial-feedback.json"
+          function global:Read-Host {
+            param([string]$Prompt)
+            $answer = [string]$global:answers[$global:answerIndex]
+            $global:answerIndex++
+            return $answer
+          }
+          try {
+            $global:answers = @("1","1","required")
+            $global:answerIndex = 0
+            $invalid = & "scripts/windows/test-ginger-trial.ps1" -Report $reportPath 6>&1 2>&1 | Out-String
+            if ($invalid -notmatch "placeholder" -or (Test-Path $feedbackPath)) {
+              throw "A placeholder minted trial rewards: $invalid"
+            }
+            $global:answers = @("1","1","Checked Bois 1920 EDP 100ml regular bottle in Ginger UI")
+            $global:answerIndex = 0
+            $accepted = & "scripts/windows/test-ginger-trial.ps1" -Report $reportPath 6>&1 2>&1 | Out-String
+            if ($accepted -notmatch "Human-attested outcome" -or -not (Test-Path $feedbackPath)) {
+              throw "Real attestation not stored: $accepted"
+            }
+            $saved = Get-Content -LiteralPath $feedbackPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($saved.version -ne 2 -or $saved.events.Count -ne 1 -or
+                $saved.events[0].points -ne 3 -or
+                $saved.events[0].report_sha256 -notmatch '^[a-f0-9]{64}$') {
+              throw "Saved v2 event does not contain correct score and report fingerprint"
+            }
+            $replay = & "scripts/windows/test-ginger-trial.ps1" -Report $reportPath 6>&1 2>&1 | Out-String
+            if ($replay -notmatch "No duplicate reward") {
+              throw "One report/candidate should not be rewarded twice"
+            }
+            Write-Host "Proof placeholder rejected, review note recorded, v2 hash bound, duplicate denied"
+          } finally {
+            Remove-Item function:\Read-Host -ErrorAction SilentlyContinue
+            $env:LOCALAPPDATA = $oldLocalAppData
+          }
