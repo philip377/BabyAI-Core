@@ -738,3 +738,28 @@ read-only OCR analysis returns the unverified visual title and an explicit
 warning if it remains empty. On a different font scale the measured stripe
 may differ; recheck the generated selected-supplier-row.png before adapting
 the thresholds. No clicks, link actions, ERP writes or SQL access.
+
+
+### Sixth on-machine OCR report: selected source is now legible
+
+The owner's ginger-cpu-report(6).json confirms:
+- lower matching tables visible and OCR eng+rus locally on CPU;
+- selected_row_color_band_detected=true, at y=370, height=37 (2x image);
+- selected_row_visual_candidate="Bois 1920 Oro Rosso edp 100 mi".
+- Source row and catalog IDs are STILL unverified (selected_supplier_row_verified=false,
+  safe_for_automatic_matching=false). "mi" is an OCR error for the ml suffix.
+- Three catalogue candidate rows are visible: a regular BOIS 1920 OVO ROSSO
+  edp 100ml, a BOIS 1920 ORO ROSSO tester, and another brand Paolo.
+- Critical: the ordinary candidate reads Cyrillic "ОВО" instead of Latin
+  "ORO", so a text-only exact match cannot be assumed.
+
+The read-only CPU OCR candidate reviewer (module
+src/babyai/ginger_ocr_match_review.py) now classifies:
+- ordinary BOIS 1920 OCR title: possible_ocr_match_review;
+- tester: tester_mismatch;
+- Paolo: different_brand.
+No candidate is assigned a verified Ginger SKU or auto-link authorization,
+even when its visible text is exact. The reviewer only consumes previously
+captured JSON, does not call Windows APIs or SQL, and can run without any GPU.
+Before adding the action driver, verify source row identity and native target
+catalogue selection with a supervised test.
