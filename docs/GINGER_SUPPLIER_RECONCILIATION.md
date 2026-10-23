@@ -567,3 +567,41 @@ Keep the supplier matching page open. Confirm the next report has
 language = eng+rus and native_listviews_found = 2. Then manually inspect
 the two locally saved crops and compare OCR strings to the actual Ginger
 rows; no mapping can be authorized from approximate text.
+
+
+### 23 October second real OCR acceptance result (eng+rus)
+
+The owner submitted ginger-cpu-report(1).json after installing the per-user
+Russian traineddata and running the new 2x OCR:
+- engine: Tesseract CPU; language: eng+rus
+- capture_mode: native_listview_regions; native_listviews_found: 2
+- local_only: true; ginger_modified: false
+- Lower-left words were generally legible: BOIS, 1920, ORO, ROSSO, edp, 100.
+- Right titles included Bois 1920 ORO ROSSO edp 100ml and a tester,
+  but OCR still confuses ORO vs Cyrillic OVO, "100ml" vs "100m!" and
+  one other brand title.
+- Warnings were empty in the original report only because the v1 warnings
+  checked for missing languages/empty text; that is NOT an accuracy guarantee.
+
+IMPORTANT: Two lower panes alone cannot tell the agent which TOP supplier
+row is selected. Never infer source product identity from bottom search words.
+
+The updated CPU OCR script now accepts an explicit opt-in switch:
+-CaptureSupplierGrid. It captures a separate supplier-grid.png area between the
+upper window chrome and the two lower panes and OCRs it with sparse-text PSM 11.
+This extra scan may include price/commercial information from many supplier
+rows. It remains entirely local; users should REVIEW before sharing any file.
+The report adds supplier_grid_lines and selected_supplier_row_verified=false.
+It also explicitly reports safe_for_automatic_matching=false and an
+unverified-OCR warning, even when the reader detected nonempty text.
+
+Example rerun:
+
+~~~powershell
+cd "$env:USERPROFILE\Downloads"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\test-ginger-cpu-ocr.ps1" -CaptureSupplierGrid
+~~~
+
+The next planned acceptance gate is detecting the selected/highlighted supplier
+row with reliable UI evidence and verifying the line against a human-observed
+screen. Do not use OCR-only text to double-click a proposed item or create SKU.
