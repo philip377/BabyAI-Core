@@ -215,6 +215,8 @@ jobs:
                 $saved.events[0].report_sha256 -notmatch '^[a-f0-9]{64}$') {
               throw "Saved v2 event does not contain correct score and report fingerprint"
             }
+            $global:answers = @("1")
+            $global:answerIndex = 0
             $replay = & "scripts/windows/test-ginger-trial.ps1" -Report $reportPath 6>&1 2>&1 | Out-String
             if ($replay -notmatch "No duplicate reward") {
               throw "One report/candidate should not be rewarded twice"
