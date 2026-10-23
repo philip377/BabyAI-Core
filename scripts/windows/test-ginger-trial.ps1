@@ -56,10 +56,11 @@ function Read-Report {
                 $createdReports+=,$line.Substring($prefix.Length).Trim()
             }
         }
-        if($createdReports.Count -ne 1){
+        if($createdReports.Count -ne 1 -or
+           [string]::IsNullOrWhiteSpace([string]$createdReports[0])){
             throw "Fresh Ginger OCR did not return exactly one report path. Refusing to use an older report."
         }
-        $Report=[string]$createdReports[0]
+        $Report=([string]$createdReports[0]).Trim()
         if(-not (Test-Path -LiteralPath $Report -PathType Leaf)){
             throw "OCR returned a report path that does not exist."
         }
