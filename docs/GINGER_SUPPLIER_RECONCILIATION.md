@@ -763,3 +763,55 @@ even when its visible text is exact. The reviewer only consumes previously
 captured JSON, does not call Windows APIs or SQL, and can run without any GPU.
 Before adding the action driver, verify source row identity and native target
 catalogue selection with a supervised test.
+
+
+## Strict reward policy for UNIX/Ginger (October 23, 2026)
+
+A separate reward subsystem has been added to evaluate matching quality,
+not to control the ERP. Model self-reported success, OCR output, screenshots
+alone and unverified observations receive ZERO points. Only externally
+verified results recorded through the operator CLI alter the score.
+The operator CLI is NOT exposed as a model-callable tool.
+
+Reward policy (integer points):
+- verified correct link: +10
+- confirmed correct rejection: +5
+- confirmed justified abstention: +3
+- incorrect linked item: -100
+- critical mismatch (tester / size / concentration / fragrance variant): -250
+- unauthorized action: -500
+- incorrect rejection: -20
+- needless abstention: -3
+
+Scoring NEVER grants authority to create, modify or link Ginger products.
+It does not read SQL, click buttons or update model weights. The status
+field automatic_ginger_write_allowed remains false even at high scores.
+A score <= -75 or a critical incident freezes that session for operator
+review. A frozen session cannot earn points from subsequent events.
+A new session ID must be explicitly chosen by an operator. Separate Ginger
+permissions are unaffected.
+
+Local SQLite uses BEGIN IMMEDIATE transactions, a unique attempt ID,
+a no-repeated-decision index, and a hash-chained audit trail checked on
+read/write to flag accidental evidence edits. Hash chaining is NOT a
+cryptographic signature and cannot prevent rewriting by a privileged
+administrator. Evidence refs and verifier names are required but cannot
+be independently authenticated by the CLI; an operator must genuinely
+verify the outcome before recording it.
+
+Example when installed from this branch:
+
+~~~powershell
+babyai-ginger-reward preview "C:\Users\Admin\Downloads\ginger-cpu-test-20261023-184327\ginger-cpu-report.json"
+babyai-ginger-reward record --attempt-id attempt-001 --session-id trial-01 --supplier-row-key verified-row-001 --catalog-item-key verified-ginger-item-123 --decision reject --outcome correct_reject --verifier operator --evidence-reference "owner-checked-2026-10-23"
+babyai-ginger-reward status --session-id trial-01
+~~~
+
+A preview does not award anything. Correct rejection is rewarded only after
+a reviewer truly confirms that exact candidate is inappropriate. Never
+fabricate a Ginger ID from OCR. A real linking verdict requires checking
+the actual catalogue item ID and saved association inside Ginger.
+
+This is a deterministic feedback/audit component, NOT reinforcement learning
+or model fine-tuning. Future learning could use the verified judgments
+without giving the agent a way to award itself points.
