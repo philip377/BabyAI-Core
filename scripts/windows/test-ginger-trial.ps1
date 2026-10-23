@@ -29,7 +29,7 @@ function Read-Report {
             )
         }
     }
-    $downloads=Join-Path $env:USERPROFILE "Downloads"
+    $downloads = Join-Path $env:USERPROFILE "Downloads"
     if($CaptureFresh -and $Report.Trim()){
         throw "Choose -CaptureFresh OR -Report, not both."
     }
@@ -40,16 +40,46 @@ function Read-Report {
         }
         Write-Host "Reading the current Ginger screen locally..."
         $captureStarted=[DateTime]::UtcNow
-        # Capture the child console output locally and echo it via the HOST
-        # stream. Do not leak child stdout into Read-Report's return pipeline:
-        # that previously produced an array instead of the report object.
+        # IMPORTANT: do not leak child stdout into this function's output
+        # stream. It must return ONLY one JSON object to the caller.
         $ocrOutput=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ocr -CaptureSupplierGrid 2>&1)
         $ocrExit=$LASTEXITCODE
         foreach($message in $ocrOutput){Write-Host ([string]$message)}
-        if($ocrExit -ne 0){throw "Fresh Ginger OCR failed; no result or score recorded."}
+        if($ocrExit -ne 0){
+            throw "Fresh Ginger OCR failed. No stale report or score will be used."
+        }
         $createdReports=@()
+        $prefix="CPU OCR completed: "
         foreach($message in $ocrOutput){
-            $match=[regex]::Match([string]$message,'^CPU OCR completed:\s*(.+ginger-cpu-report\.json)\s*    if(-not $Report -or -not (Test-Path -LiteralPath $Report -PathType Leaf)){
+            $line=[string]$message
+            if($line.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){
+                $createdReports+=,$line.Substring($prefix.Length).Trim()
+            }
+        }
+        if($createdReports.Count -ne 1){
+            throw "Fresh Ginger OCR did not return exactly one report path. Refusing to use an older report."
+        }
+        $Report=[string]$createdReports[0]
+        if(-not (Test-Path -LiteralPath $Report -PathType Leaf)){
+            throw "OCR returned a report path that does not exist."
+        }
+        $fresh=Get-Item -LiteralPath $Report
+        if($fresh.LastWriteTimeUtc -lt $captureStarted.AddSeconds(-5)){
+            throw "The OCR report predates this capture. Refusing stale data."
+        }
+    }
+    if(-not $Report.Trim()){
+        $folders=@(Get-ChildItem -LiteralPath $downloads -Directory -Filter "ginger-cpu-test-*" -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending)
+        foreach($folder in $folders){
+            $candidate=Join-Path $folder.FullName "ginger-cpu-report.json"
+            if(Test-Path -LiteralPath $candidate -PathType Leaf){
+                $Report=$candidate
+                break
+            }
+        }
+    }
+    if(-not $Report -or -not (Test-Path -LiteralPath $Report -PathType Leaf)){
         throw "No Ginger report found. Use -CaptureFresh or -Report path to ginger-cpu-report.json."
     }
     $file=Get-Item -LiteralPath $Report
@@ -63,12 +93,12 @@ function Read-Report {
     $required=@("selected_row_visual_candidate","selected_row_color_band_detected","right_catalogue_candidates")
     foreach($field in $required){
         if($null -eq $document.PSObject.Properties[$field]){
-            throw "OCR report lacks '$field'. Download the current OCR script and rerun -CaptureFresh."
+            throw "OCR report lacks the required selected-row field. Download the current OCR script and rerun -CaptureFresh."
         }
     }
     if($document.selected_row_color_band_detected -cne $true -or
        [string]::IsNullOrWhiteSpace([string]$document.selected_row_visual_candidate)){
-        throw "The selected supplier title is unreadable. Select one Ginger row and rerun -CaptureFresh."
+        throw "Selected supplier title is unreadable. Select one Ginger row and repeat OCR."
     }
     if($null -eq $document.right_catalogue_candidates -or
        $document.right_catalogue_candidates -isnot [array]){
