@@ -262,3 +262,35 @@ The script needs to be downloaded from this branch first. If item counts or UIA
 patterns are missing, use that result to determine whether a supervised Win32
 or MSAA inspection is necessary. Do not fall back to blind fixed-coordinate
 clicking or assume that a pane exposes the underlying supplier's item IDs.
+
+
+## Read-only native list-view findings (owner file, 23 October 2026)
+
+The ginger-listview-report.json confirmed:
+- Two actual WindowsForms10.SysListView32 native controls have valid HWNDs.
+- Left word-search table: 5 rows (native LVM_GETITEMCOUNT returned ok).
+- Right internal-catalogue search table: 8 rows (native LVM_GETITEMCOUNT returned ok).
+- Both controls expose zero UIA supported patterns, so direct
+  SelectionPattern/GridPattern/TextPattern operation is NOT available.
+
+Do not confuse successful native row counts with proof of readable row text
+or programmable selection. The next diagnostic attempts MSAA
+(Windows Legacy Accessibility) on each ListView without process-memory
+injection or input. It samples at most 12 accessible child rows per table.
+
+Download scripts/windows/ginger-msaa-probe.ps1 from this branch and run in
+Windows PowerShell with the matching panel visible:
+
+~~~powershell
+cd "$env:USERPROFILE\Downloads"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\ginger-msaa-probe.ps1" -MaxSampleRows 12 -IncludeNames | Out-File ".\ginger-msaa-report.json" -Encoding utf8
+~~~
+
+- Including -IncludeNames is an explicit owner choice. It can reveal
+  names of suppliers and catalogue items; inspect JSON before sending.
+- If this reports child labels, the next Windows UI adapter can map row
+  identity to candidate names and only then evaluate selection mechanics.
+- If MSAA yields no names or no accessible children, investigate a strictly
+  scoped Win32 ListView text retrieval adapter or supervised visual path;
+  never treat raw row indices as business item identity.
+- No existing UI or file is altered by this probe.
