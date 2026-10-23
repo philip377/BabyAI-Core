@@ -714,3 +714,27 @@ blue name-cell row and a full-width bottom dock, followed by a second
 name-only blue band that must still be rejected as ambiguous. Do not
 automatically link based on a detected blue band; supplier row remains an
 unverified visual observation until its identity is corroborated.
+
+
+### Fifth on-machine CPU report: selected band found, single-line OCR blank
+
+User's ginger-cpu-report(5).json confirms:
+- selected_row_color_band_detected=true;
+- selected_row_band_y_in_2x_png=370, selected_row_band_height_in_2x_png=37;
+- selected_row_image_local was created, but selected_row_visual_candidate=null;
+- supplier row still not verified, and automatic linking remains disabled.
+
+Root cause reproduced with the previous supplied supplier-grid(1).png,
+rescaled 2x: the script's crop started 5 pixels ABOVE the light-blue
+row and extended 5 pixels BELOW it. Even short neighboring-row fragments
+cause Tesseract PSM 7 ("single line") to output empty text. A tight
+crop INSIDE the blue stripe reproduced
+"Bois 1920 Oro Rosso edp 100 mi" with Tesseract 5. The 100 mi
+suffix remains an OCR error, so this is not an authoritative SKU match.
+
+Fix: selected crop begins 4 pixels below the detected start and its height
+equals stripe height minus 8 pixels, with bounds validation. The same
+read-only OCR analysis returns the unverified visual title and an explicit
+warning if it remains empty. On a different font scale the measured stripe
+may differ; recheck the generated selected-supplier-row.png before adapting
+the thresholds. No clicks, link actions, ERP writes or SQL access.
