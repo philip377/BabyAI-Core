@@ -101,3 +101,17 @@ def test_cpu_ocr_can_inspect_upper_supplier_grid_without_guessing_selected_row()
     assert 'Run-Ocr $supplierGridImage (Join-Path $folder "supplier-grid") $lang 11' in code
     assert 'Ginger changed during supplier-grid capture' in code
     assert 'NOT a verified selected product row' in code
+
+
+
+def test_upper_grid_tsv_preserves_word_coordinates_for_visual_row_review():
+    script = SCRIPT.read_text(encoding="utf-8")
+    assert '$gridTop=$start.Y+[int]($start.H*0.16)' in script
+    assert 'function Read-Grid-OcrSegments' in script
+    assert 'if($customTessdata){$argsList+=@("--tessdata-dir",$customTessdata)}' in script
+    assert '$argsList+="tsv"' in script
+    assert 'Import-Csv -LiteralPath $tsvFile -Delimiter ' in script
+    assert 'supplier_grid_segments=$supplierGridSegments' in script
+    assert 'supplier_grid_segment_coordinates="relative_to_2x_supplier_grid_png"' in script
+    assert 'selected_supplier_row_verified=$false' in script
+    assert 'safe_for_automatic_matching=$false' in script
