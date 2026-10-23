@@ -828,3 +828,54 @@ unsafe pairs even if a new run begins with a fresh session ID or an otherwise
 high reward score. Positive feedback is not an authorization to link any item.
 This negative-memory lookup requires actual verified row/item identifiers;
 it is NOT meaningful with OCR-only text or invented IDs.
+
+
+## Immediately runnable CPU-only matching + reward trial
+
+A user-facing PowerShell script is now available:
+scripts/windows/test-ginger-trial.ps1.
+
+This is intended for REAL testing on the office Windows machines without
+a GPU, Python install, server modifications, or an installed UNIX executable.
+It reuses existing Tesseract OCR reports and evaluates the right-hand
+candidates in the supplier matching view. It never clicks or links products.
+
+Install it into the same Downloads directory as the earlier
+test-ginger-cpu-ocr.ps1 script. First try demo mode, no Ginger needed:
+
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\test-ginger-trial.ps1" -Demo
+~~~
+
+Next, with Ginger on its SUPPLIER PRICE LIST matching page, get a fresh
+capture and immediately review the candidates:
+
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\test-ginger-trial.ps1" -CaptureFresh
+~~~
+
+For a quicker test without capturing again, omit -CaptureFresh; the script
+selects the newest ginger-cpu-test-*/ginger-cpu-report.json in Downloads.
+Alternatively explicitly pass -Report "path to ginger-cpu-report.json".
+Use -NonInteractive to preview without any rating prompts.
+
+The PowerShell trial has the same conservative mismatch categories:
+tester, visibly different brand, fragrance variant, concentration, volume.
+Otherwise it ABSTAINS/asks for human review, rather than guessing a link.
+It never issues a "link" action or scores a successfully linked product.
+
+After printing the suggestions, the operator may choose one item, verify
+the recommendation against the actual Ginger catalogue, and answer yes/no
+with a human-supplied evidence reference. Correct verified reject earns +5,
+wrong reject -20, independently justified abstain +3, unjustified
+abstain -3. Skips, demo and unverifiable OCR get 0. Duplicate feedback
+for the same source/candidate/decision is not awarded twice. Trial stops
+granting points after accumulated score <= -75. The trial ledger is stored
+under LOCALAPPDATA/BabyAI/Ginger/ginger-trial-feedback.json.
+
+IMPORTANT: This is explicitly a separate, manual test ledger. It is NOT
+the production SQLite hash-chained reward ledger and does not train model
+weights. Do not treat a trial score as proof of automatic linking, verified
+catalogue IDs, or authorization to interact with the Ginger server. Neither
+script modifies the Ginger database. Production rewards remain gated by
+independent verified actions and IDs.
