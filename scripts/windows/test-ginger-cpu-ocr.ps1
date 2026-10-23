@@ -24,10 +24,18 @@ public static class GingerWin32Ocr {
  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h,out uint pid);
  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h,out RECT r);
  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+ [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+ [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h,int command);
  [DllImport("user32.dll",CharSet=CharSet.Unicode,EntryPoint="GetClassNameW")]
  static extern int GetClassName(IntPtr h,StringBuilder b,int n);
  [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h,EnumProc cb,IntPtr v);
  public static long ActiveHandle(){return GetForegroundWindow().ToInt64();}
+ public static bool Activate(long hwnd){
+   if(hwnd==0)return false;
+   IntPtr h=new IntPtr(hwnd);
+   ShowWindow(h,9); // SW_RESTORE; harmless window activation, no ERP writes
+   return SetForegroundWindow(h);
+ }
  public static uint ActivePid(){
    uint pid;GetWindowThreadProcessId(GetForegroundWindow(),out pid);return pid;
  }
@@ -90,11 +98,29 @@ $languages=@(& $tesseract "--list-langs" 2>&1 | ForEach-Object {"$_".Trim().ToLo
 if($LASTEXITCODE -ne 0 -or $languages -notcontains "eng"){throw "Tesseract must have English OCR data (eng)."}
 $lang="eng"
 if($languages -contains "rus"){$lang="eng+rus"}
+# A PowerShell command starts with Windows Terminal in the foreground.
+# Locate Ginger4.exe by real process identity, then activate its main window.
+# This does not click any controls or modify the Ginger database.
+$gingerProcesses=@(Get-Process -Name "Ginger4" -ErrorAction SilentlyContinue |
+    Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero })
+if($gingerProcesses.Count -eq 0){throw "Ginger4 is not open. Start Ginger and open the supplier matching page."}
+if($gingerProcesses.Count -gt 1){throw "More than one Ginger4 main window found. Close extra instances for a safe test."}
+$ginger=$gingerProcesses[0]
+$gingerHwnd=[int64]$ginger.MainWindowHandle
+if([GingerWin32Ocr]::ActivePid() -ne [uint32]$ginger.Id){
+    Write-Host "Switching from PowerShell to Ginger4 window..."
+    [GingerWin32Ocr]::Activate($gingerHwnd) | Out-Null
+    Start-Sleep -Milliseconds 750
+}
+if([GingerWin32Ocr]::ActivePid() -ne [uint32]$ginger.Id){
+    Write-Host "Windows prevented automatic switching. Click the Ginger window now (4 seconds)."
+    Start-Sleep -Seconds 4
+}
 $start=[GingerWin32Ocr]::Active()
 $pidOfWindow=[GingerWin32Ocr]::ActivePid()
-if($start.Hwnd -eq 0 -or $pidOfWindow -eq 0){throw "Open Ginger4 first."}
-$owner=Get-Process -Id $pidOfWindow -ErrorAction Stop
-if($owner.ProcessName -ine "Ginger4"){throw "Click Ginger4 before running this test. Foreground: $($owner.ProcessName)"}
+if($start.Hwnd -eq 0 -or $pidOfWindow -ne [uint32]$ginger.Id){
+    throw "Ginger4 did not become active. Open its supplier matching page and retry."
+}
 if($start.W -lt 700 -or $start.H -lt 440){throw "Maximize Ginger4 to show both bottom tables."}
 $views=[GingerWin32Ocr]::ListViews($start.Hwnd)
 $possible=@($views.ToArray() | Where-Object {
