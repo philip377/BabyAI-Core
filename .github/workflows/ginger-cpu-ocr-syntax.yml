@@ -161,7 +161,7 @@ jobs:
           try {
             & "scripts/windows/test-ginger-trial.ps1" -Report $broken -NonInteractive | Out-Null
           } catch {
-            if ($_.Exception.Message -match "lacks 'selected_row_visual_candidate'") {
+            if ($_.Exception.Message -match "lacks the required selected-row field") {
               $missingDenied = $true
             } else { throw }
           }
