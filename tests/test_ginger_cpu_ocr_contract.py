@@ -109,7 +109,7 @@ def test_upper_grid_tsv_preserves_word_coordinates_for_visual_row_review():
     assert '$gridTop=$start.Y+[int]($start.H*0.16)' in script
     assert 'function Read-Grid-OcrSegments' in script
     assert 'if($customTessdata){$argsList+=@("--tessdata-dir",$customTessdata)}' in script
-    assert '$argsList+="tsv"' in script
+    assert '"-c","tessedit_create_tsv=1"' in script
     assert 'Import-Csv -LiteralPath $tsvFile -Delimiter ' in script
     assert 'supplier_grid_segments=$supplierGridSegments' in script
     assert 'supplier_grid_segment_coordinates="relative_to_2x_supplier_grid_png"' in script
@@ -141,7 +141,7 @@ def test_spatial_tesseract_does_not_need_external_tsv_config_file():
     assert '"-c","tessedit_create_txt=0"' in script
     assert '$argsList+="tsv"' not in script
     assert 'Read-Grid-OcrSegments' in script
-    assert '($OutputBase+".tsv")' in script
+    assert '$tsvFile=$OutputBase+".tsv"' in script
 
 
 
