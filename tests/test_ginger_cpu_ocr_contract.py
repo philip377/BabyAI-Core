@@ -42,3 +42,16 @@ def test_cpu_ocr_pilot_does_not_use_captured_text_as_commands():
     assert 'ActiveHandle() -ne $start.Hwnd' in code
     assert 'Remove-Item -LiteralPath $leftPng,$rightPng' in code
     assert '"intense","qahwa","elixir","extreme","absolu"' in code
+
+
+
+def test_cpu_ocr_auto_activates_ginger_when_launched_from_terminal():
+    code = SCRIPT.read_text(encoding="utf-8")
+    assert 'Get-Process -Name "Ginger4"' in code
+    assert 'SetForegroundWindow' in code
+    assert 'ShowWindow' in code
+    assert '::Activate($gingerHwnd)' in code
+    assert '::ActivePid() -ne [uint32]$ginger.Id' in code
+    assert 'Start-Sleep -Seconds 4' in code
+    assert 'Ginger4 did not become active' in code
+    assert 'More than one Ginger4 main window' in code
