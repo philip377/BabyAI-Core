@@ -527,3 +527,43 @@ Replace the old downloaded .ps1 with the latest GitHub Raw before rerunning.
 Tesseract does not need reinstalling. If the foreground issue recurs,
 check that Ginger4 is open and the supplier matching form is visible, then
 report the new console error.
+
+
+### Real CPU OCR result and Russian training data improvement
+
+The owner ran the CPU OCR script on Ginger4 (23 October 2026) and returned
+ginger-cpu-report.json. It confirmed:
+
+- capture_mode = native_listview_regions; native_listviews_found = 2.
+- local_only, read_only, ginger_modified = false.
+- Tesseract language = eng only; Russian model unavailable.
+- Right catalogue text partially readable, e.g. Bois 1920 ORO ROSSO
+  edp 100ml and a tester row; Cyrillic and numeric suffixes inaccurate.
+- Left search-word area contained badly garbled Cyrillic.
+- No automatic match should be attempted from these OCR strings alone.
+
+To remove the blocker, scripts/windows/setup-ginger-russian-ocr.ps1 now downloads
+the Russian rus.traineddata model from the official tesseract-ocr/tessdata_fast
+repository. It copies the installed eng.traineddata into a PER-USER folder under
+LOCALAPPDATA/BabyAI/Tesseract/tessdata. No admin privileges, no change to
+Program Files, and no calls to Ginger. Download is a separate, explicit owner
+action, never implicit in the read-only OCR script.
+
+The updated test-ginger-cpu-ocr.ps1 automatically discovers this folder and
+passes --tessdata-dir to Tesseract. It also scales matching-pane crops by 2x
+before OCR to assist recognition of small WinForms text. The OCR script itself
+remains offline and read-only.
+
+Run from a PowerShell console in Downloads after saving BOTH updated .ps1
+files via GitHub Raw:
+
+~~~powershell
+cd "$env:USERPROFILE\Downloads"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\setup-ginger-russian-ocr.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\test-ginger-cpu-ocr.ps1"
+~~~
+
+Keep the supplier matching page open. Confirm the next report has
+language = eng+rus and native_listviews_found = 2. Then manually inspect
+the two locally saved crops and compare OCR strings to the actual Ginger
+rows; no mapping can be authorized from approximate text.
