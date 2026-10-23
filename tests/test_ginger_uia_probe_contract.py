@@ -92,3 +92,19 @@ def test_ginger_msaa_probe_has_bounds_and_no_unsafe_input():
     assert 'setforegroundwindow' not in code
     assert 'invoke-sqlcmd' not in code
     assert 'postmessage' not in code
+
+
+
+def test_ginger_msaa_probe_independently_enumerates_native_child_hwnds():
+    code = MSAA_PROBE.read_text(encoding="utf-8")
+    assert 'EnumChildWindows' in code
+    assert 'GetClassNameW' in code
+    assert 'GetWindowRect' in code
+    assert 'native_child_windows_seen' in code
+    assert 'top_window_classes' in code
+    assert 'native_item_count' in code
+    assert 'GetListItemCount' in code
+    assert 'msaa_status' in code
+    assert '[GingerNativeInspector]::ReadMsaa(' in code
+    # UIA tree depth is no longer used for finding the native matching panes.
+    assert 'TreeWalker' not in code
