@@ -93,7 +93,7 @@ def review_ginger_cpu_ocr_report(report: Mapping[str, Any]) -> dict[str, Any]:
 
     for raw_line in candidates:
         clean = _extract_title(raw_line)
-        if not clean or normalize_text(clean) in _HEADER:
+        if not clean or clean.casefold() in _HEADER or normalize_text(clean) in {"tovar tsena", "nazvanie v prayse"}:
             continue
         candidate_norm = _name_for_comparison(clean)
         if not candidate_norm:
