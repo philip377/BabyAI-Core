@@ -879,3 +879,27 @@ weights. Do not treat a trial score as proof of automatic linking, verified
 catalogue IDs, or authorization to interact with the Ginger server. Neither
 script modifies the Ginger database. Production rewards remain gated by
 independent verified actions and IDs.
+
+
+### Real workstation trial: CaptureFresh mixed stdout with JSON
+
+The owner ran test-ginger-trial.ps1 -Demo successfully: the ordinary BOIS
+1920 ORO ROSSO candidate required review, the tester was rejected and the
+Paolo brand was rejected. The first real -CaptureFresh invocation failed
+with PowerShell StrictMode PropertyNotFoundException for the
+selected_row_visual_candidate property.
+
+Root cause: Read-Report invoked the child CPU OCR PowerShell script directly,
+allowing its console stdout to appear in the function's return pipeline
+alongside the parsed JSON. The caller then received an array of text
+messages and the JSON object instead of one report.
+
+Fix: collect child stdout and display it through Write-Host, extract the
+single literal "CPU OCR completed: <path>" line, verify the new report's
+existence and modification time, and never fall back to stale reports
+after a failed -CaptureFresh. Explicit schema validation prevents raw
+property errors with older OCR reports. The Windows synthetic regression
+test checks mixed stdout, missing fresh output and missing properties.
+
+The GUI is not yet automated. The user can rerun the updated script
+without reinstalling Tesseract or changing any Ginger server settings.
