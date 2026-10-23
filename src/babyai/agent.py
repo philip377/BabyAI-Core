@@ -8,6 +8,7 @@ from typing import Any, Callable
 from .observer import Observer
 from .permissions import Capability, PermissionStore
 from .screen_vision import ScreenCaptureStore
+from .ginger_visual_pilot import observe_ginger_once
 from .tools import Toolset
 from .windows_actions import WindowsActions
 
@@ -54,6 +55,7 @@ class AgentExecutor:
             "window.activate",
             "system.lock",
             "screen.capture",
+            "ginger.observe",
         )
 
     def catalog(self) -> str:
@@ -70,6 +72,7 @@ class AgentExecutor:
             "- window.activate {\"handle\": 123}\n"
             "- system.lock {}\n"
             "- screen.capture {\"mode\": \"active_window|primary_screen\"}\n"
+            "- ginger.observe {\"port\": 8080} (READ-ONLY active Ginger4 screen, local model required)\n"
             "If the user's request requires observing the local computer and one of these tools can answer it, "
             "call the tool immediately. Do not discuss which tools exist, do not explain permission mechanics, "
             "and do not ask the user to grant permission yourself; the BabyAI host handles permission prompts. "
@@ -171,6 +174,11 @@ class AgentExecutor:
             "system.lock": (
                 "lock workstation", "lock computer", "заблокируй компьютер", "заблокируй экран",
             ),
+            "ginger.observe": (
+                "посмотри ginger", "проверь ginger", "прочитай ginger",
+                "ginger observe", "inspect ginger", "read ginger",
+                "посмотри джинджер", "проверь джинджер",
+            ),
             "screen.capture": (
                 "capture screen", "take screenshot", "see my screen", "active window screenshot",
                 "сделай скриншот", "сними экран", "посмотри на экран", "увидь экран",
@@ -246,6 +254,7 @@ class AgentExecutor:
             "window.activate": Capability.WINDOW_ACTIVATE,
             "system.lock": Capability.SYSTEM_LOCK,
             "screen.capture": Capability.SCREEN_CAPTURE,
+            "ginger.observe": Capability.SCREEN_CAPTURE,
         }
         capability = capabilities.get(call.name)
         if capability is None:
@@ -277,6 +286,7 @@ class AgentExecutor:
             "window.activate": self._activate_window,
             "system.lock": lambda args: self._no_arguments(args, self.windows.lock_workstation),
             "screen.capture": self._capture_screen,
+            "ginger.observe": self._observe_ginger,
         }
         handler = handlers.get(call.name)
         if handler is None:
@@ -366,6 +376,17 @@ class AgentExecutor:
             self._required_string(arguments, "mode", "screen.capture")
         )
         return asdict(observation)
+
+    def _observe_ginger(self, arguments: dict[str, Any]) -> dict[str, object]:
+        self._reject_argument_keys(arguments, {"port"}, "ginger.observe")
+        assert self.capture_store is not None
+        # The screen capture tool enforces SCREEN_CAPTURE permission;
+        # the foreground checker verifies the true Ginger4.exe process.
+        result = observe_ginger_once(
+            self.capture_store,
+            port=arguments.get("port", 8080),
+        )
+        return result.as_dict()
 
     @staticmethod
     def _required_string(
