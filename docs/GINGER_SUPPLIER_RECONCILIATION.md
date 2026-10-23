@@ -686,3 +686,31 @@ No reinstall or new OCR model is needed: simply replace the downloaded
 test-ginger-cpu-ocr.ps1 with the updated branch version and rerun
 -CaptureSupplierGrid. The output remains read-only and the selected row's
 business identity remains unverified; no automatic matching.
+
+
+### Real screenshot / 4th report: false duplicate blue band (23 October)
+
+The owner supplied supplier-grid(1).png and ginger-cpu-report(3).json.
+Report correctly recognized the two matching controls and OCR coordinates,
+but selected_row_color_band_detected=false and selected title=null, despite
+a visibly selected FIRST supplier title row.
+
+Root cause verified on the supplied screenshot pixel colors: the selected
+name cell is light blue RGB approximately (173,216,230), but the dock
+"Сопоставление с каталогом" at the bottom of the captured image also
+contains a thin full-width band of blue gradients. The earlier algorithm
+detected two distinct blue bands after upscaling and intentionally rejected
+nonunique selections. This is NOT failure of Ginger selection or OCR.
+
+Fix: require light blue within the LEFT name-column sample (8.5%..14.5%
+of width), while disallowing matching blue across a RIGHT-column sample
+(24.5%..30.5%) that falls outside the title cell. Also exclude the bottom
+5% of the crop. A screenshot rescaled to the original OCR output dimensions
+reproduced two bands under the old criteria (roughly y=372 and 1665) and
+only one under the new criteria (roughly y=372, 37px tall).
+
+Windows CI contains a synthetic graphical regression test with an actual
+blue name-cell row and a full-width bottom dock, followed by a second
+name-only blue band that must still be rejected as ambiguous. Do not
+automatically link based on a detected blue band; supplier row remains an
+unverified visual observation until its identity is corroborated.
