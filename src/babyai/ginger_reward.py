@@ -235,6 +235,28 @@ class GingerRewardLedger:
             self._verify_chain(conn)
             return self._status(conn, session)
 
+    def known_unsafe_mapping(
+        self, supplier_row_key: str, catalog_item_key: str
+    ) -> bool:
+        """Block replay of verified bad mappings even in a NEW session.
+
+        Requires real, externally verified Ginger row/item identifiers.
+        This is a DENIAL signal only, never proof of a good mapping.
+        """
+        source = _field(supplier_row_key, "supplier_row_key")
+        target = _field(catalog_item_key, "catalog_item_key")
+        with self._connect() as conn:
+            self._verify_chain(conn)
+            result = conn.execute(
+                """SELECT 1 FROM reward_events
+                   WHERE supplier_row_key=? AND catalog_item_key=?
+                   AND decision='link'
+                   AND outcome IN ('wrong_link', 'critical_mismatch', 'unauthorized_action')
+                   LIMIT 1""",
+                (source, target),
+            ).fetchone()
+            return result is not None
+
     def history(self, session_id: str) -> list[dict[str, object]]:
         session = _field(session_id, "session_id")
         with self._connect() as conn:
