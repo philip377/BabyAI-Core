@@ -63,6 +63,59 @@ public static class GingerWin32Ocr {
 }
 '@
 
+
+# The selected Ginger supplier NAME cell uses a LightBlue background,
+# while ordinary name cells are pale yellow. Look for ONE horizontal band
+# of this color in the first name column; don't mistake the tab for a row.
+# This is only visual evidence, never an authoritative SKU identifier.
+Add-Type -ReferencedAssemblies @([System.Drawing.Bitmap].Assembly.Location) -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Collections.Generic;
+
+public static class GingerSelectionBand
+{
+    public static int[] Detect(string file)
+    {
+        using (Bitmap img = new Bitmap(file))
+        {
+            int x0 = (int)(img.Width * 0.085);
+            int x1 = (int)(img.Width * 0.145);
+            int y0 = Math.Min(25, img.Height / 10);
+            int step = Math.Max(3, (x1 - x0) / 12);
+            List<int[]> bands = new List<int[]>();
+            int start = -1;
+            for (int y = y0; y < img.Height - 5; y++)
+            {
+                int count = 0;
+                int matches = 0;
+                for (int x = x0; x <= x1; x += step)
+                {
+                    Color px = img.GetPixel(x, y);
+                    bool blue = px.R >= 140 && px.R <= 205
+                        && px.G >= 185 && px.G <= 235
+                        && px.B >= 205 && px.B <= 250
+                        && px.G > px.R + 22 && px.B > px.G + 5;
+                    if (blue) matches++;
+                    count++;
+                }
+                bool active = count > 0 && matches * 100 >= count * 65;
+                if (active && start < 0) start = y;
+                if (!active && start >= 0)
+                {
+                    if (y - start >= 8 && y - start <= 70)
+                        bands.Add(new int[] { start, y - start });
+                    start = -1;
+                }
+            }
+            // More than one highlight is ambiguous. Never select arbitrarily.
+            if (bands.Count != 1) return new int[0];
+            return bands[0];
+        }
+    }
+}
+'@
+
 function Save-Region([System.Drawing.Rectangle]$Region,[string]$Path){
     $screen=[System.Windows.Forms.SystemInformation]::VirtualScreen
     $clip=[System.Drawing.Rectangle]::Intersect($Region,$screen)
@@ -82,7 +135,7 @@ function Save-Region([System.Drawing.Rectangle]$Region,[string]$Path){
         } finally { $drawing.Dispose(); $scaled.Dispose() }
     }finally{$gfx.Dispose();$bmp.Dispose()}
 }
-function Run-Ocr([string]$Image,[string]$OutputBase,[string]$Language,[ValidateSet(6,11)][int]$Psm=6){
+function Run-Ocr([string]$Image,[string]$OutputBase,[string]$Language,[ValidateSet(6,7,11)][int]$Psm=6){
     # Tesseract writes UTF-8 on disk; avoids Windows PowerShell native encoding issues.
     $ocrArgs=@($Image,$OutputBase,"-l",$Language,"--psm",[string]$Psm)
     if($customTessdata){$ocrArgs+=@("--tessdata-dir",$customTessdata)}
@@ -220,6 +273,10 @@ $rightLines=@(Run-Ocr $rightPng (Join-Path $folder "catalogue-right") $lang)
 $supplierGridImage=$null
 $supplierGridLines=@()
 $supplierGridSegments=@()
+$selectedRowImage=$null
+$selectedRowVisualCandidate=$null
+$selectedRowBandY=$null
+$selectedRowBandHeight=$null
 if($CaptureSupplierGrid){
     if([GingerWin32Ocr]::ActiveHandle() -ne $start.Hwnd -or
        [GingerWin32Ocr]::ActivePid() -ne $pidOfWindow) {
@@ -241,11 +298,36 @@ if($CaptureSupplierGrid){
     $supplierGridBase=Join-Path $folder "supplier-grid"
     $supplierGridLines=@(Run-Ocr $supplierGridImage $supplierGridBase $lang 11)
     $supplierGridSegments=@(Read-Grid-OcrSegments $supplierGridImage $supplierGridBase $lang)
+    $selectionBand=[GingerSelectionBand]::Detect($supplierGridImage)
+    if($selectionBand.Length -eq 2){
+        $selectedRowBandY=[int]$selectionBand[0]
+        $selectedRowBandHeight=[int]$selectionBand[1]
+        $selectedRowImage=Join-Path $folder "selected-supplier-row.png"
+        $fullImage=[System.Drawing.Bitmap]::FromFile($supplierGridImage)
+        try{
+            $cropX=[int]($fullImage.Width*0.008)
+            $cropY=[math]::Max(0,($selectedRowBandY-5))
+            $cropW=[int]($fullImage.Width*0.168)
+            $cropH=[math]::Min(($fullImage.Height-$cropY),($selectedRowBandHeight+10))
+            $rectangle=[System.Drawing.Rectangle]::new(
+                [int]$cropX,[int]$cropY,[int]$cropW,[int]$cropH)
+            $singleRow=$fullImage.Clone($rectangle,$fullImage.PixelFormat)
+            try{$singleRow.Save($selectedRowImage,[System.Drawing.Imaging.ImageFormat]::Png)}
+            finally{$singleRow.Dispose()}
+        } finally{$fullImage.Dispose()}
+        $selectedLines=@(Run-Ocr $selectedRowImage (Join-Path $folder "selected-supplier-row") $lang 7)
+        if($selectedLines.Count -gt 0){
+            $selectedRowVisualCandidate=($selectedLines -join " ").Trim()
+        }
+    }
 }
 $warnings=[System.Collections.Generic.List[string]]::new()
 $warnings.Add("OCR results are unverified; candidate names may contain look-alike Cyrillic/Latin characters and truncated sizes.")
 if($CaptureSupplierGrid){
-    $warnings.Add("Supplier grid OCR lines are NOT a verified selected product row; visual confirmation required.")
+    $warnings.Add("Supplier-grid selection is based on a blue pixel band, not a confirmed Ginger item ID.")
+    if($null -eq $selectedRowBandY){
+        $warnings.Add("No unique LightBlue selected NAME cell detected; cannot identify selected supplier row.")
+    }
     if($supplierGridLines.Count -eq 0){
         $warnings.Add("No text could be recognized in the supplier grid.")
     }
@@ -288,6 +370,11 @@ $report=[ordered]@{
     supplier_grid_segment_coordinates="relative_to_2x_supplier_grid_png"
     supplier_grid_image_local=$supplierGridImage
     selected_supplier_row_verified=$false
+    selected_row_color_band_detected=($null -ne $selectedRowBandY)
+    selected_row_band_y_in_2x_png=$selectedRowBandY
+    selected_row_band_height_in_2x_png=$selectedRowBandHeight
+    selected_row_visual_candidate=$selectedRowVisualCandidate
+    selected_row_image_local=$selectedRowImage
     safe_for_automatic_matching=$false
     warnings=$warnings.ToArray()
     images_local=@($leftPng,$rightPng)
