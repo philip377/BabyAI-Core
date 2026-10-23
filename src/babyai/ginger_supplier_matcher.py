@@ -174,6 +174,8 @@ def _similarity(source: _Features, target: _Features) -> float:
     # catalogue side is never enough for a high-confidence suggestion.
     if source.is_tester is True and target.is_tester is None:
         score = min(score, 0.79)
+    if source.is_tester is None and target.is_tester is True:
+        score = min(score, 0.79)
     # Missing physical attributes are uncertainty, not evidence of equality.
     if source.volume_ml is None or target.volume_ml is None:
         score = min(score, 0.87)
@@ -283,7 +285,7 @@ class GingerSupplierMatcher:
                     target_features = _features(target)
                     # A reused vendor ID, renamed product, or changed bottle size
                     # must not silently inherit an old supplier mapping.
-                    if (_name_score(source.name, saved.name) >= 0.85
+                    if (sorted(source.name.split()) == sorted(saved.name.split())
                             and _compatible(source, saved)
                             and _compatible(_features(position, brand_hint=target.brand), target_features)):
                         return MatchResult("known", tuple(ranked[:limit]), target.sku)
