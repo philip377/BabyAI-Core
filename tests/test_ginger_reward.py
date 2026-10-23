@@ -155,3 +155,23 @@ def test_wrong_reject_and_needless_abstention_reduce_score(tmp_path):
     ))
     assert store.status("run-20261023").points == -23
     assert not store.status("run-20261023").frozen
+
+
+
+def test_verified_wrong_pair_cannot_be_tried_again_in_later_session(tmp_path):
+    store = ledger(tmp_path)
+    assert not store.known_unsafe_mapping("supplier-line-31", "sku-151")
+    store.record(event(outcome="critical_mismatch"))
+    assert store.known_unsafe_mapping("supplier-line-31", "sku-151")
+    # Even though a human could explicitly start a new session, the original
+    # confirmed-bad source/item pair remains unsafe across the local ledger.
+    assert store.status("next-session").frozen is False
+    assert store.known_unsafe_mapping("supplier-line-31", "sku-151")
+    assert not store.known_unsafe_mapping("supplier-line-31", "sku-152")
+
+
+def test_positive_feedback_is_not_an_automatic_authorization(tmp_path):
+    store = ledger(tmp_path)
+    store.record(event())
+    assert not store.known_unsafe_mapping("supplier-line-31", "sku-151")
+    assert store.status("run-20261023").automatic_ginger_write_allowed is False
