@@ -98,7 +98,7 @@ def test_cpu_ocr_can_inspect_upper_supplier_grid_without_guessing_selected_row()
     assert 'selected_supplier_row_verified=$false' in code
     assert 'safe_for_automatic_matching=$false' in code
     assert "OCR results are unverified" in code
-    assert 'Run-Ocr $supplierGridImage (Join-Path $folder "supplier-grid") $lang 11' in code
+    assert 'Run-Ocr $supplierGridImage $supplierGridBase $lang 11' in code
     assert 'Ginger changed during supplier-grid capture' in code
     assert 'NOT a verified selected product row' in code
 
