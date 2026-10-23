@@ -91,6 +91,49 @@ function Run-Ocr([string]$Image,[string]$OutputBase,[string]$Language,[ValidateS
     $raw=[System.IO.File]::ReadAllText(($OutputBase+".txt"),[System.Text.Encoding]::UTF8)
     return @($raw -split "\r?\n" | Where-Object {-not [string]::IsNullOrWhiteSpace($_)} | Select-Object -First 60)
 }
+function Read-Grid-OcrSegments([string]$Image,[string]$OutputBase,[string]$Language){
+    # TSV keeps words' positions rather than flattening grid columns into text.
+    # Coordinates refer to the 2x PNG; they do not indicate selection.
+    $argsList=@($Image,$OutputBase,"-l",$Language,"--psm","11")
+    if($customTessdata){$argsList+=@("--tessdata-dir",$customTessdata)}
+    $argsList+="tsv"
+    & $tesseract @argsList 2>$null | Out-Null
+    if($LASTEXITCODE -ne 0){throw "Tesseract could not read supplier-grid position data"}
+    $tsvFile=$OutputBase+".tsv"
+    if(-not (Test-Path -LiteralPath $tsvFile -PathType Leaf)){
+        throw "Tesseract did not produce supplier-grid TSV"
+    }
+    $words=@(Import-Csv -LiteralPath $tsvFile -Delimiter "`t" -Encoding UTF8 |
+        Where-Object {
+            $_.level -eq "5" -and
+            -not [string]::IsNullOrWhiteSpace($_.text) -and
+            ($_.conf -as [double]) -ge 10
+        })
+    $segments=[System.Collections.Generic.List[object]]::new()
+    foreach($group in ($words | Group-Object {
+        "$($_.page_num):$($_.block_num):$($_.par_num):$($_.line_num)"
+    })){
+        $lineWords=@($group.Group | Sort-Object {[int]$_.left})
+        $xmin=[int]::MaxValue; $ymin=[int]::MaxValue
+        $xmax=0; $ymax=0; $confidenceSum=0.0
+        foreach($word in $lineWords){
+            $x=[int]$word.left; $y=[int]$word.top
+            $xmin=[math]::Min($xmin,$x); $ymin=[math]::Min($ymin,$y)
+            $xmax=[math]::Max($xmax,($x+[int]$word.width))
+            $ymax=[math]::Max($ymax,($y+[int]$word.height))
+            $confidenceSum+=[double]$word.conf
+        }
+        $lineText=($lineWords | ForEach-Object {$_.text.Trim()}) -join " "
+        if(-not [string]::IsNullOrWhiteSpace($lineText)){
+            $segments.Add([pscustomobject]@{
+                x=$xmin; y=$ymin; width=($xmax-$xmin); height=($ymax-$ymin)
+                confidence=[math]::Round(($confidenceSum/$lineWords.Count),1)
+                text=$lineText.Substring(0,[math]::Min(350,$lineText.Length))
+            })
+        }
+    }
+    return @($segments.ToArray() | Sort-Object y,x | Select-Object -First 120)
+}
 $tesseract=$TesseractExe
 if(-not $tesseract){
     $cmd=Get-Command tesseract.exe -ErrorAction SilentlyContinue
@@ -176,12 +219,13 @@ $rightLines=@(Run-Ocr $rightPng (Join-Path $folder "catalogue-right") $lang)
 # NOT considered the selected supplier row or business item identity.
 $supplierGridImage=$null
 $supplierGridLines=@()
+$supplierGridSegments=@()
 if($CaptureSupplierGrid){
     if([GingerWin32Ocr]::ActiveHandle() -ne $start.Hwnd -or
        [GingerWin32Ocr]::ActivePid() -ne $pidOfWindow) {
         throw "Ginger changed before supplier-grid capture. Cancelled."
     }
-    $gridTop=$start.Y+[int]($start.H*0.24)
+    $gridTop=$start.Y+[int]($start.H*0.16)
     $gridBottom=[math]::Min($left.Y,$right.Y)-10
     $gridHeight=[int]($gridBottom-$gridTop)
     if($gridHeight -lt 80){throw "Supplier grid region is too small; maximize Ginger."}
@@ -194,7 +238,9 @@ if($CaptureSupplierGrid){
         throw "Ginger changed during supplier-grid capture. Cancelled."
     }
     # Sparse-text mode copes better with many columns than the list-view mode.
-    $supplierGridLines=@(Run-Ocr $supplierGridImage (Join-Path $folder "supplier-grid") $lang 11)
+    $supplierGridBase=Join-Path $folder "supplier-grid"
+    $supplierGridLines=@(Run-Ocr $supplierGridImage $supplierGridBase $lang 11)
+    $supplierGridSegments=@(Read-Grid-OcrSegments $supplierGridImage $supplierGridBase $lang)
 }
 $warnings=[System.Collections.Generic.List[string]]::new()
 $warnings.Add("OCR results are unverified; candidate names may contain look-alike Cyrillic/Latin characters and truncated sizes.")
@@ -238,6 +284,8 @@ $report=[ordered]@{
     right_catalogue_candidates=$rightLines
     supplier_grid_ocr_requested=[bool]$CaptureSupplierGrid
     supplier_grid_lines=$supplierGridLines
+    supplier_grid_segments=$supplierGridSegments
+    supplier_grid_segment_coordinates="relative_to_2x_supplier_grid_png"
     supplier_grid_image_local=$supplierGridImage
     selected_supplier_row_verified=$false
     safe_for_automatic_matching=$false
