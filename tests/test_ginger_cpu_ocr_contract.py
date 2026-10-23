@@ -152,3 +152,16 @@ def test_blue_row_detector_rejects_full_width_dock_but_not_name_cell():
     assert "int maxY = (int)(img.Height * 0.95)" in code
     assert "guardMatches * 100 <= guardCount * 20" in code
     assert "if (bands.Count != 1) return new int[0]" in code
+
+
+
+def test_selected_row_ocr_crop_excludes_neighbouring_rows():
+    code = SCRIPT.read_text(encoding="utf-8")
+    # OCR PSM 7 expects a single line; adding pixels above and below
+    # the highlighted row previously made the text go unreadable.
+    assert '$cropY=[int]($selectedRowBandY+4)' in code
+    assert '$cropH=[int]($selectedRowBandHeight-8)' in code
+    assert '$cropH -lt 14' in code
+    assert 'Selected LightBlue row detected, but OCR' in code
+    assert 'selected_supplier_row_verified=$false' in code
+    assert 'safe_for_automatic_matching=$false' in code
