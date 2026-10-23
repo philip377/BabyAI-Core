@@ -1,7 +1,7 @@
 # Ginger4 CPU OCR smoke test; no GPU, clicks, SQL or network calls.
 # Needs Tesseract OCR on the same Windows PC.
 [CmdletBinding()]
-param([string]$TesseractExe="", [string]$SupplierTitle="")
+param([string]$TesseractExe="", [string]$SupplierTitle="", [switch]$CaptureSupplierGrid)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
@@ -82,9 +82,9 @@ function Save-Region([System.Drawing.Rectangle]$Region,[string]$Path){
         } finally { $drawing.Dispose(); $scaled.Dispose() }
     }finally{$gfx.Dispose();$bmp.Dispose()}
 }
-function Run-Ocr([string]$Image,[string]$OutputBase,[string]$Language){
+function Run-Ocr([string]$Image,[string]$OutputBase,[string]$Language,[ValidateSet(6,11)][int]$Psm=6){
     # Tesseract writes UTF-8 on disk; avoids Windows PowerShell native encoding issues.
-    $ocrArgs=@($Image,$OutputBase,"-l",$Language,"--psm","6")
+    $ocrArgs=@($Image,$OutputBase,"-l",$Language,"--psm",[string]$Psm)
     if($customTessdata){$ocrArgs+=@("--tessdata-dir",$customTessdata)}
     & $tesseract @ocrArgs 2>$null | Out-Null
     if($LASTEXITCODE -ne 0){throw "Tesseract failed for $Image"}
@@ -171,7 +171,38 @@ if([GingerWin32Ocr]::ActiveHandle() -ne $start.Hwnd -or
 }
 $leftLines=@(Run-Ocr $leftPng (Join-Path $folder "matching-left") $lang)
 $rightLines=@(Run-Ocr $rightPng (Join-Path $folder "catalogue-right") $lang)
+# The supplier grid uses a different, non-ListView WinForms control.
+# Capture its upper area only with an explicit opt-in. Its OCR lines are
+# NOT considered the selected supplier row or business item identity.
+$supplierGridImage=$null
+$supplierGridLines=@()
+if($CaptureSupplierGrid){
+    if([GingerWin32Ocr]::ActiveHandle() -ne $start.Hwnd -or
+       [GingerWin32Ocr]::ActivePid() -ne $pidOfWindow) {
+        throw "Ginger changed before supplier-grid capture. Cancelled."
+    }
+    $gridTop=$start.Y+[int]($start.H*0.24)
+    $gridBottom=[math]::Min($left.Y,$right.Y)-10
+    $gridHeight=[int]($gridBottom-$gridTop)
+    if($gridHeight -lt 80){throw "Supplier grid region is too small; maximize Ginger."}
+    $gridRegion=[System.Drawing.Rectangle]::new(($start.X+4),$gridTop,($start.W-8),$gridHeight)
+    $supplierGridImage=Join-Path $folder "supplier-grid.png"
+    Save-Region $gridRegion $supplierGridImage
+    if([GingerWin32Ocr]::ActiveHandle() -ne $start.Hwnd -or
+       [GingerWin32Ocr]::ActivePid() -ne $pidOfWindow) {
+        Remove-Item -LiteralPath $supplierGridImage -Force -ErrorAction SilentlyContinue
+        throw "Ginger changed during supplier-grid capture. Cancelled."
+    }
+    # Sparse-text mode copes better with many columns than the list-view mode.
+    $supplierGridLines=@(Run-Ocr $supplierGridImage (Join-Path $folder "supplier-grid") $lang 11)
+}
 $warnings=[System.Collections.Generic.List[string]]::new()
+if($CaptureSupplierGrid){
+    $warnings.Add("Supplier grid OCR lines are NOT a verified selected product row; visual confirmation required.")
+    if($supplierGridLines.Count -eq 0){
+        $warnings.Add("No text could be recognized in the supplier grid.")
+    }
+}
 if($mode -ne "native_listview_regions"){$warnings.Add("Using approximate bottom regions; check screenshots.")}
 if($lang -eq "eng"){$warnings.Add("Russian OCR (rus) is missing; Cyrillic may be wrong.")}
 if($leftLines.Count -eq 0){$warnings.Add("Nothing readable in left matching list.")}
@@ -204,6 +235,10 @@ $report=[ordered]@{
     supplier_title_hint=$hint
     left_search_words=$leftLines
     right_catalogue_candidates=$rightLines
+    supplier_grid_ocr_requested=[bool]$CaptureSupplierGrid
+    supplier_grid_lines=$supplierGridLines
+    supplier_grid_image_local=$supplierGridImage
+    selected_supplier_row_verified=$false
     warnings=$warnings.ToArray()
     images_local=@($leftPng,$rightPng)
     recommendation="review_only_no_linking"
@@ -211,6 +246,6 @@ $report=[ordered]@{
 $reportPath=Join-Path $folder "ginger-cpu-report.json"
 $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encoding UTF8
 Write-Host "CPU OCR completed: $reportPath"
-Write-Host "Left lines: $($leftLines.Count); right lines: $($rightLines.Count); mode: $mode; languages: $lang"
+Write-Host "Left lines: $($leftLines.Count); right lines: $($rightLines.Count); upper lines: $($supplierGridLines.Count); mode: $mode; languages: $lang"
 Write-Host "Read-only: no clicks, mapping, network or SQL operations."
 Write-Host "Review report for sensitive supplier/product names before sharing."
