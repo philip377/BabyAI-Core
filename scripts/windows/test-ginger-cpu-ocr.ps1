@@ -75,31 +75,51 @@ using System.Collections.Generic;
 
 public static class GingerSelectionBand
 {
+    private static bool IsLightBlue(Color px)
+    {
+        return px.R >= 140 && px.R <= 205
+            && px.G >= 185 && px.G <= 235
+            && px.B >= 205 && px.B <= 250
+            && px.G > px.R + 22 && px.B > px.G + 5;
+    }
+
     public static int[] Detect(string file)
     {
         using (Bitmap img = new Bitmap(file))
         {
+            // Match only a blue NAME cell, not a full-width tab/pane bar.
+            // On the real Ginger screenshot the blue bottom panel produced
+            // a second "selected row" after 2x upscaling (the root bug).
             int x0 = (int)(img.Width * 0.085);
             int x1 = (int)(img.Width * 0.145);
+            int guardX0 = (int)(img.Width * 0.245);
+            int guardX1 = (int)(img.Width * 0.305);
             int y0 = Math.Min(25, img.Height / 10);
+            int maxY = (int)(img.Height * 0.95);
             int step = Math.Max(3, (x1 - x0) / 12);
+            int guardStep = Math.Max(3, (guardX1 - guardX0) / 12);
             List<int[]> bands = new List<int[]>();
             int start = -1;
-            for (int y = y0; y < img.Height - 5; y++)
+            for (int y = y0; y < maxY; y++)
             {
                 int count = 0;
                 int matches = 0;
                 for (int x = x0; x <= x1; x += step)
                 {
-                    Color px = img.GetPixel(x, y);
-                    bool blue = px.R >= 140 && px.R <= 205
-                        && px.G >= 185 && px.G <= 235
-                        && px.B >= 205 && px.B <= 250
-                        && px.G > px.R + 22 && px.B > px.G + 5;
-                    if (blue) matches++;
+                    if (IsLightBlue(img.GetPixel(x, y))) matches++;
                     count++;
                 }
-                bool active = count > 0 && matches * 100 >= count * 65;
+                int guardCount = 0;
+                int guardMatches = 0;
+                for (int x = guardX0; x <= guardX1; x += guardStep)
+                {
+                    if (IsLightBlue(img.GetPixel(x, y))) guardMatches++;
+                    guardCount++;
+                }
+                // Actual selected name cells end before the price column;
+                // full-width blue container bars are rejected.
+                bool active = count > 0 && matches * 100 >= count * 65
+                    && guardCount > 0 && guardMatches * 100 <= guardCount * 20;
                 if (active && start < 0) start = y;
                 if (!active && start >= 0)
                 {
