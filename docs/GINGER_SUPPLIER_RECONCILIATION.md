@@ -634,3 +634,30 @@ prices and customer/supplier information visible in the grid.
 
 The new code is still read-only. Automatic mapping and Ginger interactions
 remain disabled pending row-identity verification.
+
+
+### Owner screenshot verifies first-column LightBlue selected cell
+
+The source supplier-grid.png (2048x597 in the shared crop) confirms:
+- the FIRST visible supplier row has a LightBlue background only in the
+  NAME column, while other rows have pale-yellow backgrounds;
+- the active row arrow is visible at the left;
+- the first source row reads "Bois 1920 Oro Rosso edp 100 ml", price 69.30,
+  and target column "<не указано>"; it is NOT yet linked.
+
+Pixel inspection of the actual provided screenshot found an unambiguous
+LightBlue horizontal stripe near y=60..75 in the screenshot crop, e.g.
+RGB(173,216,230) in the name column. Name-grid background otherwise
+appears pale yellow, e.g. RGB(255,255,225).
+
+CPU OCR script now tests for a UNIQUE stripe in a left-name-column sampling
+band; if none or multiple bands are found it declines to infer a selected row.
+With one stripe, it exports selected-supplier-row.png and OCRs that small
+crop separately (Tesseract PSM 7) into selected_row_visual_candidate.
+It reports stripe y and height RELATIVE TO the 2x supplier-grid PNG.
+
+Despite these advances, the auto-detected title is only visual evidence.
+selected_supplier_row_verified remains FALSE and
+safe_for_automatic_matching remains FALSE until the selected Ginger item
+is tied to stable UI/ERP row identity. No controls are clicked or changed.
+The PowerShell workflow includes synthetic LightBlue row detection tests.
