@@ -605,3 +605,32 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\test-ginger-cpu-ocr.ps1" 
 The next planned acceptance gate is detecting the selected/highlighted supplier
 row with reliable UI evidence and verifying the line against a human-observed
 screen. Do not use OCR-only text to double-click a proposed item or create SKU.
+
+
+### Third on-machine CPU test: upper supplier list (23 October 2026)
+
+Owner's ginger-cpu-report(2).json confirmed CPU OCR eng+rus, 2 native lower
+listviews and a third captured supplier-grid area. Source rows such as
+Bois 1920 Parana, Boss Hugo and Boss Bottled titles are legible, and many
+candidate mappings in the column "Товар" show <не указано>. However,
+Tesseract sparse-text PSM 11 splits the supplier grid's *different columns*
+into separate lines and the first visible item starts as partial
+"osso едp / 100:". Critically, selected_supplier_row_verified=false:
+none of those lines is a confirmed selected supplier SKU.
+
+The 23 October improvement moves the upper-grid crop start from 24% to
+16% of the Ginger foreground window height (helps preserve the first
+visible row), and adds separate Tesseract TSV output grouped by OCR lines,
+with x/y/width/height and OCR confidence relative to the 2x grid PNG.
+The JSON includes supplier_grid_segments and
+supplier_grid_segment_coordinates="relative_to_2x_supplier_grid_png".
+
+No selected row is inferred from OCR alone; screenshots may be sent for
+visual calibration of the highlight background and grid columns.
+Users can supply the ALREADY GENERATED prior
+ginger-cpu-test-20261023-175618/supplier-grid.png for such visual
+calibration without rerunning anything. Before sharing, review commercial
+prices and customer/supplier information visible in the grid.
+
+The new code is still read-only. Automatic mapping and Ginger interactions
+remain disabled pending row-identity verification.
