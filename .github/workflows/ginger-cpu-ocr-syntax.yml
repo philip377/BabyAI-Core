@@ -39,3 +39,41 @@ jobs:
             exit 1
           }
           Write-Host "CPU OCR script syntax valid on Windows PowerShell 5.1"
+
+      - name: Test blue-row detector on synthetic Ginger screenshots
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $source = Get-Content "scripts/windows/test-ginger-cpu-ocr.ps1" -Raw
+          $pattern = "(?s)Add-Type -ReferencedAssemblies @\(\[System.Drawing.Bitmap\]\.Assembly\.Location\) -TypeDefinition @'\r?\n(?<code>.*?)\r?\n'@"
+          $match = [regex]::Match($source, $pattern)
+          if (-not $match.Success) { throw "Missing blue-row detector C# source" }
+          Add-Type -ReferencedAssemblies @([System.Drawing.Bitmap].Assembly.Location) -TypeDefinition $match.Groups["code"].Value
+          $path = Join-Path $env:TEMP "ginger-selection-test.png"
+          $bmp = New-Object System.Drawing.Bitmap(1200, 400)
+          $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+          $yellow = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255,255,225))
+          $blue = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(173,216,230))
+          try {
+            $graphics.Clear([System.Drawing.Color]::White)
+            $graphics.FillRectangle($yellow, 40, 30, 260, 340)
+            $graphics.FillRectangle($blue, 40, 75, 260, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $result = [GingerSelectionBand]::Detect($path)
+            if ($result.Length -ne 2 -or $result[0] -ne 75 -or $result[1] -ne 18) {
+              throw "Blue row not found correctly: $($result -join ',')"
+            }
+            $graphics.FillRectangle($blue, 40, 140, 260, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $ambiguous = [GingerSelectionBand]::Detect($path)
+            if ($ambiguous.Length -ne 0) {
+              throw "Multiple blue rows must be rejected"
+            }
+            Write-Host "Single-row detection and ambiguous-row rejection passed"
+          } finally {
+            $graphics.Dispose()
+            $yellow.Dispose()
+            $blue.Dispose()
+            $bmp.Dispose()
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+          }
