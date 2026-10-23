@@ -506,3 +506,24 @@ CI workflow checks parseability of the standalone test script.
 
 Next acceptance gate: compare recognized titles against the same screen.
 Only then build a strictly scoped and approval-gated click/verify loop.
+
+
+### Windows Terminal foreground regression (October 23, 2026)
+
+First on-machine attempt confirmed that Tesseract was installed, but the
+CPU OCR script exited before capture: the PowerShell process was the
+foreground WindowsTerminal, not Ginger4. The failure was in the script's
+foreground assumption, not Tesseract, Ginger, or OCR quality.
+
+The updated test-ginger-cpu-ocr.ps1 enumerates actual running Ginger4
+processes, requires one visible main window, restores/activates that window
+with Win32 ShowWindow/SetForegroundWindow, and verifies that Ginger4 is
+really foreground. If Windows denies programmatic focus, it gives the
+operator four seconds to click Ginger. It does not click controls or
+modify business data. The subsequent capture still checks foreground
+identity and aborts if the window changes.
+
+Replace the old downloaded .ps1 with the latest GitHub Raw before rerunning.
+Tesseract does not need reinstalling. If the foreground issue recurs,
+check that Ginger4 is open and the supplier matching form is visible, then
+report the new console error.
