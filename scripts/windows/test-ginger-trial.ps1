@@ -1,4 +1,4 @@
-# Interactive, CPU-only UNIX/Ginger candidate trial for Windows PowerShell 5.1.
+﻿# Interactive, CPU-only UNIX/Ginger candidate trial for Windows PowerShell 5.1.
 # Reads an existing Ginger OCR JSON report. Optionally captures a NEW report
 # using the sibling read-only OCR script. NEVER clicks, links, edits SQL,
 # reads credentials, uploads data or authorizes ERP actions.
