@@ -34,7 +34,7 @@ if ($null -eq $root) {
 }
 
 $script:found = 0
-$script:rows = New-Object System.Collections.Generic.List[object]
+$script:rows = [System.Collections.Generic.List[object]]::new()
 $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 
 function Read-GingerElement {
@@ -89,5 +89,7 @@ Read-GingerElement -Node $root -Depth 0
     elements_seen = $script:found
     truncated = ($script:found -ge $MaxElements)
     warning = "No product linking performed. Names are hidden by default."
-    elements = @($script:rows)
+    # Windows PowerShell 5.1 can throw ArgumentException with @($list).
+    # ToArray() avoids the binder bug and keeps JSON serialization stable.
+    elements = $script:rows.ToArray()
 } | ConvertTo-Json -Depth 6
