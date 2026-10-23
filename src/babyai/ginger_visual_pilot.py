@@ -105,7 +105,7 @@ def interpret_ginger_frame(frame: GingerVisualObservation) -> GingerPilotObserva
             variant for variant in source_variants
             if candidate_tokens and all(variant not in candidate for candidate in candidate_tokens)
         }
-        if missing_variants:
+        if missing_variants and frame.status in {"possible_match", "ambiguous"}:
             state, next_step = "template_discovery_only", "find_exact_flanker_or_propose_new_sku"
             warnings.append(
                 "Different fragrance variant: " + ", ".join(sorted(missing_variants))
