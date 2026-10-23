@@ -4,10 +4,12 @@ on:
   push:
     paths:
       - "scripts/windows/test-ginger-cpu-ocr.ps1"
+      - "scripts/windows/setup-ginger-russian-ocr.ps1"
       - ".github/workflows/ginger-cpu-ocr-syntax.yml"
   pull_request:
     paths:
       - "scripts/windows/test-ginger-cpu-ocr.ps1"
+      - "scripts/windows/setup-ginger-russian-ocr.ps1"
       - ".github/workflows/ginger-cpu-ocr-syntax.yml"
 
 jobs:
@@ -20,10 +22,18 @@ jobs:
         run: |
           $tokens = $null
           $parseErrors = $null
-          $file = (Resolve-Path "scripts/windows/test-ginger-cpu-ocr.ps1").Path
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            $file, [ref]$tokens, [ref]$parseErrors
-          ) | Out-Null
+          foreach ($relative in @("scripts/windows/test-ginger-cpu-ocr.ps1", "scripts/windows/setup-ginger-russian-ocr.ps1")) {
+            $parseErrors = $null
+            $file = (Resolve-Path $relative).Path
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file, [ref]$tokens, [ref]$parseErrors
+            ) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error $_.ToString() }
+              exit 1
+            }
+            Write-Host "Parsed $relative"
+          }
           if ($parseErrors.Count -gt 0) {
             $parseErrors | ForEach-Object { Write-Error $_.ToString() }
             exit 1
