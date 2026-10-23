@@ -156,7 +156,7 @@ class GingerRewardLedger:
         for row in rows:
             data = dict(row)
             digest = data.pop("event_hash")
-            if (data["previous_hash"] != previous or data["sequence"] != last_seq + 1:
+            if data["previous_hash"] != previous or data["sequence"] != last_seq + 1:
                 raise RewardEvidenceError("Reward audit chain is damaged")
             if data["outcome"] not in REWARDS or data["points"] != REWARDS[data["outcome"]]:
                 raise RewardEvidenceError("Reward value is inconsistent with policy")
