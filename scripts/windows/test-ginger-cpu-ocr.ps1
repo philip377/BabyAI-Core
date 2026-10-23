@@ -149,7 +149,9 @@ function Read-Grid-OcrSegments([string]$Image,[string]$OutputBase,[string]$Langu
     # Coordinates refer to the 2x PNG; they do not indicate selection.
     $argsList=@($Image,$OutputBase,"-l",$Language,"--psm","11")
     if($customTessdata){$argsList+=@("--tessdata-dir",$customTessdata)}
-    $argsList+="tsv"
+    # The per-user tessdata folder holds language weights, not configs/tsv.
+    # Enable TSV via a built-in parameter; do not pass the missing "tsv" config.
+    $argsList+=@("-c","tessedit_create_tsv=1","-c","tessedit_create_txt=0")
     & $tesseract @argsList 2>$null | Out-Null
     if($LASTEXITCODE -ne 0){throw "Tesseract could not read supplier-grid position data"}
     $tsvFile=$OutputBase+".tsv"
