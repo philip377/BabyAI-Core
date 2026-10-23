@@ -189,3 +189,27 @@ def test_qahwa_source_cannot_match_plain_khamrah():
     )
     assert result.state == "template_discovery_only"
     assert result.read_only
+
+
+
+def test_unix_agent_exposes_ginger_observation_only_with_screen_permission(tmp_path):
+    from babyai.agent import AgentExecutor, ToolCall
+    from babyai.permissions import Capability, PermissionStore
+
+    permissions = PermissionStore(tmp_path / "permissions.json")
+    agent = AgentExecutor(permissions)
+    assert "ginger.observe" in agent.tool_names()
+    assert "READ-ONLY" in agent.catalog()
+    assert agent.required_capability(ToolCall("ginger.observe", {})) == Capability.SCREEN_CAPTURE
+    assert agent.tool_compatible_with_intent("посмотри ginger", "ginger.observe")
+    assert not agent.tool_compatible_with_intent("расскажи про парфюмерию", "ginger.observe")
+    assert not agent.is_allowed(ToolCall("ginger.observe", {}))
+
+
+def test_agent_ginger_observation_rejects_unknown_arguments(tmp_path):
+    from babyai.agent import AgentExecutor, ToolCall, ToolProtocolError
+    from babyai.permissions import PermissionStore
+
+    agent = AgentExecutor(PermissionStore(tmp_path / "permissions.json"))
+    with pytest.raises(ToolProtocolError, match="Unexpected|unsupported"):
+        agent.execute(ToolCall("ginger.observe", {"unsafe_click": [20, 30]}))
