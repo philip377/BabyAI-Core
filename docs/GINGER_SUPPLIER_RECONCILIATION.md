@@ -157,3 +157,73 @@ unless you explicitly agree to reveal UI element names.
 This inspection is not a working Ginger automation adapter. Some custom
 controls may show only as opaque panes; in that case, a supervised alternative
 is needed rather than making blind coordinate clicks.
+
+
+## Missing catalogue product: owner demonstration (23 October 2026)
+
+The screenshots explicitly demonstrate a **second** operator flow in
+Ginger 4.14.3.92. It must not be mistaken for linking a generic fragrance.
+
+Supplier price-list item: "Bruno Banani Man Intense edP 30ml".
+An existing Ginger base-template item was:
+"Bruno Banani BRUNO BANANI (муж) edp 30ml".
+Existing "LOYAL MAN" and base "BRUNO BANANI" items are NOT the same perfume
+as MAN INTENSE and must not be linked to the supplier row.
+
+Observed manual flow:
+
+1. Keep that supplier row selected in the upper-left price list.
+2. Put stars by ALL seven visible words: Bruno / Banani / Man /
+   Intense / edP / 30 / ml. The lower-right search returns zero candidates.
+3. Remove the star specifically from "Intense". The relaxed search
+   returns several related catalogue items. This is only evidence of
+   possible templates, NOT evidence that the source equals a result.
+4. Check independently whether the named perfume physically exists. The
+   owner provided an online product listing/photo showing the Man Intense
+   scent, 30 ml, edP. A negative Ginger search alone is insufficient proof.
+5. Right-click the correct similar existing base catalogue item in the
+   bottom-right table and choose "Добавить с текущими значениями"
+   (not "Добавить" if current values are required).
+6. In "Добавить товар", choose group "BRUNO BANANI".
+7. Keep the group-based Ginger naming convention and insert INTENSE
+   **after BRUNO BANANI**, before "(муж) edp 30ml":
+   "Bruno Banani BRUNO BANANI INTENSE (муж) edp 30ml".
+   INTENSE is the fragrance variant, not the product concentration/type.
+8. Leave barcode empty; set both "Цена 1" and "Цена 2" to 0;
+   leave "Описание" empty. Press OK only after operator approval.
+9. Repeat the full-star search; the newly created item must now be visible
+   on the right. Re-select the original supplier row (not a neighbor) and
+   double-click the verified new canonical item.
+10. Verify that the supplier row's "Товар" cell now identifies the new
+    BRUNO BANANI INTENSE item and that a fresh right-hand catalogue view
+    points to the same canonical product.
+
+The new read-only code covers two distinct decisions:
+- ginger_variant_search.plan_variant_search_passes: full all-star attempt,
+  then a template-discovery pass without the named variant. Empty results
+  do not by themselves prove the product is missing.
+- ginger_catalog_creation.draft_missing_variant: can only generate a draft
+  if the operator confirms the exact catalogue search was checked,
+  independently verified the perfume identity, and checked the selected
+  supplier row. Requires an existing, appropriate template with matching
+  volume/concentration/packaging, a matching group and a nonduplicate
+  catalogue name. It refuses to copy from incompatible source products.
+
+The draft contains "group", "new_title", empty barcode and description,
+zero prices and a **requires_explicit_approval** flag. No Ginger write,
+right-click, OK press, item creation, or double-click occurs in this PR.
+
+### Technical separation
+
+Ginger is an operational warehouse/customer system. Never interpret
+an unsuccessful search or a web result as authorization to create a SKU.
+A future supervised Windows adapter needs independent, cancellable
+permissions for (a) interactive search, (b) catalog creation, and (c) linking.
+Before each side effect it must verify the selected supplier row and
+current window state. After each side effect it must re-read and validate.
+It must never write directly to the existing Dubrovka/Ginger server.
+
+A user-approved bulk policy can eventually allow handling straightforward,
+verified EXISTING positions; creating NEW products remains approval-gated
+until an actual Ginger owner acceptance test establishes safe rollback and
+duplicate prevention.
