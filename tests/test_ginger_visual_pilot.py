@@ -211,5 +211,5 @@ def test_agent_ginger_observation_rejects_unknown_arguments(tmp_path):
     from babyai.permissions import PermissionStore
 
     agent = AgentExecutor(PermissionStore(tmp_path / "permissions.json"))
-    with pytest.raises(ToolProtocolError, match="Unexpected|unsupported"):
+    with pytest.raises(ToolProtocolError, match="unexpected"):
         agent.execute(ToolCall("ginger.observe", {"unsafe_click": [20, 30]}))
