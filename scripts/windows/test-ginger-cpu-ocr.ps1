@@ -188,11 +188,13 @@ if($SupplierTitle){
 }
 $hint=$null
 if($SupplierTitle){$hint=$SupplierTitle}
+$dataDirLabel="installed_default"
+if($customTessdata){$dataDirLabel=$customTessdata}
 $report=[ordered]@{
     source="Ginger4 CPU OCR pilot"
     engine="Tesseract CPU"
     image_upscale_factor=2
-    language_data_directory=if($customTessdata){$customTessdata}else{"installed_default"}
+    language_data_directory=$dataDirLabel
     read_only=$true
     ginger_modified=$false
     local_only=$true
