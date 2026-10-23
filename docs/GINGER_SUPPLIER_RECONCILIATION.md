@@ -815,3 +815,16 @@ the actual catalogue item ID and saved association inside Ginger.
 This is a deterministic feedback/audit component, NOT reinforcement learning
 or model fine-tuning. Future learning could use the verified judgments
 without giving the agent a way to award itself points.
+
+
+### Negative-memory safety rule
+
+A recorded, externally confirmed wrong_link, critical_mismatch or
+unauthorized_action on a specific verified supplier-row ID and catalogue-item
+ID is remembered across ALL sessions by the read-only
+GingerRewardLedger.known_unsafe_mapping(supplier_row_key, catalog_item_key)
+lookup. The future supervised Ginger action driver should deny those known
+unsafe pairs even if a new run begins with a fresh session ID or an otherwise
+high reward score. Positive feedback is not an authorization to link any item.
+This negative-memory lookup requires actual verified row/item identifiers;
+it is NOT meaningful with OCR-only text or invented IDs.
