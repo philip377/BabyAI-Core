@@ -661,3 +661,28 @@ selected_supplier_row_verified remains FALSE and
 safe_for_automatic_matching remains FALSE until the selected Ginger item
 is tied to stable UI/ERP row identity. No controls are clicked or changed.
 The PowerShell workflow includes synthetic LightBlue row detection tests.
+
+
+### Actual OCR TSV export regression and fix (owner Windows screenshot)
+
+When running the selected-supplier-row test, the owner repeatedly received:
+  tesseract.exe: read_params_file: Can't open tsv
+  scripts/windows/test-ginger-cpu-ocr.ps1 (Read-Grid-OcrSegments)
+
+Root cause: earlier per-user OCR setup intentionally copies only
+eng.traineddata and rus.traineddata into LOCALAPPDATA/BabyAI/Tesseract/tessdata.
+Tesseract's trailing "tsv" argument is a reference to the separate file
+tessdata/configs/tsv, which is absent in that per-user folder.
+This is a SCRIPT BUG, not an installation failure.
+
+The corrected script passes built-in Tesseract switches:
+  -c tessedit_create_tsv=1 -c tessedit_create_txt=0
+and does NOT pass "tsv" as an external config filename. The OCR engine writes
+the same .tsv output containing word bounding boxes. Reproduced the failure
+and verified this fix independently with Tesseract 5 and an isolated tessdata
+directory containing only eng.traineddata.
+
+No reinstall or new OCR model is needed: simply replace the downloaded
+test-ginger-cpu-ocr.ps1 with the updated branch version and rerun
+-CaptureSupplierGrid. The output remains read-only and the selected row's
+business identity remains unverified; no automatic matching.
