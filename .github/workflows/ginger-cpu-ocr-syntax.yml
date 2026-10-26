@@ -1,0 +1,303 @@
+name: Ginger CPU OCR PowerShell syntax
+
+on:
+  push:
+    paths:
+      - "scripts/windows/test-ginger-cpu-ocr.ps1"
+      - "scripts/windows/test-ginger-trial.ps1"
+      - "scripts/windows/setup-ginger-russian-ocr.ps1"
+      - ".github/workflows/ginger-cpu-ocr-syntax.yml"
+  pull_request:
+    paths:
+      - "scripts/windows/test-ginger-cpu-ocr.ps1"
+      - "scripts/windows/test-ginger-trial.ps1"
+      - "scripts/windows/setup-ginger-russian-ocr.ps1"
+      - ".github/workflows/ginger-cpu-ocr-syntax.yml"
+
+jobs:
+  parse-windows-powershell-5:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          foreach ($relative in @("scripts/windows/test-ginger-cpu-ocr.ps1", "scripts/windows/test-ginger-trial.ps1", "scripts/windows/setup-ginger-russian-ocr.ps1")) {
+            $parseErrors = $null
+            $file = (Resolve-Path $relative).Path
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $file, [ref]$tokens, [ref]$parseErrors
+            ) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error $_.ToString() }
+              exit 1
+            }
+            Write-Host "Parsed $relative"
+          }
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.ToString() }
+            exit 1
+          }
+          Write-Host "CPU OCR script syntax valid on Windows PowerShell 5.1"
+
+      - name: Test blue-row detector on synthetic Ginger screenshots
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $source = Get-Content "scripts/windows/test-ginger-cpu-ocr.ps1" -Raw
+          $pattern = "(?s)Add-Type -ReferencedAssemblies @\(\[System.Drawing.Bitmap\]\.Assembly\.Location\) -TypeDefinition @'\r?\n(?<code>.*?)\r?\n'@"
+          $match = [regex]::Match($source, $pattern)
+          if (-not $match.Success) { throw "Missing blue-row detector C# source" }
+          Add-Type -ReferencedAssemblies @([System.Drawing.Bitmap].Assembly.Location) -TypeDefinition $match.Groups["code"].Value
+          $path = Join-Path $env:TEMP "ginger-selection-test.png"
+          $bmp = New-Object System.Drawing.Bitmap(1200, 400)
+          $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+          $yellow = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255,255,225))
+          $blue = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(173,216,230))
+          $darkBlue = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(0,120,212))
+          try {
+            $graphics.Clear([System.Drawing.Color]::White)
+            $graphics.FillRectangle($yellow, 40, 30, 260, 340)
+            $graphics.FillRectangle($blue, 40, 75, 260, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $result = [GingerSelectionBand]::Detect($path)
+            if ($result.Length -ne 2 -or $result[0] -ne 75 -or $result[1] -ne 18) {
+              throw "Blue row not found correctly: $($result -join ',')"
+            }
+            $edge = [GingerSelectionBand]::NameCellRightEdge($path, 75)
+            if ($edge -lt 296 -or $edge -gt 302) {
+              throw "Dynamic name cell right boundary not found: $edge"
+            }
+            # Text obscures the previous sample band, but the new band
+            # must still detect the selected blue cell as a single row.
+            $graphics.FillRectangle([System.Drawing.Brushes]::Black, 100, 79, 76, 12)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $occluded = [GingerSelectionBand]::Detect($path)
+            if ($occluded.Length -ne 2 -or $occluded[0] -ne 75 -or $occluded[1] -ne 18) {
+              throw "Selected blue row lost behind dark text"
+            }
+            # Ginger's wide blue bottom dock must NOT count as a second row.
+            $graphics.FillRectangle($blue, 0, 365, 1200, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $withDock = [GingerSelectionBand]::Detect($path)
+            if ($withDock.Length -ne 2 -or $withDock[0] -ne 75 -or $withDock[1] -ne 18) {
+              throw "Blue bottom dock was mistaken for a selected row"
+            }
+            # The first column can have a narrower width in Ginger.
+            $graphics.FillRectangle($yellow, 40, 75, 260, 18)
+            $graphics.FillRectangle($blue, 40, 75, 182, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $narrow = [GingerSelectionBand]::Detect($path)
+            $narrowEdge = [GingerSelectionBand]::NameCellRightEdge($path, 75)
+            if ($narrow.Length -ne 2 -or $narrow[0] -ne 75 -or
+                $narrowEdge -lt 218 -or $narrowEdge -gt 224) {
+              throw "Narrow name-cell layout not handled"
+            }
+            $graphics.FillRectangle($blue, 40, 140, 182, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $ambiguous = [GingerSelectionBand]::Detect($path)
+            if ($ambiguous.Length -ne 0) {
+              throw "Multiple blue rows must be rejected"
+            }
+            # The current supplier grid draws selected names dark blue
+            # (RGB 0,120,212), unlike older light-blue active selections.
+            $graphics.Clear([System.Drawing.Color]::White)
+            $graphics.FillRectangle($yellow, 40, 30, 260, 340)
+            $graphics.FillRectangle($darkBlue, 40, 75, 260, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $dark = [GingerSelectionBand]::Detect($path)
+            $darkEdge = [GingerSelectionBand]::NameCellRightEdge($path, 75)
+            if ($dark.Length -ne 2 -or $dark[0] -ne 75 -or $dark[1] -ne 18 -or
+                $darkEdge -lt 296 -or $darkEdge -gt 302) {
+              throw "Dark-blue current Ginger selection was not identified correctly"
+            }
+            # A second selected dark-blue title must still be ambiguous.
+            $graphics.FillRectangle($darkBlue, 40, 140, 260, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            if ([GingerSelectionBand]::Detect($path).Length -ne 0) {
+              throw "Multiple selected dark-blue rows must be rejected"
+            }
+            Write-Host "Light-blue/dark-blue selections, dynamic boundaries and ambiguity passed"
+          } finally {
+            $graphics.Dispose()
+            $yellow.Dispose()
+            $blue.Dispose()
+            $darkBlue.Dispose()
+            $bmp.Dispose()
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Trial feedback walkthrough with synthetic OCR report
+        shell: powershell
+        run: |
+          $path = Join-Path $env:TEMP "ginger-test-feedback.json"
+          $report = @{
+            source = "Ginger4 CPU OCR pilot"
+            read_only = $true
+            ginger_modified = $false
+            local_only = $true
+            selected_row_color_band_detected = $true
+            selected_row_visual_candidate = "Bois 1920 Oro Rosso edp 100 mi"
+            right_catalogue_candidates = @(
+              "Bois 1920 OVO ROSSO edp 100ml",
+              "Bois 1920 ORO ROSSO edp 100ml TESTER",
+              "Paolo Gigli Rosso edp 100ml",
+              "Estee Lauder AZUREE SOLEIL EAU FRAICHE SKINS..."
+            )
+          }
+          $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $path -Encoding UTF8
+          $output = & "scripts/windows/test-ginger-trial.ps1" -Report $path -NonInteractive 6>&1 2>&1 | Out-String
+          if ($output -notmatch "\u0422\u0435\u0441\u0442\u0435\u0440 \u0438 \u043e\u0431\u044b\u0447\u043d\u044b\u0439 \u0444\u043b\u0430\u043a\u043e\u043d" -or $output -notmatch "\u0411\u0440\u0435\u043d\u0434 \u043d\u0435 \u0441\u043e\u0432\u043f\u0430\u0434\u0430\u0435\u0442" -or
+              $output -notmatch "\u0411\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u044b\u0439 \u0440\u0435\u0436\u0438\u043c") {
+            throw "\u0420\u0443\u0441\u0441\u043a\u0438\u0439 \u0432\u044b\u0432\u043e\u0434 \u043a\u043b\u0430\u0441\u0441\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u0438 \u043a\u0430\u043d\u0434\u0438\u0434\u0430\u0442\u043e\u0432 \u043d\u0435\u0432\u0435\u0440\u0435\u043d: $output"
+          }
+          Write-Host $output
+          $demo = & "scripts/windows/test-ginger-trial.ps1" -Demo 6>&1 2>&1 | Out-String
+          if ($demo -notmatch "\u0414\u0415\u041c\u041e: \u043f\u0440\u0438\u043c\u0435\u0440") {
+            throw "\u0420\u0443\u0441\u0441\u043a\u0438\u0439 \u0434\u0435\u043c\u043e\u0440\u0435\u0436\u0438\u043c \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d: $demo"
+          }
+          Write-Host "Ginger CPU-only noninteractive and demo test passed"
+
+      - name: Check CaptureFresh does not contaminate returned OCR JSON
+        shell: powershell
+        run: |
+          $sample = Join-Path $env:TEMP "ginger-fresh-report.json"
+          $data = @{
+            source = "Ginger4 CPU OCR pilot"
+            read_only = $true
+            ginger_modified = $false
+            local_only = $true
+            selected_row_color_band_detected = $true
+            selected_row_visual_candidate = "Bois 1920 Oro Rosso edp 100 mi"
+            right_catalogue_candidates = @("Bois 1920 ORO ROSSO edp 100ml TESTER")
+          }
+          $data | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $sample -Encoding UTF8
+          $env:GINGER_FAKE_REPORT = $sample
+          function global:powershell.exe {
+            $global:LASTEXITCODE = 0
+            Write-Output "CPU OCR completed: $env:GINGER_FAKE_REPORT"
+            Write-Output "Read-only: no clicks or catalogue writes"
+          }
+          $out = & "scripts/windows/test-ginger-trial.ps1" -CaptureFresh -NonInteractive 6>&1 2>&1 | Out-String
+          if ($out -notmatch "\u0422\u043e\u0432\u0430\u0440 \u043f\u043e\u0441\u0442\u0430\u0432\u0449\u0438\u043a\u0430 .*Bois 1920 Oro Rosso" -or
+              $out -notmatch "\u0422\u0435\u0441\u0442\u0435\u0440 \u0438 \u043e\u0431\u044b\u0447\u043d\u044b\u0439 \u0444\u043b\u0430\u043a\u043e\u043d" -or
+              $out -notmatch "OCR \u0437\u0430\u0432\u0435\u0440\u0448\u0451\u043d") {
+            throw "Fresh report polluted by subprocess stdout: $out"
+          }
+          Write-Host "Fresh report was parsed and child logs shown separately."
+          $env:GINGER_FAKE_REPORT = ""
+          $wasDenied = $false
+          try {
+            & "scripts/windows/test-ginger-trial.ps1" -CaptureFresh -NonInteractive | Out-Null
+          } catch {
+            if ($_.Exception.Message -match "\u0421\u0442\u0430\u0440\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c \u043d\u0435\u043b\u044c\u0437\u044f") {
+              $wasDenied = $true
+            } else { throw }
+          }
+          if (-not $wasDenied) { throw "Missing new report must never use an old file" }
+          $broken = Join-Path $env:TEMP "ginger-old-schema.json"
+          $data.Remove("selected_row_visual_candidate")
+          $data | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $broken -Encoding UTF8
+          $missingDenied = $false
+          try {
+            & "scripts/windows/test-ginger-trial.ps1" -Report $broken -NonInteractive | Out-Null
+          } catch {
+            if ($_.Exception.Message -match "\u0412 \u043e\u0442\u0447\u0451\u0442\u0435 \u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445 \u043e \u0432\u044b\u0431\u0440\u0430\u043d\u043d\u043e\u0439 \u0441\u0442\u0440\u043e\u043a\u0435") {
+              $missingDenied = $true
+            } else { throw }
+          }
+          if (-not $missingDenied) { throw "Old schema must be rejected clearly" }
+          Remove-Item function:\powershell.exe -ErrorAction SilentlyContinue
+          Write-Host "Old reports and missing properties are rejected safely"
+
+      - name: Reject placeholder rewards; bind human trial note to OCR hash
+        shell: powershell
+        run: |
+          $oldLocalAppData = $env:LOCALAPPDATA
+          $env:LOCALAPPDATA = Join-Path $env:TEMP "ginger-trial-ci-v2"
+          New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
+          $reportPath = Join-Path $env:LOCALAPPDATA "synthetic-ginger-report.json"
+          $fake = @{
+            source = "Ginger4 CPU OCR pilot"
+            read_only = $true
+            ginger_modified = $false
+            local_only = $true
+            selected_row_color_band_detected = $true
+            selected_row_visual_candidate = "Bois 1920 Oro Rosso edp 100 mi"
+            right_catalogue_candidates = @(
+              "Bois 1920 OVO ROSSO edp 100ml",
+              "Bois 1920 ORO ROSSO edp 100ml TESTER"
+            )
+          }
+          $fake | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $reportPath -Encoding UTF8
+          $feedbackPath = Join-Path $env:LOCALAPPDATA "BabyAI\Ginger\ginger-trial-feedback.json"
+          function global:Read-Host {
+            param([string]$Prompt)
+            $answer = [string]$global:answers[$global:answerIndex]
+            $global:answerIndex++
+            return $answer
+          }
+          try {
+            $global:answers = @("1","1","required")
+            $global:answerIndex = 0
+            $invalid = & "scripts/windows/test-ginger-trial.ps1" -Report $reportPath 6>&1 2>&1 | Out-String
+            if ($invalid -notmatch "\u0417\u0430\u0433\u043b\u0443\u0448\u043a\u0430" -or (Test-Path $feedbackPath)) {
+              throw "A placeholder minted trial rewards: $invalid"
+            }
+            $global:answers = @("1","1","Checked Bois 1920 EDP 100ml regular bottle in Ginger UI")
+            $global:answerIndex = 0
+            $accepted = & "scripts/windows/test-ginger-trial.ps1" -Report $reportPath 6>&1 2>&1 | Out-String
+            if ($accepted -notmatch "\u041e\u0446\u0435\u043d\u043a\u0430:" -or -not (Test-Path $feedbackPath)) {
+              throw "Real attestation not stored: $accepted"
+            }
+            $saved = Get-Content -LiteralPath $feedbackPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($saved.version -ne 2 -or $saved.events.Count -ne 1 -or
+                $saved.events[0].points -ne 3 -or
+                $saved.events[0].report_sha256 -notmatch '^[a-f0-9]{64}$') {
+              throw "Saved v2 event does not contain correct score and report fingerprint"
+            }
+            $global:answers = @("1")
+            $global:answerIndex = 0
+            $replay = & "scripts/windows/test-ginger-trial.ps1" -Report $reportPath 6>&1 2>&1 | Out-String
+            if ($replay -notmatch "\u041f\u043e\u0432\u0442\u043e\u0440\u043d\u0430\u044f \u043d\u0430\u0433\u0440\u0430\u0434\u0430") {
+              throw "One report/candidate should not be rewarded twice"
+            }
+            # Real 26 Oct screenshot: trailing ellipsis and gibberish are NOT
+            # proof that a tester or variant is absent. No reward is allowed.
+            $garbledPath = Join-Path $env:LOCALAPPDATA "ginger-garbled-report.json"
+            $badOcr = @{
+              source = "Ginger4 CPU OCR pilot"
+              read_only = $true
+              ginger_modified = $false
+              local_only = $true
+              selected_row_color_band_detected = $true
+              selected_row_visual_candidate = "Estee Lauder Bronze Goddess Soleil Eau Fraiche 100ml TESTER"
+              right_catalogue_candidates = @(
+                "Estee Lauder AZUREE SOLEIL EAU FRAICHE SKINS... 0.00",
+                "Le tage Me ee ees MN Cee Mi ee A eae 15.20"
+              )
+            }
+            $badOcr | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $garbledPath -Encoding UTF8
+            $global:answers = @("1")
+            $global:answerIndex = 0
+            $invalidCandidate = & "scripts/windows/test-ginger-trial.ps1" -Report $garbledPath 6>&1 2>&1 | Out-String
+            if ($invalidCandidate -notmatch "\u041e\u0446\u0435\u043d\u043a\u0430 \u0437\u0430\u043f\u0440\u0435\u0449\u0435\u043d\u0430") {
+              throw "Truncated candidate should not receive reward: $invalidCandidate"
+            }
+            $global:answers = @("2")
+            $global:answerIndex = 0
+            $gibberish = & "scripts/windows/test-ginger-trial.ps1" -Report $garbledPath 6>&1 2>&1 | Out-String
+            if ($gibberish -notmatch "\u041e\u0446\u0435\u043d\u043a\u0430 \u0437\u0430\u043f\u0440\u0435\u0449\u0435\u043d\u0430") {
+              throw "Garbled candidate should not receive reward: $gibberish"
+            }
+            $unchanged = Get-Content -LiteralPath $feedbackPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($unchanged.events.Count -ne 1) {
+              throw "Unreliable OCR minted feedback and reward"
+            }
+            Write-Host "Proof placeholder rejected, valid feedback recorded, ambiguous OCR earns zero, duplicate denied"
+          } finally {
+            Remove-Item function:\Read-Host -ErrorAction SilentlyContinue
+            $env:LOCALAPPDATA = $oldLocalAppData
+          }
