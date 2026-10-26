@@ -83,3 +83,33 @@ def test_malformed_candidate_list_is_rejected():
     report["right_catalogue_candidates"] = ["ok", None]
     with pytest.raises(ValueError, match="malformed"):
         review_ginger_cpu_ocr_report(report)
+
+
+
+def test_live_ginger_bronze_goddess_truncated_catalogue_not_a_tester_mismatch():
+    report = real_world_report()
+    report["selected_row_visual_candidate"] = (
+        "Estee Lauder Bronze Goddess Soleil Eau Fraiche 100ml TESTER"
+    )
+    report["right_catalogue_candidates"] = [
+        "Estee Lauder AZUREE SOLEIL EAU FRAICHE SKINS... 0.00",
+        "Le tage Me ee ees MN Cee Mi ee A eae 15.20",
+        "Estee Lauder BRONZE GODDESS SOLEIL 100ml TESTER 0.00",
+    ]
+    output = review_ginger_cpu_ocr_report(report)
+    assert [item["status"] for item in output["candidates"]] == [
+        "unreadable_ocr", "unreadable_ocr", "possible_ocr_match_review",
+    ]
+    assert output["candidates"][0]["reward_eligible"] is False
+    assert output["candidates"][1]["reward_eligible"] is False
+    assert output["candidates"][2]["reward_eligible"] is True
+    assert output["safe_for_automatic_matching"] is False
+
+
+def test_full_clear_non_tester_and_tester_are_distinct():
+    report = real_world_report()
+    report["selected_row_visual_candidate"] = "Estee Lauder Bronze Goddess EDP 100ml TESTER"
+    report["right_catalogue_candidates"] = ["Estee Lauder Bronze Goddess EDP 100ml"]
+    output = review_ginger_cpu_ocr_report(report)
+    assert output["candidates"][0]["status"] == "tester_mismatch"
+    assert output["candidates"][0]["reward_eligible"] is True
