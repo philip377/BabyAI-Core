@@ -247,6 +247,18 @@
                                     </StackPanel>
                                 </StackPanel>
                             </Button>
+                            <Button x:Name="GingerNavigationButton"
+                                    Style="{StaticResource NavigationButtonStyle}"
+                                    Click="GingerNavigationButton_Click"
+                                    AutomationProperties.Name="Ginger — проверка сопоставления"
+                                    ToolTipService.ToolTip="Ginger — проверка товаров и журнал действий">
+                                <StackPanel Orientation="Horizontal" Spacing="11">
+                                    <FontIcon Glyph="&#xE8D4;" FontFamily="Segoe MDL2 Assets"
+                                              FontSize="16" Width="24" VerticalAlignment="Center" />
+                                    <TextBlock Text="Ginger · проверка" FontSize="12"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Button>
                             <Button x:Name="SettingsNavigationButton"
                                     Style="{StaticResource NavigationButtonStyle}"
                                     Click="SettingsButton_Click"
