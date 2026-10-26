@@ -64,7 +64,7 @@ public static class GingerWin32Ocr {
 '@
 
 
-# The selected Ginger supplier NAME cell uses a LightBlue background,
+# Ginger highlights the selected NAME cell either light blue or dark blue,
 # while ordinary name cells are pale yellow. Look for ONE horizontal band
 # of this color in the first name column; don't mistake the tab for a row.
 # This is only visual evidence, never an authoritative SKU identifier.
@@ -412,9 +412,9 @@ $warnings.Add("OCR results are unverified; candidate names may contain look-alik
 if($CaptureSupplierGrid){
     $warnings.Add("Supplier-grid selection is based on a blue pixel band, not a confirmed Ginger item ID.")
     if($null -eq $selectedRowBandY){
-        $warnings.Add("No unique LightBlue selected NAME cell detected; cannot identify selected supplier row.")
+        $warnings.Add("No unique blue selected NAME cell detected (light or dark); cannot identify selected supplier row.")
     } elseif([string]::IsNullOrWhiteSpace($selectedRowVisualCandidate)){
-        $warnings.Add("Selected LightBlue row detected, but OCR of its isolated name cell returned no title.")
+        $warnings.Add("Selected blue row detected, but OCR of its isolated name cell returned no title.")
     }
     if($supplierGridLines.Count -eq 0){
         $warnings.Add("No text could be recognized in the supplier grid.")
