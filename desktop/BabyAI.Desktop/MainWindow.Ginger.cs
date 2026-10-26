@@ -173,12 +173,20 @@ public sealed partial class MainWindow
 
         log("Проверяю наличие локального OCR и окна Ginger.");
         using var process = new Process { StartInfo = info };
-        if (!process.Start())
-            throw new InvalidOperationException("Не удалось запустить локальное распознавание Ginger.");
+        // UNIX may be configured to stay above other windows. Lower that
+        // priority while Ginger is captured, or the chat overlay can cover
+        // supplier cells and contaminate local OCR.
+        var presenter = AppWindow.Presenter as Microsoft.UI.Windowing.OverlappedPresenter;
+        var wasTopmost = presenter?.IsAlwaysOnTop ?? false;
+        if (presenter is not null)
+            presenter.IsAlwaysOnTop = false;
 
         string? reportPath = null;
         try
         {
+            if (!process.Start())
+                throw new InvalidOperationException("Не удалось запустить локальное распознавание Ginger.");
+
             // Read stderr concurrently to avoid filling the child process pipe.
             var stderrTask = process.StandardError.ReadToEndAsync(token);
             while (await process.StandardOutput.ReadLineAsync(token) is { } line)
@@ -215,11 +223,15 @@ public sealed partial class MainWindow
         }
         finally
         {
-            if (!process.HasExited)
+            try
             {
-                try { process.Kill(entireProcessTree: true); }
-                catch (InvalidOperationException) { }
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
             }
+            catch (InvalidOperationException) { }
+            if (presenter is not null)
+                presenter.IsAlwaysOnTop = wasTopmost;
+            Activate();
         }
 
         if (string.IsNullOrWhiteSpace(reportPath) || !File.Exists(reportPath))
