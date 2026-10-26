@@ -255,7 +255,8 @@
                                 <StackPanel Orientation="Horizontal" Spacing="11">
                                     <FontIcon Glyph="&#xE8D4;" FontFamily="Segoe MDL2 Assets"
                                               FontSize="16" Width="24" VerticalAlignment="Center" />
-                                    <TextBlock Text="Ginger · проверка" FontSize="12"
+                                    <TextBlock x:Name="GingerNavigationLabel"
+                                               Text="Ginger · проверка" FontSize="12"
                                                VerticalAlignment="Center" />
                                 </StackPanel>
                             </Button>
