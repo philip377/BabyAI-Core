@@ -130,7 +130,7 @@ def test_visual_selected_supplier_cell_is_single_unique_blue_band_not_guess():
     assert 'selected_row_color_band_detected=($null -ne $selectedRowBandY)' in code
     assert 'selected_supplier_row_verified=$false' in code
     assert 'safe_for_automatic_matching=$false' in code
-    assert "No unique LightBlue selected NAME cell" in code
+    assert "No unique blue selected NAME cell" in code
 
 
 
@@ -162,6 +162,17 @@ def test_selected_row_ocr_crop_excludes_neighbouring_rows():
     assert '$cropY=[int]($selectedRowBandY+4)' in code
     assert '$cropH=[int]($selectedRowBandHeight-8)' in code
     assert '$cropH -lt 14' in code
-    assert 'Selected LightBlue row detected, but OCR' in code
+    assert 'Selected blue row detected, but OCR' in code
+    assert 'selected_supplier_row_verified=$false' in code
+    assert 'safe_for_automatic_matching=$false' in code
+
+
+
+def test_modern_dark_blue_supplier_selection_is_recognized_read_only():
+    code = SCRIPT.read_text(encoding="utf-8")
+    assert 'private static bool IsDarkBlue(Color px)' in code
+    assert 'px.R <= 75 && px.G >= 65 && px.G <= 180' in code
+    assert 'return IsLightBlue(px) || IsDarkBlue(px)' in code
+    assert 'if (IsSelectionBlue(img.GetPixel(x, y)))' in code
     assert 'selected_supplier_row_verified=$false' in code
     assert 'safe_for_automatic_matching=$false' in code
