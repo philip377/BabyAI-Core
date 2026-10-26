@@ -113,6 +113,20 @@ public sealed class BabyAIBridgeClient : IDisposable
     public Task<string> RejectToolAsync(CancellationToken cancellationToken = default) =>
         ExecuteReplyCommandAsync("approval.reject", cancellationToken);
 
+    /// <summary>
+    /// Review a local, read-only Ginger OCR report without starting the LLM.
+    /// ERP linking, reward awards and catalogue modification are unavailable.
+    /// </summary>
+    public async Task<JsonElement> ReviewGingerAsync(
+        string reportPath,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = JsonSerializer.Serialize(new { report_path = reportPath });
+        var json = await ExecuteAsync("ginger.preview", payload, cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.GetProperty("review").Clone();
+    }
+
     public Task SetHistoryEnabledAsync(bool enabled) =>
         ExecuteAsync("history.set_enabled", JsonSerializer.Serialize(new { enabled }));
 
