@@ -31,9 +31,9 @@ public sealed partial class MainWindow
             FontSize = 12,
             MinHeight = 305,
             MaxHeight = 355,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             PlaceholderText = "Здесь появятся понятные записи о проверке Ginger.",
         };
+        ScrollViewer.SetVerticalScrollBarVisibility(logBox, ScrollBarVisibility.Auto);
         var hint = new TextBlock
         {
             Text = "Только чтение · CPU OCR · без сопоставления и изменений базы",
