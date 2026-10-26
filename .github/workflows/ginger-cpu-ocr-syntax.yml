@@ -105,15 +105,15 @@ jobs:
             )
           }
           $report | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $path -Encoding UTF8
-          $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/windows/test-ginger-trial.ps1" -Report $path -NonInteractive 2>&1 | Out-String
-          if ($LASTEXITCODE -ne 0) { throw "Trial smoke test failed: $output" }
-          if ($output -notmatch "tester_mismatch" -or $output -notmatch "different_brand" -or $output -notmatch "No buttons clicked") {
-            throw "Trial classification not demonstrated: $output"
+          $output = & "scripts/windows/test-ginger-trial.ps1" -Report $path -NonInteractive 6>&1 2>&1 | Out-String
+          if ($output -notmatch "Тестер и обычный флакон" -or $output -notmatch "Бренд не совпадает" -or
+              $output -notmatch "Безопасный режим") {
+            throw "Русский вывод классификации кандидатов неверен: $output"
           }
           Write-Host $output
-          $demo = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts/windows/test-ginger-trial.ps1" -Demo 2>&1 | Out-String
-          if ($LASTEXITCODE -ne 0 -or $demo -notmatch "DEMO DATA ONLY") {
-            throw "Demo mode failed: $demo"
+          $demo = & "scripts/windows/test-ginger-trial.ps1" -Demo 6>&1 2>&1 | Out-String
+          if ($demo -notmatch "ДЕМО: пример") {
+            throw "Русский деморежим недоступен: $demo"
           }
           Write-Host "Ginger CPU-only noninteractive and demo test passed"
 
@@ -138,9 +138,9 @@ jobs:
             Write-Output "Read-only: no clicks or catalogue writes"
           }
           $out = & "scripts/windows/test-ginger-trial.ps1" -CaptureFresh -NonInteractive 6>&1 2>&1 | Out-String
-          if ($out -notmatch "Selected supplier OCR: Bois 1920 Oro Rosso" -or
-              $out -notmatch "tester_mismatch" -or
-              $out -notmatch "CPU OCR completed:") {
+          if ($out -notmatch "Товар поставщика .*Bois 1920 Oro Rosso" -or
+              $out -notmatch "Тестер и обычный флакон" -or
+              $out -notmatch "OCR завершён") {
             throw "Fresh report polluted by subprocess stdout: $out"
           }
           Write-Host "Fresh report was parsed and child logs shown separately."
@@ -149,7 +149,7 @@ jobs:
           try {
             & "scripts/windows/test-ginger-trial.ps1" -CaptureFresh -NonInteractive | Out-Null
           } catch {
-            if ($_.Exception.Message -match "Refusing to use an older report") {
+            if ($_.Exception.Message -match "Старые данные использовать нельзя") {
               $wasDenied = $true
             } else { throw }
           }
@@ -161,7 +161,7 @@ jobs:
           try {
             & "scripts/windows/test-ginger-trial.ps1" -Report $broken -NonInteractive | Out-Null
           } catch {
-            if ($_.Exception.Message -match "lacks the required selected-row field") {
+            if ($_.Exception.Message -match "В отчёте нет данных о выбранной строке") {
               $missingDenied = $true
             } else { throw }
           }
@@ -200,13 +200,13 @@ jobs:
             $global:answers = @("1","1","required")
             $global:answerIndex = 0
             $invalid = & "scripts/windows/test-ginger-trial.ps1" -Report $reportPath 6>&1 2>&1 | Out-String
-            if ($invalid -notmatch "placeholder" -or (Test-Path $feedbackPath)) {
+            if ($invalid -notmatch "Заглушка" -or (Test-Path $feedbackPath)) {
               throw "A placeholder minted trial rewards: $invalid"
             }
             $global:answers = @("1","1","Checked Bois 1920 EDP 100ml regular bottle in Ginger UI")
             $global:answerIndex = 0
             $accepted = & "scripts/windows/test-ginger-trial.ps1" -Report $reportPath 6>&1 2>&1 | Out-String
-            if ($accepted -notmatch "Human-attested outcome" -or -not (Test-Path $feedbackPath)) {
+            if ($accepted -notmatch "Оценка:" -or -not (Test-Path $feedbackPath)) {
               throw "Real attestation not stored: $accepted"
             }
             $saved = Get-Content -LiteralPath $feedbackPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -218,7 +218,7 @@ jobs:
             $global:answers = @("1")
             $global:answerIndex = 0
             $replay = & "scripts/windows/test-ginger-trial.ps1" -Report $reportPath 6>&1 2>&1 | Out-String
-            if ($replay -notmatch "No duplicate reward") {
+            if ($replay -notmatch "Повторная награда") {
               throw "One report/candidate should not be rewarded twice"
             }
             Write-Host "Proof placeholder rejected, review note recorded, v2 hash bound, duplicate denied"
