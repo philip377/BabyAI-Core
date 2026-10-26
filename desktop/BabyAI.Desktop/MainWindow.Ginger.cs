@@ -18,7 +18,7 @@ public sealed partial class MainWindow
     // only observed actions and the structured outcomes of the OCR reviewer.
     private async void GingerNavigationButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_gingerDialogOpen)
+        if (_gingerDialogOpen || _busy)
             return;
         _gingerDialogOpen = true;
         var lines = new List<string>();
