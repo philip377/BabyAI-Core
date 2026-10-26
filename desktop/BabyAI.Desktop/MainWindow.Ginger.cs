@@ -71,7 +71,9 @@ public sealed partial class MainWindow
             if (lines.Count > 180)
                 lines.RemoveAt(0);
             logBox.Text = string.Join(Environment.NewLine, lines);
-            logBox.Select(logBox.Text.Length, 0);
+            // The dialog has not been loaded for the first log line yet.
+            if (logBox.XamlRoot is not null)
+                logBox.Select(logBox.Text.Length, 0);
             SaveGingerLogLine(entry);
         }
 
