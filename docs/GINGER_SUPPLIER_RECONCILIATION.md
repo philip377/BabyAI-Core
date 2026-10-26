@@ -939,3 +939,48 @@ performed in this stage.
 
 The next interactive milestone should be a strictly gated UI-only
 search-word toggle with before/after verification, not an ERP link.
+
+
+## Integration in the existing UNIX WinUI desktop (26 October 2026)
+
+The Windows desktop now contains a "Ginger · проверка" navigation button.
+It opens an in-app Russian-language action log with an explicit
+"Проверить выделенный товар" start button and "Остановить" cancel button.
+The log is readable, timestamped, scrollable, and retained locally in
+LOCALAPPDATA/BabyAI/logs/ginger-actions.log (one rotated backup after 2 MB).
+
+When the user presses Start, WinUI runs the previously tested
+test-ginger-cpu-ocr.ps1 bundled with the desktop installer. UNIX temporarily
+relinquishes its always-on-top setting, the script switches to Ginger,
+captures only visible screen regions, then UNIX restores the window and
+shows explanations from the existing Python
+ginger_ocr_match_review.review_ginger_cpu_ocr_json function.
+
+The desktop bridge command "ginger.preview" accepts ONLY resolved local
+ginger-cpu-test-*/ginger-cpu-report.json paths directly under the current
+user's Downloads folder. It refuses arbitrary paths, model-generated
+actions, SQL access, network calls and catalogue modifications. The review
+runs without loading any language model or requiring a GPU.
+
+Example in-app log:
+[14:02:00] Начинаю проверку. Данные останутся на этом компьютере.
+[14:02:01] Проверяю наличие локального OCR и окна Ginger.
+[14:02:05] Снимки таблиц сохранены локально; распознавание завершено.
+[14:02:05] Проверяю распознанные названия и возможные совпадения.
+[14:02:06] Товар поставщика: Estee Lauder ... 100ml TESTER
+[14:02:06] 1. Estee Lauder AZUREE SOLEIL ... SKINS...
+[14:02:06]      НЕ УГАДЫВАЮ: название обрезано или распознано с ошибками.
+[14:02:06] Итог: автоматическая привязка и создание товара выключены.
+[14:02:06] Баллы: 0 — без подтверждённого действия награда не начисляется.
+
+This stage integrates the READ-ONLY vision + candidate review with an
+explainable journal, not the prior stand-alone PowerShell feedback prompt.
+The old manually confirmed trial scoring remains accessible separately,
+but the new GUI deliberately does NOT award points or train on OCR-only
+results. It does not link, create, delete or modify Ginger items.
+Tesseract with eng+rus must be installed on the machine for live screen OCR.
+
+After merging/building the updated desktop application, open UNIX,
+expand the left sidebar and select "Ginger · проверка". Keep a supplier
+item selected in Ginger, then press "Проверить выделенный товар".
+Review the displayed decisions and the separate on-disk activity log.
