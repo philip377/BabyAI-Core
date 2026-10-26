@@ -31,6 +31,7 @@ class OcrCandidateAssessment:
     status: str
     reason: str
     similarity: float
+    reward_eligible: bool
 
 
 def _extract_title(line: str) -> str:
@@ -43,6 +44,18 @@ def _volume(text: str) -> tuple[int | None, bool]:
         return None, True
     raw = items[0].group(2).casefold()
     return int(items[0].group(1)), raw not in {"ml", "мл"}
+
+
+def _is_unreadable_catalogue_title(title: str) -> bool:
+    """Truncation and heavily fragmented OCR cannot establish tester status."""
+    if "..." in title or "…" in title:
+        return True
+    words = title.split()
+    if len(words) < 2:
+        return True
+    short = sum(len(token) <= 3 for token in words)
+    has_details = _CONCENTRATION.search(title) or _TESTER.search(title) or _VOLUME.search(title)
+    return len(words) >= 8 and short >= 5 and not has_details
 
 
 def _name_for_comparison(text: str) -> str:
@@ -104,7 +117,11 @@ def review_ginger_cpu_ocr_report(report: Mapping[str, Any]) -> dict[str, Any]:
         conc = conc_match.group(1).casefold() if conc_match else None
         similarity = round(SequenceMatcher(None, source_normalized, candidate_norm).ratio(), 4)
 
-        if candidate_norm.split()[0] != source_brand:
+        if _is_unreadable_catalogue_title(clean):
+            status, reason = (
+                "unreadable_ocr", "Truncated or garbled name: tester, volume and variant are unknown"
+            )
+        elif candidate_norm.split()[0] != source_brand:
             status, reason = "different_brand", "First brand token differs"
         elif source_tester != bool(_TESTER.search(clean)):
             status, reason = "tester_mismatch", "Tester and ordinary bottle are distinct catalogue items"
@@ -123,7 +140,8 @@ def review_ginger_cpu_ocr_report(report: Mapping[str, Any]) -> dict[str, Any]:
             status, reason = "possible_ocr_match_review", "OCR is approximate; verify name, variant and size in Ginger"
 
         results.append(OcrCandidateAssessment(
-            title_as_read=clean, status=status, reason=reason, similarity=similarity
+            title_as_read=clean, status=status, reason=reason, similarity=similarity,
+            reward_eligible=(status != "unreadable_ocr")
         ))
 
     warnings = ["Only visible OCR text is compared, not actual Ginger catalogue IDs"]
