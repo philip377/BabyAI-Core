@@ -83,6 +83,37 @@ public static class GingerSelectionBand
             && px.G > px.R + 22 && px.B > px.G + 5;
     }
 
+    public static int NameCellRightEdge(string file, int selectedY)
+    {
+        using (Bitmap img = new Bitmap(file))
+        {
+            // Use the top interior of the blue row, clear of product text.
+            // Detect the actual name-cell boundary instead of assuming 16.8%
+            // image width (that cut off the TESTER suffix on wider grids).
+            int y = Math.Max(0, Math.Min(img.Height - 1, selectedY + 3));
+            int startX = (int)(img.Width * 0.06);
+            int maxX = (int)(img.Width * 0.32);
+            int lastBlue = -1;
+            int nonBlueRun = 0;
+            for (int x = startX; x < maxX; x++)
+            {
+                if (IsLightBlue(img.GetPixel(x, y)))
+                {
+                    lastBlue = x;
+                    nonBlueRun = 0;
+                }
+                else if (lastBlue >= 0 && ++nonBlueRun >= 12)
+                {
+                    break;
+                }
+            }
+            if (lastBlue < (int)(img.Width * 0.12)
+                || lastBlue > (int)(img.Width * 0.30))
+                return 0;
+            return lastBlue;
+        }
+    }
+
     public static int[] Detect(string file)
     {
         using (Bitmap img = new Bitmap(file))
@@ -90,8 +121,14 @@ public static class GingerSelectionBand
             // Match only a blue NAME cell, not a full-width tab/pane bar.
             // On the real Ginger screenshot the blue bottom panel produced
             // a second "selected row" after 2x upscaling (the root bug).
-            int x0 = (int)(img.Width * 0.085);
-            int x1 = (int)(img.Width * 0.145);
+            // Read the blank RIGHT side of the supplier NAME cell.
+            // Older sampling (8.5%-14.5%) overlapped title glyphs:
+            // a single row split into blue stripes above/below the text,
+            // with neither stripe meeting the minimum height threshold.
+            // On both observed Ginger layouts 15.1%-16.3% lies INSIDE the
+            // selected name cell, just before the next table column.
+            int x0 = (int)(img.Width * 0.151);
+            int x1 = (int)(img.Width * 0.163);
             int guardX0 = (int)(img.Width * 0.245);
             int guardX1 = (int)(img.Width * 0.305);
             int y0 = Math.Min(25, img.Height / 10);
@@ -328,14 +365,20 @@ if($CaptureSupplierGrid){
         $fullImage=[System.Drawing.Bitmap]::FromFile($supplierGridImage)
         try{
             $cropX=[int]($fullImage.Width*0.008)
-            # Include ONLY the interior of the blue row. +/-5 px padding
-            # used to include bits of adjacent rows and made PSM 7 return
-            # empty OCR despite finding the correct selection highlight.
+            # Crop inside the selected band to exclude neighboring rows.
             $cropY=[int]($selectedRowBandY+4)
-            $cropW=[int]($fullImage.Width*0.168)
             $cropH=[int]($selectedRowBandHeight-8)
-            if($cropY -lt 0 -or $cropH -lt 14 -or
-               ($cropY+$cropH) -gt $fullImage.Height){
+            # Determine the actual right edge of the selected NAME cell.
+            # A fixed percentage truncated long titles such as ... TESTER.
+            $nameCellEnd=[GingerSelectionBand]::NameCellRightEdge(
+                $supplierGridImage, $selectedRowBandY)
+            if($nameCellEnd -eq 0){
+                throw "Selected supplier name cell boundary is ambiguous"
+            }
+            $cropW=[int]($nameCellEnd-$cropX-5)
+            if($cropY -lt 0 -or $cropH -lt 14 -or $cropW -lt 120 -or
+               ($cropY+$cropH) -gt $fullImage.Height -or
+               ($cropX+$cropW) -gt $fullImage.Width){
                 throw "Detected supplier row is too short or outside the captured image"
             }
             $rectangle=[System.Drawing.Rectangle]::new(
