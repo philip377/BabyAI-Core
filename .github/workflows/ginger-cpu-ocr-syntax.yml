@@ -56,6 +56,7 @@ jobs:
           $graphics = [System.Drawing.Graphics]::FromImage($bmp)
           $yellow = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255,255,225))
           $blue = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(173,216,230))
+          $darkBlue = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(0,120,212))
           try {
             $graphics.Clear([System.Drawing.Color]::White)
             $graphics.FillRectangle($yellow, 40, 30, 260, 340)
@@ -100,11 +101,30 @@ jobs:
             if ($ambiguous.Length -ne 0) {
               throw "Multiple blue rows must be rejected"
             }
-            Write-Host "Single-row detection and ambiguous-row rejection passed"
+            # The current supplier grid draws selected names dark blue
+            # (RGB 0,120,212), unlike older light-blue active selections.
+            $graphics.Clear([System.Drawing.Color]::White)
+            $graphics.FillRectangle($yellow, 40, 30, 260, 340)
+            $graphics.FillRectangle($darkBlue, 40, 75, 260, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $dark = [GingerSelectionBand]::Detect($path)
+            $darkEdge = [GingerSelectionBand]::NameCellRightEdge($path, 75)
+            if ($dark.Length -ne 2 -or $dark[0] -ne 75 -or $dark[1] -ne 18 -or
+                $darkEdge -lt 296 -or $darkEdge -gt 302) {
+              throw "Dark-blue current Ginger selection was not identified correctly"
+            }
+            # A second selected dark-blue title must still be ambiguous.
+            $graphics.FillRectangle($darkBlue, 40, 140, 260, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            if ([GingerSelectionBand]::Detect($path).Length -ne 0) {
+              throw "Multiple selected dark-blue rows must be rejected"
+            }
+            Write-Host "Light-blue/dark-blue selections, dynamic boundaries and ambiguity passed"
           } finally {
             $graphics.Dispose()
             $yellow.Dispose()
             $blue.Dispose()
+            $darkBlue.Dispose()
             $bmp.Dispose()
             Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
           }
