@@ -12,6 +12,41 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Russian text is UTF-8 with BOM for Windows PowerShell 5.1.
+# Machine-readable status codes and JSON field names remain unchanged.
+function Get-RussianDecision([string]$decision) {
+    switch($decision) {
+        "reject" { return "ОТКЛОНИТЬ — найдено несовпадение" }
+        "abstain" { return "НУЖНА ПРОВЕРКА — данных пока недостаточно" }
+        "link" { return "СОПОСТАВИТЬ (в этом тесте запрещено)" }
+        default { return "НЕИЗВЕСТНО — остановка" }
+    }
+}
+function Get-RussianOutcome([string]$outcome) {
+    switch($outcome) {
+        "correct_reject" { return "Правильно отклонил неподходящий товар" }
+        "wrong_reject" { return "Ошибочно отклонил товар" }
+        "correct_abstain" { return "Правильно отправил на ручную проверку" }
+        "unnecessary_abstain" { return "Напрасно отправил на ручную проверку" }
+        default { return "Неизвестная оценка" }
+    }
+}
+function Write-RussianOcrMessage([string]$line) {
+    if($line.StartsWith("CPU OCR completed: ",[StringComparison]::OrdinalIgnoreCase)){
+        Write-Host ("OCR завершён. Файл отчёта: " + $line.Substring("CPU OCR completed: ".Length))
+    }elseif($line.StartsWith("Switching from PowerShell to Ginger4 window")){
+        Write-Host "Переключаюсь на окно Ginger..."
+    }elseif($line.StartsWith("Left lines: ")){
+        Write-Host ("Сведения OCR: " + $line)
+    }elseif($line.StartsWith("Read-only: ")){
+        Write-Host "Режим только чтения: товары и сервер Ginger не изменены."
+    }elseif($line.StartsWith("Review report for sensitive")){
+        Write-Host "Перед отправкой отчёта проверь, нет ли в нём служебных данных."
+    }else{
+        Write-Host $line
+    }
+}
+
 function Read-Report {
     if($Demo){
         # Example only. A demo can NEVER be awarded or written to the ledger.
@@ -31,22 +66,22 @@ function Read-Report {
     }
     $downloads = Join-Path $env:USERPROFILE "Downloads"
     if($CaptureFresh -and $Report.Trim()){
-        throw "Choose -CaptureFresh OR -Report, not both."
+        throw "Укажи только один вариант: -CaptureFresh (новый снимок) или -Report (готовый отчёт)."
     }
     if($CaptureFresh){
         $ocr=Join-Path $PSScriptRoot "test-ginger-cpu-ocr.ps1"
         if(-not (Test-Path -LiteralPath $ocr -PathType Leaf)){
-            throw "Save test-ginger-cpu-ocr.ps1 alongside this script, or omit -CaptureFresh."
+            throw "Рядом со скриптом отсутствует test-ginger-cpu-ocr.ps1. Скачай его в ту же папку."
         }
-        Write-Host "Reading the current Ginger screen locally..."
+        Write-Host "Считываю текущее окно Ginger (локально, без изменения товаров)..."
         $captureStarted=[DateTime]::UtcNow
         # IMPORTANT: do not leak child stdout into this function's output
         # stream. It must return ONLY one JSON object to the caller.
         $ocrOutput=@(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ocr -CaptureSupplierGrid 2>&1)
         $ocrExit=$LASTEXITCODE
-        foreach($message in $ocrOutput){Write-Host ([string]$message)}
+        foreach($message in $ocrOutput){Write-RussianOcrMessage ([string]$message)}
         if($ocrExit -ne 0){
-            throw "Fresh Ginger OCR failed. No stale report or score will be used."
+            throw "Не удалось распознать свежий экран Ginger. Старый отчёт и начисление очков запрещены."
         }
         $createdReports=@()
         $prefix="CPU OCR completed: "
@@ -58,15 +93,15 @@ function Read-Report {
         }
         if($createdReports.Count -ne 1 -or
            [string]::IsNullOrWhiteSpace([string]$createdReports[0])){
-            throw "Fresh Ginger OCR did not return exactly one report path. Refusing to use an older report."
+            throw "OCR не вернул один корректный путь к новому отчёту. Старые данные использовать нельзя."
         }
         $Report=([string]$createdReports[0]).Trim()
         if(-not (Test-Path -LiteralPath $Report -PathType Leaf)){
-            throw "OCR returned a report path that does not exist."
+            throw "OCR сообщил путь к отчёту, но файл не существует."
         }
         $fresh=Get-Item -LiteralPath $Report
         if($fresh.LastWriteTimeUtc -lt $captureStarted.AddSeconds(-5)){
-            throw "The OCR report predates this capture. Refusing stale data."
+            throw "Отчёт создан раньше текущего снимка. Использование устаревших данных запрещено."
         }
     }
     if(-not $Report.Trim()){
@@ -81,31 +116,31 @@ function Read-Report {
         }
     }
     if(-not $Report -or -not (Test-Path -LiteralPath $Report -PathType Leaf)){
-        throw "No Ginger report found. Use -CaptureFresh or -Report path to ginger-cpu-report.json."
+        throw "Отчёт Ginger не найден. Запусти с -CaptureFresh или укажи -Report и путь к ginger-cpu-report.json."
     }
     $file=Get-Item -LiteralPath $Report
-    if($file.Length -gt 4194304){throw "OCR report too large"}
+    if($file.Length -gt 4194304){throw "Слишком большой OCR-отчёт (больше 4 МБ)."}
     $script:CurrentReportPath=$file.FullName
     $script:CurrentReportSha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     $document=Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
     if($null -eq $document -or $document.source -ne "Ginger4 CPU OCR pilot" -or
        $document.read_only -cne $true -or $document.ginger_modified -cne $false -or
        $document.local_only -cne $true){
-        throw "Report does not have valid Ginger read-only and local-only confirmation."
+        throw "Отчёт не подтверждает безопасный локальный режим чтения Ginger."
     }
     $required=@("selected_row_visual_candidate","selected_row_color_band_detected","right_catalogue_candidates")
     foreach($field in $required){
         if($null -eq $document.PSObject.Properties[$field]){
-            throw "OCR report lacks the required selected-row field. Download the current OCR script and rerun -CaptureFresh."
+            throw "В отчёте нет данных о выбранной строке. Скачай обновлённый OCR-скрипт и запусти -CaptureFresh."
         }
     }
     if($document.selected_row_color_band_detected -cne $true -or
        [string]::IsNullOrWhiteSpace([string]$document.selected_row_visual_candidate)){
-        throw "Selected supplier title is unreadable. Select one Ginger row and repeat OCR."
+        throw "Не удалось прочитать выделенный товар поставщика. Выдели одну строку в Ginger и повтори запуск."
     }
     if($null -eq $document.right_catalogue_candidates -or
        $document.right_catalogue_candidates -isnot [array]){
-        throw "OCR report has an invalid right-catalogue list; stop without scoring."
+        throw "Список товаров справа в отчёте повреждён. Начисление очков остановлено."
     }
     return $document
 }
@@ -146,28 +181,28 @@ function Test-Candidate([string]$source,[string]$candidate){
     $srcVariant=Get-Variant $source
     $dstVariant=Get-Variant $title
     $classification="review"
-    $reason="OCR is not proof of catalogue identity: compare the actual perfume, volume and packaging."
+    $reason="OCR может ошибаться: проверь сам аромат, объём и упаковку в Ginger."
     $decision="abstain"
     if($firstSource -ne $firstCandidate){
         $classification="different_brand"
-        $reason="Different first brand word."
+        $reason="Бренд не совпадает."
         $decision="reject"
     }elseif((Get-Tester $source) -ne (Get-Tester $title)){
         $classification="tester_mismatch"
-        $reason="Tester and regular bottle are different items."
+        $reason="Тестер и обычный флакон — разные товары."
         $decision="reject"
     }elseif($srcVariant -ne $dstVariant){
         $classification="variant_mismatch"
-        $reason="Different fragrance variant."
+        $reason="Отличается версия аромата (например, INTENSE или ELIXIR)."
         $decision="reject"
     }elseif($srcConc -and $dstConc -and $srcConc -ne $dstConc){
         $classification="concentration_mismatch"
-        $reason="EDP/EDT concentration differs."
+        $reason="Не совпадает концентрация (EDP/EDT)."
         $decision="reject"
     }elseif($srcVolume.size -ne 0 -and $dstVolume.size -ne 0 -and
             $srcVolume.size -ne $dstVolume.size){
         $classification="volume_mismatch"
-        $reason="Bottle size differs."
+        $reason="Не совпадает объём флакона."
         $decision="reject"
     }
     # Never mark any OCR title as an automatically linkable exact match.
@@ -220,10 +255,10 @@ function Test-TrustedTrialEvent($evt){
 }
 
 function Write-TrialReward($selection,[string]$source){
-    if($Demo){throw "Demo results cannot be scored"}
+    if($Demo){throw "За демонстрацию очки не начисляются."}
     if(-not $script:CurrentReportPath -or
        ([string]$script:CurrentReportSha256) -notmatch '^[a-f0-9]{64}$'){
-        throw "Missing original OCR report SHA256. No feedback is accepted."
+        throw "Отсутствует хеш исходного OCR-отчёта. Оценка не принимается."
     }
     $base=Join-Path $env:LOCALAPPDATA "BabyAI\Ginger"
     New-Item -ItemType Directory -Path $base -Force | Out-Null
@@ -232,14 +267,14 @@ function Write-TrialReward($selection,[string]$source){
     if(Test-Path -LiteralPath $ledger -PathType Leaf){
         $existing=Get-Content -LiteralPath $ledger -Raw -Encoding UTF8 | ConvertFrom-Json
         if($existing.version -notin @(1,2) -or $null -eq $existing.events){
-            throw "Unrecognized feedback ledger; refuse to overwrite"
+            throw "Неизвестный формат журнала оценок. Перезапись запрещена."
         }
         $events=@($existing.events)
     }
     $key=Get-EventKey $source $selection.candidate $selection.decision
     $trustedEvents=@($events | Where-Object {Test-TrustedTrialEvent $_})
     if(@($trustedEvents | Where-Object {$_.key -eq $key}).Count -gt 0){
-        Write-Host "Already reviewed this source/candidate pair with a detailed note. No duplicate reward."
+        Write-Host "Эта пара товаров уже оценивалась. Повторная награда не начисляется."
         return
     }
     $existingScore=0
@@ -254,22 +289,22 @@ function Write-TrialReward($selection,[string]$source){
         if($points -le -100){$critical=$true}
     }
     if($existingScore -le -75 -or $critical){
-        Write-Host "Trial is frozen because of negative feedback. Operator must review. No reward."
+        Write-Host "Тест заблокирован из-за ошибок. Нужна проверка оператором, новые очки не начисляются."
         return
     }
     Write-Host ""
-    Write-Host "Human review is needed. Compare ORIGINAL Ginger item and candidate."
-    Write-Host "1 = recommendation was correct after manually checking Ginger"
-    Write-Host "2 = recommendation was wrong after manually checking Ginger"
-    Write-Host "0 = cannot independently verify (no points)"
-    $answer=(Read-Host "Checked result (1 / 2 / 0)").Trim()
-    if($answer -eq "0"){Write-Host "No evidence, zero points.";return}
-    if($answer -notin @("1","2")){Write-Host "Not recorded.";return}
-    Write-Host "Describe the ACTUAL visible difference or match (brand, bottle, size, concentration)."
-    Write-Host "At least 25 characters, 4 words, concrete identifying detail."
-    $note=(Read-Host "What did you verify in Ginger?").Trim()
+    Write-Host "Сверь выбранную позицию с ОРИГИНАЛЬНЫМИ строками в Ginger, не только с распознанным текстом."
+    Write-Host "1 — UNIX правильно решил НЕ сопоставлять этот товар автоматически."
+    Write-Host "2 — UNIX ошибся в оценке кандидата."
+    Write-Host "0 — не уверен / не проверял (0 очков)."
+    $answer=(Read-Host "Твоя оценка (1, 2 или 0)").Trim()
+    if($answer -eq "0"){Write-Host "Проверка пропущена. Начислено 0 очков.";return}
+    if($answer -notin @("1","2")){Write-Host "Неверный выбор. Оценка не сохранена.";return}
+    Write-Host "Объясни, что именно проверил в Ginger: бренд, тестер, объём или концентрацию."
+    Write-Host "Напиши не меньше 25 символов и 4 слов. Например: Это тестер, а поставщик указал обычный флакон 100 мл."
+    $note=(Read-Host "Что именно ты проверил?").Trim()
     if(-not (Test-ReviewNote $note)){
-        Write-Host "Rejected: a placeholder such as 'required' is NOT evidence. +0 points."
+        Write-Host "Заглушка вместо объяснения не принимается. Начислено 0 очков."
         return
     }
     if($selection.decision -eq "reject"){
@@ -299,28 +334,28 @@ function Write-TrialReward($selection,[string]$source){
     $payload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $temp -Encoding UTF8
     Move-Item -LiteralPath $temp -Destination $ledger -Force
     $score=$existingScore+$points
-    Write-Host "Human-attested outcome: $outcome / points: $points / trial score: $score"
-    Write-Host "Report SHA256: $($script:CurrentReportSha256)"
-    Write-Host "Legacy v1 positive points are kept as history but EXCLUDED from this score."
-    if($score -le -75){Write-Host "TRIAL FREEZE: negative reward budget reached."}
-    Write-Host "Trial feedback: $ledger"
-    Write-Host "Note: a human-written explanation is NOT independent proof of catalogue identity."
-    Write-Host "This is a local trial log, not the production SQLite reward ledger."
+    Write-Host ("Оценка: {0}. Баллы: {1}; итоговый счёт: {2}" -f (Get-RussianOutcome $outcome),$points,$score)
+    Write-Host "SHA-256 исходного отчёта: $($script:CurrentReportSha256)"
+    Write-Host "Старые неподтверждённые положительные очки остались в истории, но исключены из счёта."
+    if($score -le -75){Write-Host "ВНИМАНИЕ! Тест заблокирован из-за отрицательного счёта."}
+    Write-Host "Журнал оценок: $ledger"
+    Write-Host "Примечание: твоё объяснение не заменяет независимую проверку идентификатора товара."
+    Write-Host "Это локальный тестовый журнал, а не основная база наград UNIX."
 }
 
 $data=Read-Report
 $source=[string]$data.selected_row_visual_candidate
 if([string]::IsNullOrWhiteSpace($source) -or
    $data.selected_row_color_band_detected -cne $true){
-    throw "Selected Ginger supplier title was not visible. Open the line and repeat OCR."
+    throw "Не удалось определить выбранный товар. Выдели строку в Ginger и повтори OCR."
 }
 $items=@($data.right_catalogue_candidates)
-if($items.Count -eq 0){Write-Host "No candidates visible. No reward.";return}
+if($items.Count -eq 0){Write-Host "Справа не видно подходящих строк для оценки. Очки не начислены.";return}
 Write-Host ""
-Write-Host "===== UNIX / GINGER / CPU MATCHING TRIAL ====="
-Write-Host "Selected supplier OCR: $source"
-Write-Host "Source/item IDs are NOT verified. No auto-linking allowed."
-if($Demo){Write-Host "DEMO DATA ONLY — no real Ginger activity or scoring."}
+Write-Host "===== UNIX — ПРОВЕРКА СОПОСТАВЛЕНИЯ GINGER ====="
+Write-Host "Товар поставщика (распознано с экрана): $source"
+Write-Host "ВНИМАНИЕ: идентификаторы товаров не подтверждены. Автосопоставление выключено."
+if($Demo){Write-Host "ДЕМО: пример без чтения Ginger и начисления очков."}
 $assessments=[System.Collections.Generic.List[object]]::new()
 foreach($candidate in $items){
     $text=[string]$candidate
@@ -329,18 +364,18 @@ foreach($candidate in $items){
     $item=Test-Candidate $source $text
     $assessments.Add($item)
     Write-Host ("[{0}] {1}" -f $assessments.Count,$item.candidate)
-    Write-Host ("    UNIX: {0} ({1}); {2}" -f $item.decision,$item.classification,$item.reason)
+    Write-Host ("    Решение UNIX: {0}. Причина: {1}" -f (Get-RussianDecision $item.decision),$item.reason)
 }
-if($assessments.Count -eq 0){Write-Host "No readable candidate text. +0 points.";return}
-Write-Host "WARNING: image/OCR text may contain confusable Cyrillic/Latin letters."
-Write-Host "No buttons clicked. Ginger and its server were not modified."
+if($assessments.Count -eq 0){Write-Host "Не удалось прочитать товары справа. +0 очков.";return}
+Write-Host "ВНИМАНИЕ: распознавание иногда путает латинские и русские буквы."
+Write-Host "Безопасный режим: никаких кликов, Ginger и его сервер не изменены."
 if($Demo -or $NonInteractive){return}
-$chosen=(Read-Host "Which candidate should be reviewed? (number or 0 to exit)").Trim()
+$chosen=(Read-Host "Номер товара для проверки (1, 2, 3... или 0 — выход)").Trim()
 if($chosen -eq "0"){return}
 $index=0
 if(-not [int]::TryParse($chosen,[ref]$index) -or $index -lt 1 -or
    $index -gt $assessments.Count){
-    Write-Host "No valid candidate selected. +0 points."
+    Write-Host "Неверный номер товара. +0 очков."
     return
 }
 Write-TrialReward -selection $assessments[$index-1] -source $source
