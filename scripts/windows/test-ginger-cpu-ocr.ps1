@@ -83,6 +83,20 @@ public static class GingerSelectionBand
             && px.G > px.R + 22 && px.B > px.G + 5;
     }
 
+    private static bool IsDarkBlue(Color px)
+    {
+        // Active selection on the newer Ginger supplier grid:
+        // observed RGB(0,120,212), not the older LightBlue(173,216,230).
+        return px.R <= 75 && px.G >= 65 && px.G <= 180
+            && px.B >= 155 && px.B <= 250
+            && px.B > px.G + 25 && px.G > px.R + 35;
+    }
+
+    private static bool IsSelectionBlue(Color px)
+    {
+        return IsLightBlue(px) || IsDarkBlue(px);
+    }
+
     public static int NameCellRightEdge(string file, int selectedY)
     {
         using (Bitmap img = new Bitmap(file))
@@ -97,7 +111,7 @@ public static class GingerSelectionBand
             int nonBlueRun = 0;
             for (int x = startX; x < maxX; x++)
             {
-                if (IsLightBlue(img.GetPixel(x, y)))
+                if (IsSelectionBlue(img.GetPixel(x, y)))
                 {
                     lastBlue = x;
                     nonBlueRun = 0;
@@ -143,14 +157,14 @@ public static class GingerSelectionBand
                 int matches = 0;
                 for (int x = x0; x <= x1; x += step)
                 {
-                    if (IsLightBlue(img.GetPixel(x, y))) matches++;
+                    if (IsSelectionBlue(img.GetPixel(x, y))) matches++;
                     count++;
                 }
                 int guardCount = 0;
                 int guardMatches = 0;
                 for (int x = guardX0; x <= guardX1; x += guardStep)
                 {
-                    if (IsLightBlue(img.GetPixel(x, y))) guardMatches++;
+                    if (IsSelectionBlue(img.GetPixel(x, y))) guardMatches++;
                     guardCount++;
                 }
                 // Actual selected name cells end before the price column;
