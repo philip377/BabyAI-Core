@@ -170,6 +170,23 @@ function Get-Tester([string]$title){
     return [bool]([regex]::IsMatch($title,'(?i)(tester|testeur|тестер|тест)(?![а-яa-z])'))
 }
 
+function Test-UnreadableOcrTitle([string]$title){
+    # An ellipsis means Ginger truncated the catalogue cell.
+    # It does NOT prove the absence of TESTER, INTENSE, EDT or volume.
+    if($title -match '(\.{3,}|…|[…])'){return $true}
+    $tokens=@($title -split '\s+' | Where-Object {$_})
+    if($tokens.Count -lt 2){return $true}
+    # Extremely fragmented OCR such as "Le tage Me ee ees MN Cee Mi ee A eae"
+    # must not receive a confident "different brand" rejection.
+    if($tokens.Count -ge 8){
+        $tiny=@($tokens | Where-Object {$_.Length -le 3}).Count
+        $hasProductDetails=([regex]::IsMatch($title,'(?i)\b(edp|edt|edc|tester|тестер|parfum|extrait)\b') -or
+             ((Get-Volume $title).size -ne 0))
+        if($tiny -ge 5 -and -not $hasProductDetails){return $true}
+    }
+    return $false
+}
+
 function Test-Candidate([string]$source,[string]$candidate){
     $title=([regex]::Replace($candidate,'\s+\d{1,6}[.,]\d{2}\s*$','')).Trim()
     $firstSource=([regex]::Match($source,'^[^\s]+')).Value.ToLowerInvariant()
@@ -183,7 +200,13 @@ function Test-Candidate([string]$source,[string]$candidate){
     $classification="review"
     $reason="OCR может ошибаться: проверь сам аромат, объём и упаковку в Ginger."
     $decision="abstain"
-    if($firstSource -ne $firstCandidate){
+    $rewardEligible=$true
+    if(Test-UnreadableOcrTitle $title){
+        $classification="unreadable_ocr"
+        $reason="Название обрезано или плохо распознано. Нельзя утверждать, что здесь нет TESTER, другого объёма или другой версии аромата."
+        $decision="abstain"
+        $rewardEligible=$false
+    }elseif($firstSource -ne $firstCandidate){
         $classification="different_brand"
         $reason="Бренд не совпадает."
         $decision="reject"
@@ -213,6 +236,7 @@ function Test-Candidate([string]$source,[string]$candidate){
         reason=$reason
         uncertain_ocr=($srcVolume.uncertain -or $dstVolume.uncertain)
         automatic_link_allowed=$false
+        reward_eligible=$rewardEligible
     }
 }
 
@@ -251,11 +275,28 @@ function Test-TrustedTrialEvent($evt){
     if($evt.evidence_level -cne "human_attested_with_report_hash_v2"){return $false}
     if(([string]$evt.report_sha256) -notmatch '^[a-f0-9]{64}$'){return $false}
     if(-not (Test-ReviewNote ([string]$evt.review_note))){return $false}
+    # Older +5 rewards for unreadable OCR must stay in the history
+    # but must NOT influence the verified current score.
+    if([int]$evt.points -gt 0){
+        foreach($name in @("source_as_read","candidate_as_read","decision")){
+            if($null -eq $evt.PSObject.Properties[$name]){return $false}
+        }
+        $freshAssessment=Test-Candidate ([string]$evt.source_as_read) ([string]$evt.candidate_as_read)
+        if(-not $freshAssessment.reward_eligible -or
+           $freshAssessment.decision -cne ([string]$evt.decision)){
+            return $false
+        }
+    }
     return $true
 }
 
 function Write-TrialReward($selection,[string]$source){
     if($Demo){throw "За демонстрацию очки не начисляются."}
+    if(-not $selection.reward_eligible){
+        Write-Host "Оценка запрещена: название кандидата обрезано или OCR недостаточно надёжен. +0 очков."
+        Write-Host "Попробуй открыть полное название в Ginger или выбери другую позицию для теста."
+        return
+    }
     if(-not $script:CurrentReportPath -or
        ([string]$script:CurrentReportSha256) -notmatch '^[a-f0-9]{64}$'){
         throw "Отсутствует хеш исходного OCR-отчёта. Оценка не принимается."
@@ -336,7 +377,7 @@ function Write-TrialReward($selection,[string]$source){
     $score=$existingScore+$points
     Write-Host ("Оценка: {0}. Баллы: {1}; итоговый счёт: {2}" -f (Get-RussianOutcome $outcome),$points,$score)
     Write-Host "SHA-256 исходного отчёта: $($script:CurrentReportSha256)"
-    Write-Host "Старые неподтверждённые положительные очки остались в истории, но исключены из счёта."
+    Write-Host "Старые неподтверждённые или ошибочно начисленные за плохой OCR баллы остались в истории, но исключены из счёта."
     if($score -le -75){Write-Host "ВНИМАНИЕ! Тест заблокирован из-за отрицательного счёта."}
     Write-Host "Журнал оценок: $ledger"
     Write-Host "Примечание: твоё объяснение не заменяет независимую проверку идентификатора товара."
@@ -365,6 +406,9 @@ foreach($candidate in $items){
     $assessments.Add($item)
     Write-Host ("[{0}] {1}" -f $assessments.Count,$item.candidate)
     Write-Host ("    Решение UNIX: {0}. Причина: {1}" -f (Get-RussianDecision $item.decision),$item.reason)
+    if(-not $item.reward_eligible){
+        Write-Host "    Оценка: 0 очков; неполное название нельзя использовать для обучения."
+    }
 }
 if($assessments.Count -eq 0){Write-Host "Не удалось прочитать товары справа. +0 очков.";return}
 Write-Host "ВНИМАНИЕ: распознавание иногда путает латинские и русские буквы."
