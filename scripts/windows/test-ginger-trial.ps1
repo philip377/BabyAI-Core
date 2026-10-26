@@ -60,7 +60,8 @@ function Read-Report {
             right_catalogue_candidates = @(
                 "Bois 1920 ОВО ROSSO edp 100ml",
                 "Bois 1920 ORO ROSSO edp 100ml TESTER",
-                "Paolo ... OVO ROSSA edp 100ml"
+                "Paolo Gigli Rosso edp 100ml",
+                "Estee Lauder AZUREE SOLEIL EAU FRAICHE SKINS..."
             )
         }
     }
