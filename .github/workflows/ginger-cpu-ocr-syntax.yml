@@ -65,6 +65,18 @@ jobs:
             if ($result.Length -ne 2 -or $result[0] -ne 75 -or $result[1] -ne 18) {
               throw "Blue row not found correctly: $($result -join ',')"
             }
+            $edge = [GingerSelectionBand]::NameCellRightEdge($path, 75)
+            if ($edge -lt 296 -or $edge -gt 302) {
+              throw "Dynamic name cell right boundary not found: $edge"
+            }
+            # Text obscures the previous sample band, but the new band
+            # must still detect the selected blue cell as a single row.
+            $graphics.FillRectangle([System.Drawing.Brushes]::Black, 100, 79, 76, 12)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $occluded = [GingerSelectionBand]::Detect($path)
+            if ($occluded.Length -ne 2 -or $occluded[0] -ne 75 -or $occluded[1] -ne 18) {
+              throw "Selected blue row lost behind dark text"
+            }
             # Ginger's wide blue bottom dock must NOT count as a second row.
             $graphics.FillRectangle($blue, 0, 365, 1200, 18)
             $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -72,7 +84,17 @@ jobs:
             if ($withDock.Length -ne 2 -or $withDock[0] -ne 75 -or $withDock[1] -ne 18) {
               throw "Blue bottom dock was mistaken for a selected row"
             }
-            $graphics.FillRectangle($blue, 40, 140, 260, 18)
+            # The first column can have a narrower width in Ginger.
+            $graphics.FillRectangle($yellow, 40, 75, 260, 18)
+            $graphics.FillRectangle($blue, 40, 75, 182, 18)
+            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            $narrow = [GingerSelectionBand]::Detect($path)
+            $narrowEdge = [GingerSelectionBand]::NameCellRightEdge($path, 75)
+            if ($narrow.Length -ne 2 -or $narrow[0] -ne 75 -or
+                $narrowEdge -lt 218 -or $narrowEdge -gt 224) {
+              throw "Narrow name-cell layout not handled"
+            }
+            $graphics.FillRectangle($blue, 40, 140, 182, 18)
             $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
             $ambiguous = [GingerSelectionBand]::Detect($path)
             if ($ambiguous.Length -ne 0) {
