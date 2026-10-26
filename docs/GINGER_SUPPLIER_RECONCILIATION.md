@@ -903,3 +903,39 @@ test checks mixed stdout, missing fresh output and missing properties.
 
 The GUI is not yet automated. The user can rerun the updated script
 without reinstalling Tesseract or changing any Ginger server settings.
+
+
+### 26 October live Ginger trial: misleading rejection score from truncated OCR
+
+The user successfully ran the Russian trial on the selected supplier row
+"Estee Lauder Bronze Goddess Soleil Eau Fraiche 100ml TESTER". Ginger's
+right-hand candidate grid displayed four truncated
+"Estee Lauder AZUREE SOLEIL EAU FRAICHE SKINS..." rows and an OCR-corrupted
+fifth "Le tage Me ee ees MN Cee Mi ee A eae". The old trial incorrectly
+classified the first four as tester_mismatch by treating an unseen
+TESTER suffix as evidence the right-side item was NOT a tester. It also
+called the illegible fifth candidate a different brand. The user
+human-confirmed rejecting the fifth and the old v2 trial awarded +5;
+that is not a sound training label or trustworthy reward.
+
+Fix applied to PowerShell and Python reviewers:
+- Any right-catalogue title containing an ellipsis is an incomplete
+  observation: do NOT infer absence of TESTER, bottle size, version, etc.
+- Heavily fragmented OCR (e.g., the live fifth candidate) is marked
+  unreadable_ocr rather than a confidently different brand.
+- unreadable_ocr is an abstention with reward_eligible=false; the operator
+  may inspect the catalogue manually, but no test reward is possible.
+- Previously saved positive v2 ratings on newly identified unreadable
+  source/candidate titles remain in historical feedback JSON but are
+  EXCLUDED from the recomputed effective trial score. Negatives stay
+  conservative and continue to count.
+- Fully readable, unambiguous true tester mismatches still reject.
+- No OCR-only exact match may create or link a product.
+
+Windows regression tests now run synthetic variants of both real
+AZUREE/BRONZE GODDESS truncated entries and the gibberish fifth candidate,
+with checks that neither writes trial rewards. No Ginger actions were
+performed in this stage.
+
+The next interactive milestone should be a strictly gated UI-only
+search-word toggle with before/after verification, not an ERP link.
