@@ -25,6 +25,10 @@
        desktop application. It is launched only by the explicit Ginger UI
        button, never on startup or from untrusted model-generated commands. -->
   <ItemGroup>
+    <Content Include="..\..\scripts\windows\ginger-uia-probe.ps1;..\..\scripts\windows\ginger-msaa-probe.ps1;..\..\scripts\windows\ginger-listview-probe.ps1"
+             Link="Ginger\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\scripts\windows\test-ginger-cpu-ocr.ps1"
              Link="Ginger\test-ginger-cpu-ocr.ps1"
              CopyToOutputDirectory="PreserveNewest"
