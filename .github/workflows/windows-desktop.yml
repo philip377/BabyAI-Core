@@ -20,6 +20,9 @@ jobs:
         # Runs only fixed synthetic subprocesses, not a live Ginger session.
         shell: pwsh
         run: dotnet run --project tests/GingerDiagnostics.Smoke/GingerDiagnostics.Smoke.csproj
+      - name: Test Ginger semantic navigation on an isolated fixture
+        shell: powershell
+        run: ./tests/ginger-navigation-smoke.ps1
       - name: Install BabyAI Core package
         shell: pwsh
         run: python -m pip install -e .
