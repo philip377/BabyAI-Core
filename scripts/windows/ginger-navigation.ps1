@@ -118,25 +118,68 @@ public static class GingerMenuAccess {
         foreach (IntPtr hwnd in Windows(root, process)) {
             StringBuilder name = new StringBuilder(256);
             GetClassNameW(hwnd, name, name.Capacity);
-            if (!name.ToString().Contains("SysHeader32") || !IsWindowVisible(hwnd)) continue;
+            if (!IsWindowVisible(hwnd)) continue;
             IAccessible value = Client(hwnd);
-            if (value == null) throw new InvalidOperationException("Header is unreadable");
+            if (value == null) continue;
+            if (Convert.ToInt32(value.get_accRole(0)) == 24) {
+                string[] columns = TableHeaders(value);
+                if (columns.Length > 0) result.Add(columns);
+                continue;
+            }
+            if (!name.ToString().Contains("SysHeader32")) continue;
             List<GingerMenuNode> nodes = new List<GingerMenuNode>();
             Walk(value, 0, "", 0, nodes);
             result.Add(nodes.ConvertAll(n => n.Name).ToArray());
         }
         return result;
     }
+    // DataGridView exposes an accessible header row, not a SysHeader32 HWND.
+    // Inspect only the first four table children and at most 64 header cells.
+    // Never recurse through data rows or read cell values.
+    private static object[] FirstChildren(IAccessible parent, int limit) {
+        int total = parent.accChildCount;
+        if (total < 0) throw new InvalidOperationException("Invalid child count");
+        int count = Math.Min(total, limit);
+        if (count == 0) return new object[0];
+        object[] children = new object[count]; int obtained;
+        if (AccessibleChildren(parent, 0, count, children, out obtained) < 0 || obtained != count)
+            throw new InvalidOperationException("Incomplete header read");
+        return children;
+    }
+    public static string[] TableHeaders(IAccessible table) {
+        foreach (object child in FirstChildren(table, 4)) {
+            IAccessible row = child as IAccessible;
+            if (row == null || Convert.ToInt32(row.get_accRole(0)) != 28) continue;
+            if (row.accChildCount > 64) continue;
+            List<string> names = new List<string>();
+            bool headerOnly = true;
+            foreach (object cell in FirstChildren(row, 64)) {
+                IAccessible nested = cell as IAccessible;
+                IAccessible owner = nested ?? row;
+                object id = nested != null ? (object)0 : cell;
+                int role = Convert.ToInt32(owner.get_accRole(id));
+                if (role == 26) continue; // Corner/row header has no column meaning.
+                if (role != 25) { headerOnly = false; break; }
+                names.Add(owner.get_accName(id) ?? "");
+            }
+            if (headerOnly && names.Count > 0) return names.ToArray();
+        }
+        return new string[0];
+    }
     public static bool PricesVisible(IntPtr root, uint process) {
+        int matches = 0;
         foreach (string[] header in Headers(root, process)) {
-            bool supplier = false, included = false;
+            bool supplier = false, included = false, number = false, date = false;
             foreach (string name in header) {
                 supplier |= Normalize(name) == "поставщик";
-                included |= Normalize(name) == "входит в сводные";
+                included |= Normalize(name) == "входит в сводные" || Normalize(name) == "вкл в сводный";
+                number |= Normalize(name) == "номер";
+                date |= Normalize(name) == "дата";
             }
-            if (supplier && included) return true;
+            if (supplier && included && number && date) matches++;
         }
-        return false;
+        RequireWindow(root, process);
+        return matches == 1;
     }
 }
 '@

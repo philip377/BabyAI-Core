@@ -1,4 +1,4 @@
-# Run with Windows PowerShell 5.1 -STA. All actions target this test's own form.
+﻿# Run with Windows PowerShell 5.1 -STA. All actions target this test's own form.
 $ErrorActionPreference = 'Stop'
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/windows/ginger-navigation.ps1'))
 $boundary = $source.IndexOf('$processes = @(')
@@ -46,5 +46,29 @@ try {
     [GingerMenuAccess]::Invoke($root, $ownerId, $leaf)
     if ($script:invocations -ne 1) { throw 'Expected exactly one leaf invocation' }
     if ([GingerMenuAccess]::PricesVisible($root, $ownerId)) { throw 'False table recognition' }
-    Write-Output 'PASS: semantic path, whitelist, process ownership, disabled control, one invocation, absent table'
+    $grid = New-Object Windows.Forms.DataGridView
+    $grid.Dock = 'Fill'
+    foreach ($column in @('Номер', 'Поставщик', 'Дата', 'Вкл в сводный')) {
+        [void]$grid.Columns.Add($column, $column)
+    }
+    $form.Controls.Add($grid)
+    $grid.BringToFront()
+    [Windows.Forms.Application]::DoEvents()
+    if (-not [GingerMenuAccess]::PricesVisible($root, $ownerId)) { throw 'DataGridView headers not recognized' }
+    $grid.Columns[3].HeaderText = 'Unrelated'
+    if ([GingerMenuAccess]::PricesVisible($root, $ownerId)) { throw 'Wrong checkbox column accepted' }
+    $grid.Columns[3].HeaderText = 'Вкл в сводный'
+    $grid.ColumnHeadersVisible = $false
+    if ([GingerMenuAccess]::PricesVisible($root, $ownerId)) { throw 'Hidden headers accepted' }
+    $grid.ColumnHeadersVisible = $true
+    $other = New-Object Windows.Forms.DataGridView
+    foreach ($column in @('Номер', 'Поставщик', 'Дата', 'Вкл в сводный')) {
+        [void]$other.Columns.Add($column, $column)
+    }
+    $form.Controls.Add($other)
+    $other.BringToFront()
+    [Windows.Forms.Application]::DoEvents()
+    if ([GingerMenuAccess]::PricesVisible($root, $ownerId)) { throw 'Ambiguous tables accepted' }
+    $other.Dispose()
+    Write-Output 'PASS: menu guards; DataGridView headers; wrong, hidden, absent and ambiguous tables rejected'
 } finally { $form.Dispose() }
