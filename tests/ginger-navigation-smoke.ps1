@@ -70,5 +70,33 @@ try {
     [Windows.Forms.Application]::DoEvents()
     if ([GingerMenuAccess]::PricesVisible($root, $ownerId)) { throw 'Ambiguous tables accepted' }
     $other.Dispose()
+    $grid.AllowUserToAddRows = $false
+    $grid.Columns.RemoveAt(3)
+    $check = New-Object Windows.Forms.DataGridViewCheckBoxColumn
+    $check.HeaderText = 'Вкл в сводный'
+    [void]$grid.Columns.Add($check)
+    [void]$grid.Rows.Add([object[]]@('1','Supplier A','2026-10-30',$true))
+    [void]$grid.Rows.Add([object[]]@('2','Supplier B','2026-10-30',$false))
+    [void]$grid.Rows.Add([object[]]@('3','Supplier A','2026-10-30',$true))
+    [Windows.Forms.Application]::DoEvents()
+    $snapshot = [GingerMenuAccess]::ReadPrices($root, $ownerId)
+    if ($snapshot.Rows.Length -ne 3 -or $snapshot.Queue.Length -ne 2 -or
+        $snapshot.Queue[0].Number -ne '1' -or $snapshot.Queue[1].Number -ne '3' -or
+        $snapshot.CanWrite -or $snapshot.IdentityVerified) { throw 'Incorrect read-only queue' }
+    $grid.Rows[2].Cells[0].Value = '1'
+    $denied = $false
+    try { [GingerMenuAccess]::ReadPrices($root, $ownerId) | Out-Null } catch { $denied = $true }
+    if (-not $denied) { throw 'Duplicate price number accepted' }
+    $grid.Rows[2].Cells[0].Value = '3'
+    $grid.Rows[2].Cells[1].Value = ''
+    $denied = $false
+    try { [GingerMenuAccess]::ReadPrices($root, $ownerId) | Out-Null } catch { $denied = $true }
+    if (-not $denied) { throw 'Missing supplier accepted' }
+    foreach ($case in @(@('True',0), @('False',16), @('True',48), @('unknown',0))) {
+        $denied = $false
+        try { [GingerMenuAccess]::CheckedValue($case[0], $case[1]) | Out-Null } catch { $denied = $true }
+        if (-not $denied) { throw 'Ambiguous checkbox accepted' }
+    }
     Write-Output 'PASS: menu guards; DataGridView headers; wrong, hidden, absent and ambiguous tables rejected'
+    Write-Output 'PASS: ordered checked-price queue; duplicate numbers and inconsistent checkboxes rejected'
 } finally { $form.Dispose() }
