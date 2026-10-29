@@ -83,6 +83,29 @@ try {
     if ($snapshot.Rows.Length -ne 3 -or $snapshot.Queue.Length -ne 2 -or
         $snapshot.Queue[0].Number -ne '1' -or $snapshot.Queue[1].Number -ne '3' -or
         $snapshot.CanWrite -or $snapshot.IdentityVerified) { throw 'Incorrect read-only queue' }
+    $grid.SelectionMode = 'FullRowSelect'
+    $snapshot = [GingerMenuAccess]::ReadPrices($root, $ownerId)
+    foreach ($request in @(@('3',$false), @('2',$true))) {
+        $denied = $false
+        try { [GingerMenuAccess]::SelectPrice($root,$ownerId,$snapshot,$request[0],$request[1]) | Out-Null } catch { $denied = $true }
+        if (-not $denied) { throw 'Unconfirmed or unchecked selection accepted' }
+    }
+    $grid.Rows[2].Cells[1].Value = 'Changed supplier'
+    $denied = $false
+    try { [GingerMenuAccess]::SelectPrice($root,$ownerId,$snapshot,'3',$true) | Out-Null } catch { $denied = $true }
+    if (-not $denied) { throw 'Stale price snapshot accepted' }
+    $grid.Rows[2].Cells[1].Value = 'Supplier A'
+    $snapshot = [GingerMenuAccess]::ReadPrices($root, $ownerId)
+    $selected = [GingerMenuAccess]::SelectPrice($root,$ownerId,$snapshot,'3',$true)
+    if (@($selected.Rows | Where-Object Selected).Count -ne 1 -or -not $grid.Rows[2].Selected -or $selected.CanWrite) {
+        throw 'Selection result invalid'
+    }
+    $grid.SelectionMode = 'CellSelect'
+    $snapshot = [GingerMenuAccess]::ReadPrices($root, $ownerId)
+    $selected = [GingerMenuAccess]::SelectPrice($root,$ownerId,$snapshot,'1',$true)
+    if (-not $selected.Rows[0].SupplierFocused -or $grid.CurrentCell.ColumnIndex -ne 1 -or $grid.CurrentCell.RowIndex -ne 0) {
+        throw 'Supplier cell focus not verified'
+    }
     $grid.Rows[2].Cells[0].Value = '1'
     $denied = $false
     try { [GingerMenuAccess]::ReadPrices($root, $ownerId) | Out-Null } catch { $denied = $true }
@@ -99,4 +122,5 @@ try {
     }
     Write-Output 'PASS: menu guards; DataGridView headers; wrong, hidden, absent and ambiguous tables rejected'
     Write-Output 'PASS: ordered checked-price queue; duplicate numbers and inconsistent checkboxes rejected'
+    Write-Output 'PASS: confirmed selection verified; stale and unchecked requests blocked'
 } finally { $form.Dispose() }

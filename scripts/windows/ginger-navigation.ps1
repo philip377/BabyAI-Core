@@ -1,6 +1,9 @@
 ﻿# Fixed semantic menu navigation. No coordinates, text entry, SQL or catalogue writes.
 [CmdletBinding()]
-param([ValidateSet('Inspect', 'OpenPrices', 'ReadPrices')][string]$Mode = 'Inspect')
+param(
+    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded')][string]$Mode = 'Inspect',
+    [switch]$ConfirmNavigation
+)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -21,12 +24,14 @@ public sealed class GingerMenuNode {
 }
 
 public sealed class GingerPriceRow {
+    internal IAccessible Target;
     public int Position;
     public string Number;
     public string Supplier;
     public string Date;
     public bool Included;
     public bool Selected;
+    public bool SupplierFocused;
 }
 public sealed class GingerPriceSnapshot {
     public long TableHandle;
@@ -259,9 +264,15 @@ public static class GingerMenuAccess {
                 if(s==null || d==null || c==null) throw new InvalidOperationException("Unreadable price cells");
                 string num=CellValue(n);
                 if(!numbers.Add(num)) throw new InvalidOperationException("Duplicate price number");
-                rows.Add(new GingerPriceRow { Position=rows.Count, Number=num, Supplier=CellValue(s), Date=CellValue(d),
+                bool selected=(Convert.ToInt32(row.get_accState(0)) & 2)!=0;
+                foreach(object cell in cells) {
+                    IAccessible accessible=cell as IAccessible;
+                    if(accessible==null) throw new InvalidOperationException("Unreadable selection state");
+                    selected |= (Convert.ToInt32(accessible.get_accState(0)) & 2)!=0;
+                }
+                rows.Add(new GingerPriceRow { Target=s, Position=rows.Count, Number=num, Supplier=CellValue(s), Date=CellValue(d),
                     Included=CheckedValue(CellValue(c),Convert.ToInt32(c.get_accState(0))),
-                    Selected=(Convert.ToInt32(row.get_accState(0)) & 2)!=0 });
+                    Selected=selected, SupplierFocused=(Convert.ToInt32(s.get_accState(0)) & 4)!=0 });
             }
             if(!seenHeader || count!=table.accChildCount) throw new InvalidOperationException("Table changed during read");
             result=new GingerPriceSnapshot { TableHandle=hwnd.ToInt64(), Rows=rows.ToArray() };
@@ -276,10 +287,49 @@ public static class GingerMenuAccess {
             throw new InvalidOperationException("Price snapshot changed");
         for(int i=0;i<a.Rows.Length;i++) {
             GingerPriceRow x=a.Rows[i], y=b.Rows[i];
-            if(x.Number!=y.Number || x.Supplier!=y.Supplier || x.Date!=y.Date || x.Included!=y.Included || x.Selected!=y.Selected)
+            if(x.Number!=y.Number || x.Supplier!=y.Supplier || x.Date!=y.Date || x.Included!=y.Included || x.Selected!=y.Selected || x.SupplierFocused!=y.SupplierFocused)
                 throw new InvalidOperationException("Price snapshot changed");
         }
         return b; // Observation only; never authorizes a later selection or write.
+    }
+    private static void SamePrices(GingerPriceSnapshot expected, GingerPriceSnapshot actual, bool selection) {
+        if(expected==null || expected.TableHandle!=actual.TableHandle || expected.Rows.Length!=actual.Rows.Length)
+            throw new InvalidOperationException("Price table changed; selection blocked");
+        for(int i=0;i<expected.Rows.Length;i++) {
+            GingerPriceRow x=expected.Rows[i], y=actual.Rows[i];
+            if(x.Number!=y.Number || x.Supplier!=y.Supplier || x.Date!=y.Date || x.Included!=y.Included ||
+               (selection && (x.Selected!=y.Selected || x.SupplierFocused!=y.SupplierFocused)))
+                throw new InvalidOperationException("Price row changed; selection blocked");
+        }
+    }
+    public static GingerPriceSnapshot SelectPrice(IntPtr root, uint process, GingerPriceSnapshot expected,
+        string number, bool navigationConfirmed) {
+        if(!navigationConfirmed) throw new InvalidOperationException("Navigation confirmation required");
+        GingerPriceSnapshot fresh=ReadPrices(root,process);
+        SamePrices(expected,fresh,true);
+        GingerPriceRow[] matches=Array.FindAll(fresh.Rows,r=>r.Number==number && r.Included);
+        if(matches.Length!=1) throw new InvalidOperationException("Expected one included price");
+        GingerPriceRow target=matches[0];
+        // Moving focus could commit an active edit: do not select while an editor is visible.
+        foreach(IntPtr child in Windows(new IntPtr(fresh.TableHandle),process)) {
+            StringBuilder cls=new StringBuilder(256); GetClassNameW(child,cls,cls.Capacity);
+            if(IsWindowVisible(child) && cls.ToString().IndexOf("EDIT",StringComparison.OrdinalIgnoreCase)>=0)
+                throw new InvalidOperationException("Finish the active table edit before navigation");
+        }
+        GingerPriceSnapshot last=ReadPricesOnce(root,process);
+        SamePrices(fresh,last,true);
+        target=Array.Find(last.Rows,r=>r.Number==number && r.Included);
+        int state=Convert.ToInt32(target.Target.get_accState(0));
+        if((state & (1|0x8000|0x10000))!=0 || (state & 0x200000)==0)
+            throw new InvalidOperationException("Price row is not visibly selectable");
+        RequireWindow(root,process);
+        target.Target.accSelect(3,0); // TAKEFOCUS | TAKESELECTION, never invoke a cell action.
+        GingerPriceSnapshot after=ReadPrices(root,process);
+        SamePrices(fresh,after,false);
+        GingerPriceRow[] selected=Array.FindAll(after.Rows,r=>r.Selected);
+        if(selected.Length!=1 || selected[0].Number!=number || !selected[0].SupplierFocused)
+            throw new InvalidOperationException("Selection result not verified; do not retry automatically");
+        return after; // Still grants no catalogue-write permission or matching action.
     }
 }
 '@
@@ -293,6 +343,13 @@ $processId = [uint32]$target.Id
 $actions = [System.Collections.Generic.List[string]]::new()
 $prices = $null
 if ($Mode -eq 'ReadPrices') { $prices = [GingerMenuAccess]::ReadPrices($window, $processId) }
+if ($Mode -eq 'SelectFirstIncluded') {
+    if (-not $ConfirmNavigation) { throw 'Navigation confirmation required' }
+    $before = [GingerMenuAccess]::ReadPrices($window, $processId)
+    if ($before.Queue.Length -eq 0) { throw 'No included prices; no selection performed' }
+    $prices = [GingerMenuAccess]::SelectPrice($window, $processId, $before, $before.Queue[0].Number, $true)
+    $actions.Add('Select first included price: selection verified')
+}
 if ($Mode -eq 'OpenPrices' -and -not [GingerMenuAccess]::PricesVisible($window, $processId)) {
     [GingerMenuAccess]::Invoke($window, $processId, 'журналы')
     $actions.Add('Журналы')
