@@ -1,6 +1,22 @@
 using System.Diagnostics;
 using System.Text;
 using BabyAI.Desktop;
+using System.Text.Json;
+
+if (args.Length == 2 && args[0] == "--reports")
+{
+    var reports = new List<GingerProbeResult>();
+    foreach (var probe in GingerDiagnostics.Probes)
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(args[1], Path.GetFileNameWithoutExtension(probe) + ".json")));
+        reports.Add(GingerReadiness.Parse(probe, doc.RootElement));
+    }
+    Console.WriteLine(JsonSerializer.Serialize(GingerReadiness.Assess(reports)));
+    return;
+}
+
+ReadinessTests.Run();
+NativeSelectionTests.Run();
 
 static ProcessStartInfo Command(string command)
 {

@@ -88,8 +88,9 @@ public sealed partial class MainWindow
             try
             {
                 Log("Начинаю проверку. Данные останутся на этом компьютере.");
-                await GingerDiagnostics.CollectAsync(Log, _gingerCancellation.Token);
-                await AnalyzeGingerInUnixAsync(Log, _gingerCancellation.Token);
+                var readiness = await GingerDiagnostics.CollectAsync(Log, _gingerCancellation.Token);
+                if (readiness.CanRunOcr)
+                    await AnalyzeGingerInUnixAsync(Log, _gingerCancellation.Token);
                 Log("Проверка завершена. Никаких изменений в Ginger не внесено.");
             }
             catch (OperationCanceledException)

@@ -7,5 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../desktop/BabyAI.Desktop/GingerDiagnostics.cs" Link="GingerDiagnostics.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerReadiness.cs" Link="GingerReadiness.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerNativeSelection.cs" Link="GingerNativeSelection.cs" />
   </ItemGroup>
 </Project>
