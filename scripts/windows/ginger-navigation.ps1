@@ -61,7 +61,7 @@ public sealed class GingerCandidateSnapshot {
     public GingerSelectedProduct Source;
     public long PanelHandle;
     public GingerCatalogueCandidate[] Candidates;
-    public bool IdentityVerified=false, CanMatch=false;
+    public bool IdentityVerified=false, CanMatch=false, SearchCompletionVerified=false;
 }
 public sealed class GingerSelectedProduct {
     public long TableHandle;

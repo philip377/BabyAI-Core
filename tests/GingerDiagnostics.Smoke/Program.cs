@@ -15,6 +15,7 @@ if (args.Length == 2 && args[0] == "--reports")
     return;
 }
 
+CandidateReaderTests.Run();
 ReadinessTests.Run();
 NativeSelectionTests.Run();
 
