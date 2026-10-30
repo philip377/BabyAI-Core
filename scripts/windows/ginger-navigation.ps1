@@ -1,7 +1,7 @@
 ﻿# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
 [CmdletBinding()]
 param(
-    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice', 'ReadSelectedProduct')][string]$Mode = 'Inspect',
+    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice', 'ReadSelectedProduct', 'ReadMatchingCandidates')][string]$Mode = 'Inspect',
     [switch]$ConfirmNavigation
 )
 Set-StrictMode -Version Latest
@@ -50,6 +50,18 @@ public sealed class GingerMatchingView {
 public sealed class GingerTabCandidate {
     public long Handle,Parent;
     public int X,Y,Width,Height;
+}
+public sealed class GingerCatalogueCandidate {
+    public int ObservedPosition;
+    public string Title, DescriptionText;
+    public bool Selected;
+    public bool IdentityVerified=false;
+}
+public sealed class GingerCandidateSnapshot {
+    public GingerSelectedProduct Source;
+    public long PanelHandle;
+    public GingerCatalogueCandidate[] Candidates;
+    public bool IdentityVerified=false, CanMatch=false;
 }
 public sealed class GingerSelectedProduct {
     public long TableHandle;
@@ -588,10 +600,81 @@ public static class GingerMenuAccess {
     public static GingerSelectedProduct ReadSelectedProduct(IntPtr root,uint process) {
         GingerSelectedProduct first=ReadSelectedProductOnce(root,process);
         GingerSelectedProduct second=ReadSelectedProductOnce(root,process);
-        if(first.TableHandle!=second.TableHandle || first.ObservedRowPosition!=second.ObservedRowPosition ||
+        RequireSameSelectedProduct(first,second);
+        return second;
+    }
+    public static void RequireSameSelectedProduct(GingerSelectedProduct first,GingerSelectedProduct second) {
+        if(first==null || second==null || first.TableHandle!=second.TableHandle || first.ObservedRowPosition!=second.ObservedRowPosition ||
            first.DocumentNumber!=second.DocumentNumber || first.Supplier!=second.Supplier ||
            first.Title!=second.Title || first.PriceText!=second.PriceText || first.LinkedProductText!=second.LinkedProductText)
             throw new InvalidOperationException("Selected product changed between observations");
+    }
+    private static long ListCount(IntPtr hwnd,uint process) {
+        uint owner; IntPtr count;
+        if(GetWindowThreadProcessId(hwnd,out owner)==0 || owner!=process ||
+           SendMessageTimeoutW(hwnd,0x1004,IntPtr.Zero,IntPtr.Zero,2,100,out count)==IntPtr.Zero || count.ToInt64()<0)
+            throw new InvalidOperationException("Candidate count unavailable");
+        return count.ToInt64();
+    }
+    private static GingerCandidateSnapshot ReadCandidatesOnce(IntPtr root,uint process) {
+        GingerSelectedProduct source=ReadSelectedProduct(root,process);
+        GingerCandidateSnapshot result=null;
+        foreach(IntPtr hwnd in Windows(root,process)) {
+            StringBuilder cls=new StringBuilder(256); GetClassNameW(hwnd,cls,cls.Capacity);
+            if(!IsWindowVisible(hwnd) || !cls.ToString().Contains("SysListView32")) continue;
+            bool products=false;
+            foreach(string[] columns in Headers(hwnd,process))
+                products |= Column(columns,"товар")>=0 && Column(columns,"цена")>=0;
+            if(!products) continue;
+            if(result!=null) throw new InvalidOperationException("Ambiguous candidate panels");
+            long count=ListCount(hwnd,process);
+            if(count>256) throw new InvalidOperationException("Candidate read limit exceeded");
+            IAccessible list=Client(hwnd);
+            if(list==null || Convert.ToInt32(list.get_accRole(0))!=33 || list.accChildCount>260)
+                throw new InvalidOperationException("Unsupported candidate list");
+            int childCount=list.accChildCount;
+            List<GingerCatalogueCandidate> candidates=new List<GingerCatalogueCandidate>();
+            foreach(object child in FirstChildren(list,260)) {
+                IAccessible nested=child as IAccessible;
+                IAccessible owner=nested??list;
+                object id=nested!=null?(object)0:child;
+                if(nested==null && (!(id is int) || (int)id<=0))
+                    throw new InvalidOperationException("Invalid candidate child identifier");
+                int role=Convert.ToInt32(owner.get_accRole(id));
+                if(role==9 && nested!=null) continue; // Native header window, not a product.
+                if(role!=34) throw new InvalidOperationException("Unexpected candidate child role");
+                string title=owner.get_accName(id), description=owner.get_accDescription(id)??"";
+                if(String.IsNullOrWhiteSpace(title) || title=="(null)" || title.Length>512 || description.Length>2048)
+                    throw new InvalidOperationException("Missing or oversized candidate text");
+                candidates.Add(new GingerCatalogueCandidate {
+                    ObservedPosition=candidates.Count+1,Title=title,DescriptionText=description,
+                    Selected=(Convert.ToInt32(owner.get_accState(id)) & 2)!=0
+                });
+            }
+            if(candidates.Count!=count || ListCount(hwnd,process)!=count || list.accChildCount!=childCount)
+                throw new InvalidOperationException("Candidate list changed or incomplete");
+            result=new GingerCandidateSnapshot {Source=source,PanelHandle=hwnd.ToInt64(),Candidates=candidates.ToArray()};
+        }
+        if(result==null) throw new InvalidOperationException("Candidate panel missing");
+        RequireSameSelectedProduct(source,ReadSelectedProduct(root,process));
+        RequireWindow(root,process);
+        return result;
+    }
+    public static void RequireSameCandidates(GingerCandidateSnapshot first,GingerCandidateSnapshot second) {
+        if(first==null || second==null || first.Candidates==null || second.Candidates==null ||
+           first.PanelHandle!=second.PanelHandle || first.Candidates.Length!=second.Candidates.Length)
+            throw new InvalidOperationException("Candidate panel changed");
+        RequireSameSelectedProduct(first.Source,second.Source);
+        for(int i=0;i<first.Candidates.Length;i++) {
+            GingerCatalogueCandidate a=first.Candidates[i], b=second.Candidates[i];
+            if(a==null || b==null || a.ObservedPosition!=b.ObservedPosition || a.Title!=b.Title ||
+               a.DescriptionText!=b.DescriptionText || a.Selected!=b.Selected)
+                throw new InvalidOperationException("Candidate rows changed between observations");
+        }
+    }
+    public static GingerCandidateSnapshot ReadMatchingCandidates(IntPtr root,uint process) {
+        GingerCandidateSnapshot first=ReadCandidatesOnce(root,process), second=ReadCandidatesOnce(root,process);
+        RequireSameCandidates(first,second);
         return second;
     }
     public static GingerMatchingView InspectMatching(IntPtr root,uint process) {
@@ -632,6 +715,8 @@ $processId = [uint32]$target.Id
 $actions = [System.Collections.Generic.List[string]]::new()
 $prices = $null
 $selectedProduct = $null
+$candidateSnapshot = $null
+if ($Mode -eq 'ReadMatchingCandidates') { $candidateSnapshot = [GingerMenuAccess]::ReadMatchingCandidates($window, $processId) }
 if ($Mode -eq 'ReadSelectedProduct') { $selectedProduct = [GingerMenuAccess]::ReadSelectedProduct($window, $processId) }
 $matchingStatus = 'not_requested'
 $matchingView = $null
@@ -692,6 +777,7 @@ $menu = @([GingerMenuAccess]::Menu($window, $processId) | Where-Object { $_.Path
     actions = $actions.ToArray(); menu = $menu
     headers = [GingerMenuAccess]::Headers($window, $processId).ToArray()
     catalogue_changed = $false; row_identity_verified = $false
+    candidate_snapshot = $candidateSnapshot
     selected_product = $selectedProduct
     prices = $prices
     matching_status = $matchingStatus

@@ -226,6 +226,59 @@ try {
     if($observed.Title -ne 'Synthetic perfume 100 ml' -or $observed.PriceText -ne '123,45' -or
        $observed.LinkedProductText -ne '<не указано>' -or $observed.ObservedRowPosition -ne 1 -or
        $observed.IdentityVerified -or $observed.CanMatch){throw 'Product observation incorrectly identified or authorized'}
+    $candidatesPanel=New-Object Windows.Forms.ListView
+    $candidatesPanel.View='Details'
+    [void]$candidatesPanel.Columns.Add('Товар')
+    [void]$candidatesPanel.Columns.Add('Цена')
+    $form.Controls.Add($candidatesPanel)
+    $candidatesPanel.BringToFront()
+    [Windows.Forms.Application]::DoEvents()
+    $empty=[GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)
+    if($empty.Candidates.Length -ne 0 -or $empty.CanMatch){throw 'Empty candidates grant matching'}
+    $retail=$candidatesPanel.Items.Add('Synthetic perfume 100 ml')
+    [void]$retail.SubItems.Add('123.45')
+    $tester=$candidatesPanel.Items.Add('Synthetic perfume 100 ml (тестер)')
+    [void]$tester.SubItems.Add('100.00')
+    $snapshot=[GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)
+    if($snapshot.Candidates.Length -ne 2 -or $snapshot.CanMatch -or $snapshot.IdentityVerified -or
+       $snapshot.Candidates[0].IdentityVerified -or $snapshot.Candidates[1].Title -notlike '*(тестер)' -or
+       -not $snapshot.Candidates[0].DescriptionText.Contains('123.45')){throw 'Candidate text lost or identity invented'}
+    $retail.SubItems[1].Text='124.45'
+    $changed=[GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)
+    $denied=$false
+    try{[GingerMenuAccess]::RequireSameCandidates($snapshot,$changed)}catch{$denied=$true}
+    if(-not $denied){throw 'Changed candidate price accepted'}
+    $retail.SubItems[1].Text='123.45'
+    $retail.Text='Other product'
+    $changed=[GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)
+    $denied=$false
+    try{[GingerMenuAccess]::RequireSameCandidates($snapshot,$changed)}catch{$denied=$true}
+    if(-not $denied){throw 'Changed candidate title accepted'}
+    $retail.Text='Synthetic perfume 100 ml'
+    $grid.Rows[0].Cells[1].Value='999,99'
+    $changed=[GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)
+    $denied=$false
+    try{[GingerMenuAccess]::RequireSameCandidates($snapshot,$changed)}catch{$denied=$true}
+    if(-not $denied){throw 'Changed source accepted with old candidates'}
+    $grid.Rows[0].Cells[1].Value='123,45'
+    $duplicate=New-Object Windows.Forms.ListView
+    $duplicate.View='Details'
+    [void]$duplicate.Columns.Add('Товар'); [void]$duplicate.Columns.Add('Цена')
+    $form.Controls.Add($duplicate)
+    [Windows.Forms.Application]::DoEvents()
+    $denied=$false
+    try{[void][GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)}catch{$denied=$true}
+    if(-not $denied){throw 'Duplicate candidate panel accepted'}
+    $duplicate.Dispose()
+    for($i=2;$i -lt 257;$i++){[void]$candidatesPanel.Items.Add('Synthetic item '+$i)}
+    $denied=$false
+    try{[void][GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)}catch{$denied=$true}
+    if(-not $denied){throw 'Candidate limit ignored'}
+    $candidatesPanel.Dispose()
+    $denied=$false
+    try{[void][GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)}catch{$denied=$true}
+    if(-not $denied){throw 'Missing candidate panel accepted'}
+    Write-Output 'PASS: candidate texts and variants read; changed source, price, title, duplicate panels and excess rows rejected'
     $grid.ClearSelection()
     $denied=$false
     try{[void][GingerMenuAccess]::ReadSelectedProduct($root,$ownerId)}catch{$denied=$true}
