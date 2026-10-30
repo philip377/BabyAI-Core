@@ -215,6 +215,34 @@ try {
     $numberBox.Text='1'
     [GingerMenuAccess]::OpenDocumentMatching($root,$ownerId,$document,$true)
     if($script:matchingInvocations -ne 1){throw 'Verified document menu not invoked'}
+    $extra.HideDropDown()
+    $grid.ClearSelection()
+    $grid.Rows[0].Cells[0].Value='Synthetic perfume 100 ml'
+    $grid.Rows[0].Cells[1].Value='123,45'
+    $grid.Rows[0].Cells[2].Value='<не указано>'
+    $grid.Rows[0].Cells[0].Selected=$true
+    [Windows.Forms.Application]::DoEvents()
+    $observed=[GingerMenuAccess]::ReadSelectedProduct($root,$ownerId)
+    if($observed.Title -ne 'Synthetic perfume 100 ml' -or $observed.PriceText -ne '123,45' -or
+       $observed.LinkedProductText -ne '<не указано>' -or $observed.ObservedRowPosition -ne 1 -or
+       $observed.IdentityVerified -or $observed.CanMatch){throw 'Product observation incorrectly identified or authorized'}
+    $grid.ClearSelection()
+    $denied=$false
+    try{[void][GingerMenuAccess]::ReadSelectedProduct($root,$ownerId)}catch{$denied=$true}
+    if(-not $denied){throw 'Missing product selection accepted'}
+    $grid.MultiSelect=$true
+    $grid.Rows[0].Cells[0].Selected=$true
+    $grid.Rows[1].Cells[0].Selected=$true
+    $denied=$false
+    try{[void][GingerMenuAccess]::ReadSelectedProduct($root,$ownerId)}catch{$denied=$true}
+    if(-not $denied){throw 'Ambiguous product selection accepted'}
+    $grid.ClearSelection()
+    $grid.Rows[0].Cells[0].Selected=$true
+    $grid.Rows[0].Cells[0].Value=''
+    $denied=$false
+    try{[void][GingerMenuAccess]::ReadSelectedProduct($root,$ownerId)}catch{$denied=$true}
+    if(-not $denied){throw 'Blank product title accepted'}
+    Write-Output 'PASS: selected product read-only observation; absent, multiple and blank selections rejected'
     $numberBox.Dispose();$supplierBox.Dispose()
     Write-Output 'PASS: menu guards; DataGridView headers; wrong, hidden, absent and ambiguous tables rejected'
     Write-Output 'PASS: ordered checked-price queue; duplicate numbers and inconsistent checkboxes rejected'

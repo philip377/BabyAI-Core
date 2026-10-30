@@ -1,7 +1,7 @@
 ﻿# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
 [CmdletBinding()]
 param(
-    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice')][string]$Mode = 'Inspect',
+    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice', 'ReadSelectedProduct')][string]$Mode = 'Inspect',
     [switch]$ConfirmNavigation
 )
 Set-StrictMode -Version Latest
@@ -50,6 +50,12 @@ public sealed class GingerMatchingView {
 public sealed class GingerTabCandidate {
     public long Handle,Parent;
     public int X,Y,Width,Height;
+}
+public sealed class GingerSelectedProduct {
+    public long TableHandle;
+    public int ObservedRowPosition;
+    public string DocumentNumber, Supplier, Title, PriceText, LinkedProductText;
+    public bool IdentityVerified=false, CanMatch=false;
 }
 public sealed class GingerPriceDocument {
     public string Number,Supplier;
@@ -262,7 +268,7 @@ public static class GingerMenuAccess {
         return included;
     }
     private static string CellValue(IAccessible cell) {
-        if (Convert.ToInt32(cell.get_accRole(0)) != 29)
+        if (cell == null || Convert.ToInt32(cell.get_accRole(0)) != 29)
             throw new InvalidOperationException("Expected a data cell");
         string value = cell.get_accValue(0);
         if (String.IsNullOrWhiteSpace(value) || value == "(null)" || value.Length > 512)
@@ -522,6 +528,72 @@ public static class GingerMenuAccess {
         input[1]=new Input { Mouse=new MouseInput { X=x,Y=y,Flags=0xC005 } };
         if(SendInput(2,input,Marshal.SizeOf(typeof(Input)))!=2) throw new InvalidOperationException("Tab click outcome unknown; no retry");
     }
+    // These are UI observations only. Position and displayed names are never product IDs.
+    private static GingerSelectedProduct ReadSelectedProductOnce(IntPtr root,uint process) {
+        GingerPriceDocument document=ReadPriceDocument(root,process);
+        GingerSelectedProduct result=null;
+        int tables=0;
+        foreach(IntPtr hwnd in Windows(root,process)) {
+            if(!IsWindowVisible(hwnd)) continue;
+            IAccessible table=Client(hwnd);
+            if(table==null || Convert.ToInt32(table.get_accRole(0))!=24) continue;
+            string[] headers=TableHeaders(table);
+            int title=Column(headers,"название в прайсе","название у поставщика");
+            int price=Column(headers,"цена","цена в прайсе"), linked=Column(headers,"товар");
+            if(title<0 || price<0 || linked<0) continue;
+            if(++tables!=1) throw new InvalidOperationException("Ambiguous product tables");
+            int count=table.accChildCount, position=0;
+            if(count<1 || count>503) throw new InvalidOperationException("Product read limit exceeded");
+            bool headerSeen=false;
+            foreach(object item in FirstChildren(table,503)) {
+                IAccessible row=item as IAccessible;
+                if(row==null) throw new InvalidOperationException("Unsupported product row");
+                int role=Convert.ToInt32(row.get_accRole(0));
+                if(role==3) continue;
+                if(role!=28 || row.accChildCount!=headers.Length)
+                    throw new InvalidOperationException("Unexpected product row structure");
+                object[] cells=FirstChildren(row,64);
+                IAccessible nameCell=cells[title] as IAccessible;
+                if(nameCell==null) throw new InvalidOperationException("Missing product cell");
+                if(Convert.ToInt32(nameCell.get_accRole(0))==25) {
+                    if(headerSeen || position!=0) throw new InvalidOperationException("Unexpected product header");
+                    headerSeen=true; continue;
+                }
+                if(!headerSeen) throw new InvalidOperationException("Product header missing");
+                position++;
+                bool selected=(Convert.ToInt32(row.get_accState(0)) & 2)!=0;
+                foreach(object cell in cells) {
+                    IAccessible accessible=cell as IAccessible;
+                    if(accessible==null) throw new InvalidOperationException("Unreadable product cell");
+                    selected |= (Convert.ToInt32(accessible.get_accState(0)) & 2)!=0;
+                }
+                if(!selected) continue;
+                if(result!=null) throw new InvalidOperationException("Multiple selected products");
+                result=new GingerSelectedProduct {
+                    TableHandle=hwnd.ToInt64(), ObservedRowPosition=position,
+                    DocumentNumber=document.Number,Supplier=document.Supplier,
+                    Title=CellValue(nameCell),PriceText=CellValue(cells[price] as IAccessible),
+                    LinkedProductText=CellValue(cells[linked] as IAccessible)
+                };
+            }
+            if(table.accChildCount!=count) throw new InvalidOperationException("Product rows changed");
+        }
+        GingerPriceDocument after=ReadPriceDocument(root,process);
+        if(after.Number!=document.Number || after.Supplier!=document.Supplier)
+            throw new InvalidOperationException("Supplier document changed during read");
+        if(result==null) throw new InvalidOperationException("Exactly one selected product required");
+        RequireWindow(root,process);
+        return result;
+    }
+    public static GingerSelectedProduct ReadSelectedProduct(IntPtr root,uint process) {
+        GingerSelectedProduct first=ReadSelectedProductOnce(root,process);
+        GingerSelectedProduct second=ReadSelectedProductOnce(root,process);
+        if(first.TableHandle!=second.TableHandle || first.ObservedRowPosition!=second.ObservedRowPosition ||
+           first.DocumentNumber!=second.DocumentNumber || first.Supplier!=second.Supplier ||
+           first.Title!=second.Title || first.PriceText!=second.PriceText || first.LinkedProductText!=second.LinkedProductText)
+            throw new InvalidOperationException("Selected product changed between observations");
+        return second;
+    }
     public static GingerMatchingView InspectMatching(IntPtr root,uint process) {
         GingerMatchingView result=new GingerMatchingView();
         int search=0, products=0;
@@ -559,6 +631,8 @@ $window = $target.MainWindowHandle
 $processId = [uint32]$target.Id
 $actions = [System.Collections.Generic.List[string]]::new()
 $prices = $null
+$selectedProduct = $null
+if ($Mode -eq 'ReadSelectedProduct') { $selectedProduct = [GingerMenuAccess]::ReadSelectedProduct($window, $processId) }
 $matchingStatus = 'not_requested'
 $matchingView = $null
 if ($Mode -eq 'InspectMatching') { $matchingView = [GingerMenuAccess]::InspectMatching($window, $processId); $matchingStatus = $matchingView.Status }
@@ -618,6 +692,7 @@ $menu = @([GingerMenuAccess]::Menu($window, $processId) | Where-Object { $_.Path
     actions = $actions.ToArray(); menu = $menu
     headers = [GingerMenuAccess]::Headers($window, $processId).ToArray()
     catalogue_changed = $false; row_identity_verified = $false
+    selected_product = $selectedProduct
     prices = $prices
     matching_status = $matchingStatus
     matching_view = $matchingView
