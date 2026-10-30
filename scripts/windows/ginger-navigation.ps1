@@ -1,7 +1,7 @@
-﻿# Fixed semantic menu navigation. No coordinates, text entry, SQL or catalogue writes.
+﻿# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
 [CmdletBinding()]
 param(
-    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded')][string]$Mode = 'Inspect',
+    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice')][string]$Mode = 'Inspect',
     [switch]$ConfirmNavigation
 )
 Set-StrictMode -Version Latest
@@ -25,6 +25,7 @@ public sealed class GingerMenuNode {
 
 public sealed class GingerPriceRow {
     internal IAccessible Target;
+    internal IAccessible RowTarget;
     public int Position;
     public string Number;
     public string Supplier;
@@ -40,14 +41,50 @@ public sealed class GingerPriceSnapshot {
     public bool CanWrite = false;
     public GingerPriceRow[] Queue { get { return Array.FindAll(Rows, row => row.Included); } }
 }
+public sealed class GingerMatchingView {
+    public string Status = "panels_not_verified";
+    public long SearchRows = -1;
+    public long ProductRows = -1;
+    public bool CanMatch = false;
+}
+public sealed class GingerTabCandidate {
+    public long Handle,Parent;
+    public int X,Y,Width,Height;
+}
+public sealed class GingerPriceDocument {
+    public string Number,Supplier;
+    public bool CanWrite=false;
+}
 
 public static class GingerMenuAccess {
+    [StructLayout(LayoutKind.Sequential)] private struct Point { public int X; public int Y; }
+    [DllImport("user32.dll")] private static extern bool ScreenToClient(IntPtr hwnd,ref Point point);
+    [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hwnd,ref Point point);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+    [StructLayout(LayoutKind.Sequential)] private struct MouseInput { public int X,Y; public uint Data,Flags,Time; public IntPtr Extra; }
+    [StructLayout(LayoutKind.Sequential)] private struct Input { public uint Type; public MouseInput Mouse; }
+    [DllImport("user32.dll")] private static extern uint SendInput(uint count,Input[] input,int size);
+    [StructLayout(LayoutKind.Sequential)] private struct Rectangle { public int Left,Top,Right,Bottom; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd,out Rectangle rect);
+    [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hwnd,uint flags);
+    [DllImport("shcore.dll")] private static extern int GetScaleFactorForMonitor(IntPtr monitor,out int scale);
+    private static void RequireInputScale(IntPtr root) {
+        int scale;
+        if(GetSystemMetrics(80)!=1 || GetScaleFactorForMonitor(MonitorFromWindow(root,2),out scale)!=0 || scale!=100)
+            throw new InvalidOperationException("Pointer navigation currently requires one display at 100 percent scale");
+    }
     private delegate bool EnumProc(IntPtr hwnd, IntPtr unused);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr root, EnumProc callback, IntPtr unused);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassNameW(IntPtr hwnd, StringBuilder name, int capacity);
     [DllImport("user32.dll")] private static extern IntPtr GetLastActivePopup(IntPtr root);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern IntPtr SendMessageTimeoutW(
+        IntPtr hwnd,uint message,IntPtr wParam,IntPtr lParam,uint flags,uint timeout,out IntPtr result);
     [DllImport("oleacc.dll")] private static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint id, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IAccessible accessible);
     [DllImport("oleacc.dll")] private static extern int WindowFromAccessibleObject(IAccessible accessible, out IntPtr hwnd);
     [DllImport("oleacc.dll")] private static extern int AccessibleChildren(IAccessible parent, int start, int count,
@@ -119,6 +156,9 @@ public static class GingerMenuAccess {
     public static void Invoke(IntPtr root, uint process, string path) {
         if (path != "журналы" && path != "журналы/текущие прайс-листы")
             throw new InvalidOperationException("Menu action is not allowed");
+        InvokeResolved(root,process,path);
+    }
+    private static void InvokeResolved(IntPtr root, uint process, string path) {
         List<GingerMenuNode> matches = Menu(root, process).FindAll(n => n.Role == 12 && n.Path == path && Normalize(n.Name) == path.Substring(path.LastIndexOf('/') + 1));
         if (matches.Count != 1) throw new InvalidOperationException("Menu item is missing or ambiguous");
         GingerMenuNode item = matches[0];
@@ -270,7 +310,7 @@ public static class GingerMenuAccess {
                     if(accessible==null) throw new InvalidOperationException("Unreadable selection state");
                     selected |= (Convert.ToInt32(accessible.get_accState(0)) & 2)!=0;
                 }
-                rows.Add(new GingerPriceRow { Target=s, Position=rows.Count, Number=num, Supplier=CellValue(s), Date=CellValue(d),
+                rows.Add(new GingerPriceRow { Target=s, RowTarget=row, Position=rows.Count, Number=num, Supplier=CellValue(s), Date=CellValue(d),
                     Included=CheckedValue(CellValue(c),Convert.ToInt32(c.get_accState(0))),
                     Selected=selected, SupplierFocused=(Convert.ToInt32(s.get_accState(0)) & 4)!=0 });
             }
@@ -331,6 +371,183 @@ public static class GingerMenuAccess {
             throw new InvalidOperationException("Selection result not verified; do not retry automatically");
         return after; // Still grants no catalogue-write permission or matching action.
     }
+    private static void RequireSelectedPrice(GingerPriceSnapshot expected, GingerPriceSnapshot current, string number, bool focus) {
+        SamePrices(expected,current,false);
+        GingerPriceRow[] rows=Array.FindAll(current.Rows,r=>r.Selected);
+        if(rows.Length!=1 || rows[0].Number!=number || !rows[0].Included || (focus && !rows[0].SupplierFocused))
+            throw new InvalidOperationException("Selected supplier price not verified");
+    }
+    private static IntPtr PricePoint(IntPtr root,uint process,GingerPriceSnapshot snapshot,GingerPriceRow row) {
+        RequireWindow(root,process);
+        IntPtr table=new IntPtr(snapshot.TableHandle); uint owner;
+        if(GetWindowThreadProcessId(table,out owner)==0 || owner!=process || !IsWindowVisible(table))
+            throw new InvalidOperationException("Price table owner changed");
+        string[] headers=TableHeaders(Client(table));
+        int number=Column(headers,"номер"), supplier=Column(headers,"поставщик"), date=Column(headers,"дата"), included=Column(headers,"вкл в сводный","входит в сводные");
+        if(number<0 || supplier<0 || date<0 || included<0 || row.RowTarget.accChildCount!=headers.Length)
+            throw new InvalidOperationException("Price columns changed");
+        object[] cells=FirstChildren(row.RowTarget,64);
+        IAccessible n=cells[number] as IAccessible, s=cells[supplier] as IAccessible, d=cells[date] as IAccessible, c=cells[included] as IAccessible;
+        if(n==null || s==null || d==null || c==null || CellValue(n)!=row.Number || CellValue(s)!=row.Supplier || CellValue(d)!=row.Date ||
+           !CheckedValue(CellValue(c),Convert.ToInt32(c.get_accState(0))))
+            throw new InvalidOperationException("Price identity or inclusion changed before click");
+        IAccessible cell=row.Target;
+        if(CellValue(cell)!=row.Supplier || (Convert.ToInt32(cell.get_accState(0)) & (1|0x8000|0x10000))!=0)
+            throw new InvalidOperationException("Supplier cell changed or hidden");
+        int x,y,w,h; cell.accLocation(out x,out y,out w,out h,0);
+        if(w<4 || h<4) throw new InvalidOperationException("Supplier cell geometry unavailable");
+        Point point=new Point { X=checked(x+w/2),Y=checked(y+h/2) };
+        IAccessible hit=Client(table);
+        bool verified=false;
+        for(int depth=0;depth<8;depth++) {
+            object child=hit.accHitTest(point.X,point.Y);
+            IAccessible nested=child as IAccessible;
+            if(nested!=null) { hit=nested; }
+            else if(!(child is int) || (int)child!=0) break;
+            if(Convert.ToInt32(hit.get_accRole(0))==29) {
+                int hx,hy,hw,hh; hit.accLocation(out hx,out hy,out hw,out hh,0);
+                verified=CellValue(hit)==row.Supplier && hit.get_accName(0)==cell.get_accName(0) && hx==x && hy==y && hw==w && hh==h;
+                break;
+            }
+        }
+        if(!verified || !ScreenToClient(table,ref point) || point.X<0 || point.Y<0 || point.X>32767 || point.Y>32767)
+            throw new InvalidOperationException("Supplier cell hit-test failed");
+        foreach(IntPtr child in Windows(table,process)) {
+            StringBuilder cls=new StringBuilder(256); GetClassNameW(child,cls,cls.Capacity);
+            if(IsWindowVisible(child) && cls.ToString().IndexOf("EDIT",StringComparison.OrdinalIgnoreCase)>=0)
+                throw new InvalidOperationException("Active editor blocks price opening");
+        }
+        return new IntPtr((point.Y<<16)|point.X);
+    }
+    public static void OpenSelectedPrice(IntPtr root,uint process,GingerPriceSnapshot expected,string number,bool navigationConfirmed) {
+        if(!navigationConfirmed) throw new InvalidOperationException("Navigation confirmation required");
+        GingerPriceSnapshot fresh=ReadPrices(root,process);
+        RequireSelectedPrice(expected,fresh,number,false);
+        GingerPriceRow row=Array.Find(fresh.Rows,r=>r.Number==number);
+        SetForegroundWindow(root);
+        if(GetForegroundWindow()!=root) throw new InvalidOperationException("Ginger foreground could not be verified");
+        RequireInputScale(root);
+        IntPtr table=new IntPtr(fresh.TableHandle), packed=PricePoint(root,process,fresh,row);
+        Point point=new Point { X=(int)(packed.ToInt64() & 65535),Y=(int)((packed.ToInt64()>>16)&65535) };
+        if(!ClientToScreen(table,ref point) || WindowFromPoint(point)!=table)
+            throw new InvalidOperationException("Supplier cell is covered by another window");
+        int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
+        if(width<2 || height<2 || point.X<left || point.Y<top || point.X>=left+width || point.Y>=top+height)
+            throw new InvalidOperationException("Supplier cell is outside the desktop");
+        int x=(int)(((long)(point.X-left)*65536+32768)/width),y=(int)(((long)(point.Y-top)*65536+32768)/height);
+        Input[] input=new Input[4];
+        for(int i=0;i<input.Length;i++) input[i]=new Input { Type=0,Mouse=new MouseInput { X=x,Y=y,Flags=(uint)(0xC001|(i%2==0?2:4)) } };
+        RequireWindow(root,process);
+        if(GetForegroundWindow()!=root || WindowFromPoint(point)!=table || PricePoint(root,process,fresh,row)!=packed)
+            throw new InvalidOperationException("Double-click target changed");
+        if(SendInput(4,input,Marshal.SizeOf(typeof(Input)))!=4)
+            throw new InvalidOperationException("Incomplete price double click; outcome unknown, no retry");
+        // Dispatch alone does not establish which document opened. Read the resulting UI.
+    }
+    public static void ActivateForRead(IntPtr root,uint process) {
+        RequireWindow(root,process); SetForegroundWindow(root);
+        if(GetForegroundWindow()!=root) throw new InvalidOperationException("Ginger must be foreground");
+    }
+    public static void RequireForeground(IntPtr root,uint process) {
+        RequireWindow(root,process);
+        if(GetForegroundWindow()!=root) throw new InvalidOperationException("Foreground changed during observation");
+    }
+    public static GingerPriceDocument ReadPriceDocument(IntPtr root,uint process) {
+        string number=null,supplier=null;
+        int tables=0;
+        foreach(string[] headers in Headers(root,process)) {
+            bool records=Column(headers,"название у поставщика")>=0 && Column(headers,"цена в прайсе")>=0 && Column(headers,"новый")>=0;
+            bool matching=Column(headers,"название в прайсе")>=0 && Column(headers,"цена")>=0;
+            if((records || matching) && Column(headers,"товар")>=0) tables++;
+        }
+        if(tables!=1) throw new InvalidOperationException("Supplier price document table not verified");
+        foreach(IntPtr hwnd in Windows(root,process)) {
+            if(!IsWindowVisible(hwnd)) continue;
+            IAccessible value=Client(hwnd);
+            if(value==null || Convert.ToInt32(value.get_accRole(0))!=42) continue;
+            string name=Normalize(value.get_accName(0));
+            if(name!="номер" && name!="поставщик") continue;
+            string text=value.get_accValue(0);
+            if(String.IsNullOrWhiteSpace(text) || text=="(null)" || text.Length>512) throw new InvalidOperationException("Document identity field unavailable");
+            if(name=="номер") { if(number!=null) throw new InvalidOperationException("Ambiguous document number"); number=text; }
+            if(name=="поставщик") { if(supplier!=null) throw new InvalidOperationException("Ambiguous document supplier"); supplier=text; }
+        }
+        RequireWindow(root,process);
+        if(number==null || supplier==null) throw new InvalidOperationException("Document identity unavailable");
+        return new GingerPriceDocument { Number=number,Supplier=supplier };
+    }
+    public static void OpenDocumentMatching(IntPtr root,uint process,GingerPriceDocument expected,bool confirmed) {
+        if(!confirmed || expected==null) throw new InvalidOperationException("Document navigation confirmation required");
+        GingerPriceDocument current=ReadPriceDocument(root,process);
+        if(current.Number!=expected.Number || current.Supplier!=expected.Supplier) throw new InvalidOperationException("Price document changed");
+        if(InspectMatching(root,process).Status!="panels_not_verified") return; // Already open: never toggle closed.
+        InvokeResolved(root,process,"дополнительно");
+        current=ReadPriceDocument(root,process);
+        if(current.Number!=expected.Number || current.Supplier!=expected.Supplier) throw new InvalidOperationException("Price document changed while opening menu");
+        InvokeResolved(root,process,"дополнительно/сопоставление снизу");
+    }
+    public static GingerTabCandidate[] TabCandidates(IntPtr root,uint process) {
+        List<GingerTabCandidate> candidates=new List<GingerTabCandidate>(), result=new List<GingerTabCandidate>();
+        foreach(IntPtr hwnd in Windows(root,process)) {
+            if(!IsWindowVisible(hwnd)) continue;
+            Rectangle r; StringBuilder cls=new StringBuilder(256); GetClassNameW(hwnd,cls,cls.Capacity);
+            if(!cls.ToString().StartsWith("WindowsForms10.Window.") || !GetWindowRect(hwnd,out r)) continue;
+            if(r.Bottom-r.Top<16 || r.Bottom-r.Top>40 || r.Right-r.Left<150) continue;
+            candidates.Add(new GingerTabCandidate { Handle=hwnd.ToInt64(),Parent=GetParent(hwnd).ToInt64(),X=r.Left,Y=r.Top,Width=r.Right-r.Left,Height=r.Bottom-r.Top });
+        }
+        foreach(GingerTabCandidate c in candidates) {
+            List<GingerTabCandidate> group=candidates.FindAll(x=>x.Parent==c.Parent && x.Y==c.Y && x.Height==c.Height && Math.Abs(x.Width-c.Width)<=4);
+            if(group.Count!=3) continue;
+            group.Sort((a,b)=>a.X.CompareTo(b.X));
+            if(group[1].X-group[0].X-group[0].Width<0 || group[1].X-group[0].X-group[0].Width>4 ||
+               group[2].X-group[1].X-group[1].Width<0 || group[2].X-group[1].X-group[1].Width>4) continue;
+            if(!result.Exists(x=>x.Handle==c.Handle)) result.Add(c);
+        }
+        return result.ToArray();
+    }
+    public static void ClickVerifiedTab(IntPtr root,uint process,GingerTabCandidate expected,bool confirmed) {
+        if(!confirmed) throw new InvalidOperationException("Navigation confirmation required");
+        RequireWindow(root,process);
+        RequireInputScale(root);
+        GingerTabCandidate[] matches=Array.FindAll(TabCandidates(root,process),c=>c.Handle==expected.Handle && c.Parent==expected.Parent &&
+            c.X==expected.X && c.Y==expected.Y && c.Width==expected.Width && c.Height==expected.Height);
+        if(matches.Length!=1 || GetForegroundWindow()!=root) throw new InvalidOperationException("Tab target changed");
+        Point point=new Point { X=expected.X+expected.Width/2,Y=expected.Y+expected.Height/2 };
+        if(WindowFromPoint(point)!=new IntPtr(expected.Handle)) throw new InvalidOperationException("Tab is covered");
+        int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
+        if(width<2 || height<2 || point.X<left || point.Y<top || point.X>=left+width || point.Y>=top+height) throw new InvalidOperationException("Tab outside desktop");
+        int x=(int)(((long)(point.X-left)*65536+32768)/width),y=(int)(((long)(point.Y-top)*65536+32768)/height);
+        Input[] input=new Input[2];
+        input[0]=new Input { Mouse=new MouseInput { X=x,Y=y,Flags=0xC003 } };
+        input[1]=new Input { Mouse=new MouseInput { X=x,Y=y,Flags=0xC005 } };
+        if(SendInput(2,input,Marshal.SizeOf(typeof(Input)))!=2) throw new InvalidOperationException("Tab click outcome unknown; no retry");
+    }
+    public static GingerMatchingView InspectMatching(IntPtr root,uint process) {
+        GingerMatchingView result=new GingerMatchingView();
+        int search=0, products=0;
+        foreach(IntPtr hwnd in Windows(root,process)) {
+            StringBuilder cls=new StringBuilder(256); GetClassNameW(hwnd,cls,cls.Capacity);
+            if(!IsWindowVisible(hwnd) || !cls.ToString().Contains("SysListView32")) continue;
+            bool isSearch=false,isProduct=false;
+            foreach(string[] columns in Headers(hwnd,process)) {
+                isSearch |= Column(columns,"слово")>=0 && Column(columns,"поиск")>=0;
+                isProduct |= Column(columns,"товар")>=0 && Column(columns,"цена")>=0;
+            }
+            if(!isSearch && !isProduct) continue;
+            if(isSearch && isProduct) throw new InvalidOperationException("Ambiguous matching panel");
+            uint owner; IntPtr count;
+            if(GetWindowThreadProcessId(hwnd,out owner)==0 || owner!=process ||
+               SendMessageTimeoutW(hwnd,0x1004,IntPtr.Zero,IntPtr.Zero,2,100,out count)==IntPtr.Zero || count.ToInt64()<0)
+                throw new InvalidOperationException("Matching row count unavailable");
+            if(isSearch) { search++; result.SearchRows=count.ToInt64(); }
+            if(isProduct) { products++; result.ProductRows=count.ToInt64(); }
+        }
+        RequireWindow(root,process);
+        if(search>1 || products>1) throw new InvalidOperationException("Duplicate matching panels");
+        if(search==1 && products==1)
+            result.Status=result.SearchRows==0 && result.ProductRows==0 ? "panels_visible_empty" : "rows_observed_identity_unverified";
+        return result;
+    }
 }
 '@
 
@@ -342,6 +559,9 @@ $window = $target.MainWindowHandle
 $processId = [uint32]$target.Id
 $actions = [System.Collections.Generic.List[string]]::new()
 $prices = $null
+$matchingStatus = 'not_requested'
+$matchingView = $null
+if ($Mode -eq 'InspectMatching') { $matchingView = [GingerMenuAccess]::InspectMatching($window, $processId); $matchingStatus = $matchingView.Status }
 if ($Mode -eq 'ReadPrices') { $prices = [GingerMenuAccess]::ReadPrices($window, $processId) }
 if ($Mode -eq 'SelectFirstIncluded') {
     if (-not $ConfirmNavigation) { throw 'Navigation confirmation required' }
@@ -349,6 +569,19 @@ if ($Mode -eq 'SelectFirstIncluded') {
     if ($before.Queue.Length -eq 0) { throw 'No included prices; no selection performed' }
     $prices = [GingerMenuAccess]::SelectPrice($window, $processId, $before, $before.Queue[0].Number, $true)
     $actions.Add('Select first included price: selection verified')
+}
+if ($Mode -eq 'OpenMatching') {
+    if (-not $ConfirmNavigation) { throw 'Navigation confirmation required' }
+    $document = [GingerMenuAccess]::ReadPriceDocument($window, $processId)
+    [GingerMenuAccess]::OpenDocumentMatching($window, $processId, $document, $true)
+    $actions.Add('Ensure bottom matching view for verified supplier document')
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        $matchingView = [GingerMenuAccess]::InspectMatching($window, $processId)
+        if ($matchingView.Status -ne 'panels_not_verified') { break }
+        Start-Sleep -Milliseconds 200
+    } while ($timer.Elapsed.TotalSeconds -lt 10)
+    $matchingStatus = $matchingView.Status
 }
 if ($Mode -eq 'OpenPrices' -and -not [GingerMenuAccess]::PricesVisible($window, $processId)) {
     [GingerMenuAccess]::Invoke($window, $processId, 'журналы')
@@ -362,6 +595,22 @@ if ($Mode -eq 'OpenPrices' -and -not [GingerMenuAccess]::PricesVisible($window, 
         Start-Sleep -Milliseconds 200
     }
 }
+if ($Mode -eq 'OpenSelectedPrice') {
+    if (-not $ConfirmNavigation) { throw 'Navigation confirmation required' }
+    $before = [GingerMenuAccess]::ReadPrices($window, $processId)
+    $selected = @($before.Rows | Where-Object Selected)
+    if ($selected.Count -ne 1) { throw 'Exactly one selected price is required' }
+    [GingerMenuAccess]::OpenSelectedPrice($window, $processId, $before, $selected[0].Number, $true)
+    $deadline=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $document=$null
+        try {$document=[GingerMenuAccess]::ReadPriceDocument($window,$processId)} catch { }
+        if($null -ne $document){break}
+        Start-Sleep -Milliseconds 200
+    } while($deadline.Elapsed.TotalSeconds -lt 10)
+    if($null -eq $document -or $document.Number -ne $selected[0].Number -or $document.Supplier -ne $selected[0].Supplier) {throw 'Opened price document not verified; no retry'}
+    $actions.Add('Double-click supplier cell: document number and supplier verified')
+}
 $menu = @([GingerMenuAccess]::Menu($window, $processId) | Where-Object { $_.Path -in @('журналы', 'журналы/текущие прайс-листы') } | ForEach-Object { @{name=$_.Name; path=$_.Path; state=$_.State} })
 [pscustomobject]@{
     source = 'Ginger semantic navigation'; mode = $Mode; process_id = $processId
@@ -370,4 +619,6 @@ $menu = @([GingerMenuAccess]::Menu($window, $processId) | Where-Object { $_.Path
     headers = [GingerMenuAccess]::Headers($window, $processId).ToArray()
     catalogue_changed = $false; row_identity_verified = $false
     prices = $prices
+    matching_status = $matchingStatus
+    matching_view = $matchingView
 } | ConvertTo-Json -Depth 6

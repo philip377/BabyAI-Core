@@ -1,4 +1,5 @@
 ﻿# Run with Windows PowerShell 5.1 -STA. All actions target this test's own form.
+param([switch]$InteractiveInput)
 $ErrorActionPreference = 'Stop'
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/windows/ginger-navigation.ps1'))
 $boundary = $source.IndexOf('$processes = @(')
@@ -17,6 +18,14 @@ $script:invocations = 0
 $prices.Add_Click({ $script:invocations++ })
 [void]$journal.DropDownItems.Add($prices)
 [void]$menu.Items.Add($journal)
+$extra = New-Object Windows.Forms.ToolStripMenuItem('Дополнительно')
+$matching = New-Object Windows.Forms.ToolStripMenuItem('Сопоставление снизу')
+$script:matchingInvocations = 0
+$script:changeWhileOpening = $false
+$matching.Add_Click({ $script:matchingInvocations++ })
+$extra.Add_DropDownOpening({ if ($script:changeWhileOpening) { $grid.Rows[0].Cells[1].Value = 'Changed during menu' } })
+[void]$extra.DropDownItems.Add($matching)
+[void]$menu.Items.Add($extra)
 $form.Controls.Add($menu)
 $form.MainMenuStrip = $menu
 try {
@@ -106,6 +115,20 @@ try {
     if (-not $selected.Rows[0].SupplierFocused -or $grid.CurrentCell.ColumnIndex -ne 1 -or $grid.CurrentCell.RowIndex -ne 0) {
         throw 'Supplier cell focus not verified'
     }
+    $grid.ReadOnly = $true
+    $script:priceOpens = 0
+    $grid.Add_CellDoubleClick({ param($sender,$event) if ($event.ColumnIndex -eq 1 -and $event.RowIndex -eq 0) { $script:priceOpens++ } else { throw 'Wrong double-click target' } })
+    $selected = [GingerMenuAccess]::ReadPrices($root,$ownerId)
+    $denied = $false
+    try { [GingerMenuAccess]::OpenSelectedPrice($root,$ownerId,$selected,'1',$false) } catch { $denied = $true }
+    if (-not $denied -or $script:priceOpens -ne 0) { throw 'Unconfirmed price open accepted' }
+    if ($InteractiveInput) {
+        [GingerMenuAccess]::OpenSelectedPrice($root,$ownerId,$selected,'1',$true)
+        Start-Sleep -Milliseconds 100
+        [Windows.Forms.Application]::DoEvents()
+        if ($script:priceOpens -ne 1) { throw 'Expected one supplier cell double click' }
+        Write-Output 'PASS: interactive supplier-cell double click on fixture only'
+    }
     $grid.Rows[2].Cells[0].Value = '1'
     $denied = $false
     try { [GingerMenuAccess]::ReadPrices($root, $ownerId) | Out-Null } catch { $denied = $true }
@@ -120,7 +143,82 @@ try {
         try { [GingerMenuAccess]::CheckedValue($case[0], $case[1]) | Out-Null } catch { $denied = $true }
         if (-not $denied) { throw 'Ambiguous checkbox accepted' }
     }
+    $searchPanel = New-Object Windows.Forms.ListView
+    $searchPanel.View = 'Details'
+    [void]$searchPanel.Columns.Add('Слово')
+    [void]$searchPanel.Columns.Add('Поиск')
+    $productPanel = New-Object Windows.Forms.ListView
+    $productPanel.View = 'Details'
+    [void]$productPanel.Columns.Add('Товар')
+    [void]$productPanel.Columns.Add('Цена')
+    $form.Controls.Add($searchPanel)
+    $form.Controls.Add($productPanel)
+    $searchPanel.BringToFront()
+    $productPanel.BringToFront()
+    [Windows.Forms.Application]::DoEvents()
+    $view = [GingerMenuAccess]::InspectMatching($root,$ownerId)
+    if ($view.Status -ne 'panels_visible_empty' -or $view.CanMatch) { throw 'Empty panels incorrectly classified' }
+    [void]$productPanel.Items.Add('Synthetic product')
+    $view = [GingerMenuAccess]::InspectMatching($root,$ownerId)
+    if ($view.Status -ne 'rows_observed_identity_unverified' -or $view.ProductRows -ne 1 -or $view.CanMatch) { throw 'Row count grants matching permission' }
+    $productPanel.Dispose()
+    $searchPanel.Dispose()
+    $form.Width=700
+    $tabHost=New-Object Windows.Forms.Panel
+    $tabHost.Width=620; $tabHost.Height=24; $tabHost.Top=50
+    $form.Controls.Add($tabHost)
+    $tabHost.BringToFront()
+    $tabPanels=@()
+    for($i=0;$i -lt 3;$i++) {
+        $panel=New-Object Windows.Forms.Panel
+        $panel.Width=200; $panel.Height=20; $panel.Left=$i*202
+        $tabHost.Controls.Add($panel)
+        $tabPanels+=$panel
+    }
+    [Windows.Forms.Application]::DoEvents()
+    $tabs=@([GingerMenuAccess]::TabCandidates($root,$ownerId))
+    if($tabs.Count -ne 3){throw 'Native three-tab group not found'}
+    $denied=$false
+    try{[GingerMenuAccess]::ClickVerifiedTab($root,$ownerId,$tabs[1],$false)}catch{$denied=$true}
+    if(-not $denied){throw 'Unconfirmed tab click accepted'}
+    $tabPanels[1].Left+=10
+    $denied=$false
+    try{[GingerMenuAccess]::ClickVerifiedTab($root,$ownerId,$tabs[1],$true)}catch{$denied=$true}
+    if(-not $denied){throw 'Moved tab target accepted'}
+    $tabHost.Dispose()
+    $grid.Columns[0].HeaderText='Название в прайсе'
+    $grid.Columns[1].HeaderText='Цена'
+    $grid.Columns[2].HeaderText='Товар'
+    $numberBox=New-Object Windows.Forms.TextBox
+    $numberBox.AccessibleName='Номер'; $numberBox.Text='1'
+    $supplierBox=New-Object Windows.Forms.TextBox
+    $supplierBox.AccessibleName='Поставщик'; $supplierBox.Text='Supplier A'
+    $form.Controls.Add($numberBox); $form.Controls.Add($supplierBox)
+    [Windows.Forms.Application]::DoEvents()
+    $document=[GingerMenuAccess]::ReadPriceDocument($root,$ownerId)
+    if($document.Number -ne '1' -or $document.Supplier -ne 'Supplier A' -or $document.CanWrite){throw 'Wrong document identity'}
+    $denied=$false
+    try{[GingerMenuAccess]::OpenDocumentMatching($root,$ownerId,$document,$false)}catch{$denied=$true}
+    if(-not $denied -or $script:matchingInvocations -ne 0){throw 'Unconfirmed document menu accepted'}
+    $numberBox.Text='2'
+    $denied=$false
+    try{[GingerMenuAccess]::OpenDocumentMatching($root,$ownerId,$document,$true)}catch{$denied=$true}
+    if(-not $denied -or $script:matchingInvocations -ne 0){throw 'Changed document accepted'}
+    $numberBox.Text='1'
+    $script:changeDocument=$true
+    $extra.Add_DropDownOpening({if($script:changeDocument){$numberBox.Text='2'}})
+    $denied=$false
+    try{[GingerMenuAccess]::OpenDocumentMatching($root,$ownerId,$document,$true)}catch{$denied=$true}
+    if(-not $denied -or $script:matchingInvocations -ne 0){throw 'Document change during menu ignored'}
+    $script:changeDocument=$false
+    $extra.HideDropDown()
+    $numberBox.Text='1'
+    [GingerMenuAccess]::OpenDocumentMatching($root,$ownerId,$document,$true)
+    if($script:matchingInvocations -ne 1){throw 'Verified document menu not invoked'}
+    $numberBox.Dispose();$supplierBox.Dispose()
     Write-Output 'PASS: menu guards; DataGridView headers; wrong, hidden, absent and ambiguous tables rejected'
     Write-Output 'PASS: ordered checked-price queue; duplicate numbers and inconsistent checkboxes rejected'
     Write-Output 'PASS: confirmed selection verified; stale and unchecked requests blocked'
+    Write-Output 'PASS: matching view path; confirmation and price change during menu opening enforced'
+    Write-Output 'PASS: native tab geometry guards and supplier document identity checks'
 } finally { $form.Dispose() }
