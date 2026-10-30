@@ -301,5 +301,11 @@ try {
     Write-Output 'PASS: ordered checked-price queue; duplicate numbers and inconsistent checkboxes rejected'
     Write-Output 'PASS: confirmed selection verified; stale and unchecked requests blocked'
     Write-Output 'PASS: matching view path; confirmation and price change during menu opening enforced'
+    $denied=$false
+    try{[GingerMenuAccess]::ActivateForRead($root,0)}catch{$denied=$true}
+    if(-not $denied){throw 'Wrong owner allowed activation'}
+    $denied=$false
+    try{[GingerMenuAccess]::RequireForeground([IntPtr]::Zero,$ownerId)}catch{$denied=$true}
+    if(-not $denied){throw 'Invalid foreground target accepted'}
     Write-Output 'PASS: native tab geometry guards and supplier document identity checks'
 } finally { $form.Dispose() }

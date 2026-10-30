@@ -3,6 +3,8 @@ using System.Text;
 using BabyAI.Desktop;
 using System.Text.Json;
 
+Console.OutputEncoding = Encoding.UTF8;
+
 if (args.Length == 2 && args[0] == "--reports")
 {
     var reports = new List<GingerProbeResult>();
@@ -12,6 +14,13 @@ if (args.Length == 2 && args[0] == "--reports")
         reports.Add(GingerReadiness.Parse(probe, doc.RootElement));
     }
     Console.WriteLine(JsonSerializer.Serialize(GingerReadiness.Assess(reports)));
+    return;
+}
+
+if (args.Length == 1 && args[0] == "--live-candidates")
+{
+    if (!await GingerCandidateReader.TryReadAsync(Console.WriteLine, CancellationToken.None))
+        throw new InvalidOperationException("Live candidate inspection unavailable");
     return;
 }
 

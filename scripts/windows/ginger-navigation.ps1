@@ -8,7 +8,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName Accessibility
-Add-Type -ReferencedAssemblies @([Accessibility.IAccessible].Assembly.Location) -TypeDefinition @'
+Add-Type -AssemblyName Microsoft.VisualBasic
+Add-Type -ReferencedAssemblies @([Accessibility.IAccessible].Assembly.Location, [Microsoft.VisualBasic.Interaction].Assembly.Location) -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -115,6 +116,11 @@ public static class GingerMenuAccess {
         uint owner;
         if (root == IntPtr.Zero || process == 0 || GetWindowThreadProcessId(root, out owner) == 0 || owner != process)
             throw new InvalidOperationException("Ginger window changed");
+        // Avoid entering MSAA while Ginger's UI thread is already unresponsive.
+        // This is a preflight observation, not proof that a later COM call cannot block.
+        IntPtr response;
+        if(SendMessageTimeoutW(root,0,IntPtr.Zero,IntPtr.Zero,2,200,out response)==IntPtr.Zero)
+            throw new InvalidOperationException("Ginger UI is not responding; further input blocked");
         IntPtr popup = GetLastActivePopup(root);
         if (popup != root && popup != IntPtr.Zero && IsWindowVisible(popup))
             throw new InvalidOperationException("A modal or owned window requires attention");
@@ -442,8 +448,7 @@ public static class GingerMenuAccess {
         GingerPriceSnapshot fresh=ReadPrices(root,process);
         RequireSelectedPrice(expected,fresh,number,false);
         GingerPriceRow row=Array.Find(fresh.Rows,r=>r.Number==number);
-        SetForegroundWindow(root);
-        if(GetForegroundWindow()!=root) throw new InvalidOperationException("Ginger foreground could not be verified");
+        ActivateForRead(root,process);
         RequireInputScale(root);
         IntPtr table=new IntPtr(fresh.TableHandle), packed=PricePoint(root,process,fresh,row);
         Point point=new Point { X=(int)(packed.ToInt64() & 65535),Y=(int)((packed.ToInt64()>>16)&65535) };
@@ -463,12 +468,28 @@ public static class GingerMenuAccess {
         // Dispatch alone does not establish which document opened. Read the resulting UI.
     }
     public static void ActivateForRead(IntPtr root,uint process) {
-        RequireWindow(root,process); SetForegroundWindow(root);
-        if(GetForegroundWindow()!=root) throw new InvalidOperationException("Ginger must be foreground");
+        RequireWindow(root,process);
+        if(GetForegroundWindow()==root) return;
+        SetForegroundWindow(root);
+        if(GetForegroundWindow()!=root) {
+            // Standard process activation; never sends a synthetic Alt key or clicks a taskbar position.
+            Microsoft.VisualBasic.Interaction.AppActivate(checked((int)process));
+        }
+        // Activation can complete asynchronously; wait only for observation, never retry input.
+        var activation=System.Diagnostics.Stopwatch.StartNew();
+        while(GetForegroundWindow()!=root && activation.ElapsedMilliseconds<1500) {
+            RequireWindow(root,process);
+            System.Threading.Thread.Sleep(50);
+        }
+        RequireForeground(root,process);
     }
     public static void RequireForeground(IntPtr root,uint process) {
         RequireWindow(root,process);
-        if(GetForegroundWindow()!=root) throw new InvalidOperationException("Foreground changed during observation");
+        IntPtr foreground=GetForegroundWindow();
+        if(foreground!=root) {
+            uint foregroundProcess; GetWindowThreadProcessId(foreground,out foregroundProcess);
+            throw new InvalidOperationException("Foreground changed during observation; expected="+root.ToInt64()+", observed="+foreground.ToInt64()+", owner="+foregroundProcess);
+        }
     }
     public static GingerPriceDocument ReadPriceDocument(IntPtr root,uint process) {
         string number=null,supplier=null;
@@ -756,6 +777,7 @@ if ($Mode -eq 'OpenPrices' -and -not [GingerMenuAccess]::PricesVisible($window, 
 }
 if ($Mode -eq 'OpenSelectedPrice') {
     if (-not $ConfirmNavigation) { throw 'Navigation confirmation required' }
+    [GingerMenuAccess]::ActivateForRead($window, $processId)
     $before = [GingerMenuAccess]::ReadPrices($window, $processId)
     $selected = @($before.Rows | Where-Object Selected)
     if ($selected.Count -ne 1) { throw 'Exactly one selected price is required' }
