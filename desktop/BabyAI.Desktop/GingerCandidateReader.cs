@@ -70,7 +70,7 @@ internal static class GingerCandidateReader
     {
         token.ThrowIfCancellationRequested();
         var script = Path.Combine(AppContext.BaseDirectory, "Ginger", "ginger-navigation.ps1");
-        log("Р§РёС‚Р°СЋ РІС‹РґРµР»РµРЅРЅСѓСЋ РїРѕР·РёС†РёСЋ Рё РєР°РЅРґРёРґР°С‚РѕРІ С‡РµСЂРµР· РёРЅС‚РµСЂС„РµР№СЃ Ginger. Р”Р°РЅРЅС‹Рµ РѕСЃС‚Р°РЅСѓС‚СЃСЏ Р»РѕРєР°Р»СЊРЅРѕ.");
+        log("Читаю выделенную позицию и кандидатов через интерфейс Ginger. Данные останутся локально.");
         try
         {
             if (!File.Exists(script)) throw new FileNotFoundException("Bundled reader missing");
@@ -91,9 +91,9 @@ internal static class GingerCandidateReader
                 "BabyAI", "diagnostics", "ginger-candidates-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(folder);
             await File.WriteAllTextAsync(Path.Combine(folder, "observation.json"), json, Encoding.UTF8, token);
-            log($"РџРѕР·РёС†РёСЏ РїСЂРѕС‡РёС‚Р°РЅР°, РєР°РЅРґРёРґР°С‚РѕРІ РІ РїР°РЅРµР»Рё: {count}. РџРѕРІС‚РѕСЂРЅС‹Рµ СЃРЅРёРјРєРё СЃРѕРІРїР°Р»Рё.");
-            log("Р­С‚Рѕ РµС‰С‘ РЅРµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ Р·Р°РІРµСЂС€РµРЅРёСЏ РїРѕРёСЃРєР° РёР»Рё РёРґРµРЅС‚РёС‡РЅРѕСЃС‚Рё С‚РѕРІР°СЂРѕРІ. РЎРѕРїРѕСЃС‚Р°РІР»РµРЅРёРµ Р·Р°РїСЂРµС‰РµРЅРѕ.");
-            log("Р›РѕРєР°Р»СЊРЅС‹Р№ РѕС‚С‡С‘С‚: " + folder);
+            log($"Позиция прочитана, кандидатов в панели: {count}. Повторные снимки совпали.");
+            log("Это ещё не подтверждение завершения поиска или идентичности товаров. Сопоставление запрещено.");
+            log("Локальный отчёт: " + folder);
             return true;
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
@@ -101,8 +101,8 @@ internal static class GingerCandidateReader
             System.ComponentModel.Win32Exception or JsonException or OperationCanceledException)
         {
             log(ex is OperationCanceledException
-                ? "Р§С‚РµРЅРёРµ РЅРµ РѕС‚РІРµС‚РёР»Рѕ Р·Р° 30 СЃРµРєСѓРЅРґ. РџРµСЂРµС…РѕР¶Сѓ Рє РґРёР°РіРЅРѕСЃС‚РёРєРµ РёРЅС‚РµСЂС„РµР№СЃР°."
-                : "Р’С‹РґРµР»РµРЅРЅСѓСЋ РїРѕР·РёС†РёСЋ Рё РєР°РЅРґРёРґР°С‚РѕРІ РЅРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРІРµСЂРёС‚СЊ. РџРµСЂРµС…РѕР¶Сѓ Рє РґРёР°РіРЅРѕСЃС‚РёРєРµ РёРЅС‚РµСЂС„РµР№СЃР°.");
+                ? "Чтение не ответило за 30 секунд. Перехожу к диагностике интерфейса."
+                : "Выделенную позицию и кандидатов не удалось проверить. Перехожу к диагностике интерфейса.");
             return false;
         }
     }

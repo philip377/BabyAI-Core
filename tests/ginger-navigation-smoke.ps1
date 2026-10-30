@@ -2,6 +2,8 @@
 param([switch]$InteractiveInput)
 $ErrorActionPreference = 'Stop'
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/windows/ginger-navigation.ps1'))
+# The fixture must keep pumping its own window while the driver runs on another thread.
+$source = $source.Replace('public static class GingerMenuAccess {', 'public static class GingerMenuAccess { public static System.Threading.Tasks.Task ActivateFixtureAsync(IntPtr root,uint owner) { return System.Threading.Tasks.Task.Run(() => ActivateForRead(root,owner)); }')
 $boundary = $source.IndexOf('$processes = @(')
 if ($boundary -lt 0) { throw 'Missing driver boundary' }
 Invoke-Expression $source.Substring(0, $boundary)
@@ -92,6 +94,20 @@ try {
     if ($snapshot.Rows.Length -ne 3 -or $snapshot.Queue.Length -ne 2 -or
         $snapshot.Queue[0].Number -ne '1' -or $snapshot.Queue[1].Number -ne '3' -or
         $snapshot.CanWrite -or $snapshot.IdentityVerified) { throw 'Incorrect read-only queue' }
+    $next=[GingerMenuAccess]::NextIncluded($snapshot,'1')
+    if($next.Number -ne '3'){throw 'Queue skipped order or confused identical suppliers'}
+    if($null -ne [GingerMenuAccess]::NextIncluded($snapshot,'3')){throw 'Queue wraps at end'}
+    foreach($after in @('', 'missing', '2')) {
+        $denied=$false
+        try{[void][GingerMenuAccess]::NextIncluded($snapshot,$after)}catch{$denied=$true}
+        if(-not $denied){throw 'Invalid queue anchor accepted'}
+    }
+    $snapshot.Rows[2].Number='1'
+    $denied=$false
+    try{[void][GingerMenuAccess]::NextIncluded($snapshot,'1')}catch{$denied=$true}
+    if(-not $denied){throw 'Duplicate queue number accepted'}
+    $snapshot.Rows[2].Number='3'
+    Write-Output 'PASS: next included price preserves order; missing, unchecked and duplicate anchors rejected; no wrap'
     $grid.SelectionMode = 'FullRowSelect'
     $snapshot = [GingerMenuAccess]::ReadPrices($root, $ownerId)
     foreach ($request in @(@('3',$false), @('2',$true))) {
@@ -307,5 +323,22 @@ try {
     $denied=$false
     try{[GingerMenuAccess]::RequireForeground([IntPtr]::Zero,$ownerId)}catch{$denied=$true}
     if(-not $denied){throw 'Invalid foreground target accepted'}
+    $form.WindowState='Minimized'
+    [Windows.Forms.Application]::DoEvents()
+    $denied=$false
+    try{[GingerMenuAccess]::RequireForeground($root,$ownerId)}catch{$denied=$true}
+    if(-not $denied){throw 'Minimized window accepted for input'}
+    if($InteractiveInput) {
+        $activation=[GingerMenuAccess]::ActivateFixtureAsync($root,$ownerId)
+        $activationDeadline=[Diagnostics.Stopwatch]::StartNew()
+        while(-not $activation.IsCompleted -and $activationDeadline.Elapsed.TotalSeconds -lt 5) {
+            [Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 10
+        }
+        if(-not $activation.IsCompleted){throw 'Fixture activation timed out'}
+        $activation.GetAwaiter().GetResult()
+        if($form.WindowState -eq 'Minimized'){throw 'Verified window not restored'}
+        Write-Output 'PASS: minimized fixture restored and foreground verified'
+    } else { $form.WindowState='Normal' }
     Write-Output 'PASS: native tab geometry guards and supplier document identity checks'
 } finally { $form.Dispose() }

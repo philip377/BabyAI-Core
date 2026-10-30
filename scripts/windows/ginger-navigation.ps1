@@ -1,8 +1,9 @@
 ﻿# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
 [CmdletBinding()]
 param(
-    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice', 'ReadSelectedProduct', 'ReadMatchingCandidates')][string]$Mode = 'Inspect',
-    [switch]$ConfirmNavigation
+    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice', 'ReadSelectedProduct', 'ReadMatchingCandidates', 'SelectNextIncluded')][string]$Mode = 'Inspect',
+    [switch]$ConfirmNavigation,
+    [string]$AfterPriceNumber
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -81,6 +82,8 @@ public static class GingerMenuAccess {
     [DllImport("user32.dll")] private static extern bool ClientToScreen(IntPtr hwnd,ref Point point);
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool ShowWindowAsync(IntPtr hwnd,int command);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
     [StructLayout(LayoutKind.Sequential)] private struct MouseInput { public int X,Y; public uint Data,Flags,Time; public IntPtr Extra; }
@@ -277,6 +280,25 @@ public static class GingerMenuAccess {
         }
         return index;
     }
+    // Queue position is only navigation progress, never proof that products were processed.
+    public static GingerPriceRow NextIncluded(GingerPriceSnapshot snapshot,string afterNumber) {
+        if(snapshot==null || snapshot.Rows==null || String.IsNullOrWhiteSpace(afterNumber))
+            throw new InvalidOperationException("An observed price number is required");
+        HashSet<string> seen=new HashSet<string>(StringComparer.Ordinal);
+        GingerPriceRow current=null, next=null;
+        bool after=false;
+        foreach(GingerPriceRow row in snapshot.Rows) {
+            if(row==null || String.IsNullOrWhiteSpace(row.Number) || !seen.Add(row.Number))
+                throw new InvalidOperationException("Ambiguous price queue");
+            if(row.Number==afterNumber) {
+                if(!row.Included) throw new InvalidOperationException("Previous price is no longer included");
+                current=row; after=true; continue;
+            }
+            if(after && row.Included && next==null) next=row;
+        }
+        if(current==null) throw new InvalidOperationException("Previous price is missing from the queue");
+        return next;
+    }
     public static bool CheckedValue(string value, int state) {
         if ((state & 32) != 0 || (value != "True" && value != "False"))
             throw new InvalidOperationException("Unknown checkbox state");
@@ -469,6 +491,15 @@ public static class GingerMenuAccess {
     }
     public static void ActivateForRead(IntPtr root,uint process) {
         RequireWindow(root,process);
+        if(IsIconic(root)) {
+            ShowWindowAsync(root,9); // SW_RESTORE, only the verified owner window.
+            var restore=System.Diagnostics.Stopwatch.StartNew();
+            while(IsIconic(root) && restore.ElapsedMilliseconds<1500) {
+                RequireWindow(root,process);
+                System.Threading.Thread.Sleep(50);
+            }
+            if(IsIconic(root)) throw new InvalidOperationException("Ginger window remains minimized");
+        }
         if(GetForegroundWindow()==root) return;
         SetForegroundWindow(root);
         if(GetForegroundWindow()!=root) {
@@ -485,6 +516,7 @@ public static class GingerMenuAccess {
     }
     public static void RequireForeground(IntPtr root,uint process) {
         RequireWindow(root,process);
+        if(IsIconic(root)) throw new InvalidOperationException("Ginger window is minimized");
         IntPtr foreground=GetForegroundWindow();
         if(foreground!=root) {
             uint foregroundProcess; GetWindowThreadProcessId(foreground,out foregroundProcess);
@@ -638,7 +670,7 @@ public static class GingerMenuAccess {
         return count.ToInt64();
     }
     private static GingerCandidateSnapshot ReadCandidatesOnce(IntPtr root,uint process) {
-        GingerSelectedProduct source=ReadSelectedProduct(root,process);
+        GingerSelectedProduct source=ReadSelectedProductOnce(root,process);
         GingerCandidateSnapshot result=null;
         foreach(IntPtr hwnd in Windows(root,process)) {
             StringBuilder cls=new StringBuilder(256); GetClassNameW(hwnd,cls,cls.Capacity);
@@ -677,7 +709,7 @@ public static class GingerMenuAccess {
             result=new GingerCandidateSnapshot {Source=source,PanelHandle=hwnd.ToInt64(),Candidates=candidates.ToArray()};
         }
         if(result==null) throw new InvalidOperationException("Candidate panel missing");
-        RequireSameSelectedProduct(source,ReadSelectedProduct(root,process));
+        RequireSameSelectedProduct(source,ReadSelectedProductOnce(root,process));
         RequireWindow(root,process);
         return result;
     }
@@ -750,6 +782,18 @@ if ($Mode -eq 'SelectFirstIncluded') {
     $prices = [GingerMenuAccess]::SelectPrice($window, $processId, $before, $before.Queue[0].Number, $true)
     $actions.Add('Select first included price: selection verified')
 }
+if ($Mode -eq 'SelectNextIncluded') {
+    if (-not $ConfirmNavigation) { throw 'Navigation confirmation required' }
+    $before = [GingerMenuAccess]::ReadPrices($window, $processId)
+    $next = [GingerMenuAccess]::NextIncluded($before, $AfterPriceNumber)
+    if ($null -eq $next) {
+        $actions.Add('No later included price; selection unchanged; processing completion not established')
+        $prices = $before
+    } else {
+        $prices = [GingerMenuAccess]::SelectPrice($window, $processId, $before, $next.Number, $true)
+        $actions.Add('Select next included price after observed document: selection verified')
+    }
+}
 if ($Mode -eq 'OpenMatching') {
     if (-not $ConfirmNavigation) { throw 'Navigation confirmation required' }
     $document = [GingerMenuAccess]::ReadPriceDocument($window, $processId)
@@ -763,6 +807,7 @@ if ($Mode -eq 'OpenMatching') {
     } while ($timer.Elapsed.TotalSeconds -lt 10)
     $matchingStatus = $matchingView.Status
 }
+if ($Mode -eq 'OpenPrices' -and -not $ConfirmNavigation) { throw 'Navigation confirmation required' }
 if ($Mode -eq 'OpenPrices' -and -not [GingerMenuAccess]::PricesVisible($window, $processId)) {
     [GingerMenuAccess]::Invoke($window, $processId, 'журналы')
     $actions.Add('Журналы')
