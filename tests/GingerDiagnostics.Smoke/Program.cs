@@ -17,6 +17,31 @@ if (args.Length == 2 && args[0] == "--reports")
     return;
 }
 
+// Explicit manual integration trial only. Default CI never drives a live application.
+if (args.Length >= 1 && args[0] == "--queue-controller")
+{
+    if (args.Length is < 3 or > 4 || args[1] is not ("Initialize" or "Step" or "Status") ||
+        (args[1] == "Step" && (args.Length != 4 || args[3] != "--confirm-navigation")) ||
+        (args[1] != "Step" && args.Length != 3))
+        throw new InvalidOperationException("Explicit queue operation and navigation confirmation required");
+    var script = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+        "../../../../../scripts/windows/ginger-queue-step.ps1"));
+    if (!File.Exists(script)) throw new FileNotFoundException("Queue controller checkout missing");
+    var start = new ProcessStartInfo {
+        FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+        UseShellExecute = false, CreateNoWindow = true,
+        RedirectStandardOutput = true, RedirectStandardError = true,
+        StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8,
+    };
+    foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-File", script, "-Operation", args[1], "-QueueDirectory", Path.GetFullPath(args[2]) })
+        start.ArgumentList.Add(argument);
+    if (args[1] == "Step") start.ArgumentList.Add("-ConfirmNavigation");
+    Console.WriteLine(await GingerDiagnostics.RunAsync(start, TimeSpan.FromSeconds(60), CancellationToken.None));
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--live-candidates")
 {
     if (!await GingerCandidateReader.TryReadAsync(Console.WriteLine, CancellationToken.None))

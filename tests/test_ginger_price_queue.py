@@ -145,3 +145,39 @@ def test_cli_accepts_windows_utf8_bom_reports(tmp_path):
     assert status['planned_documents'] == 2
     assert status['observed_documents'] == 0
     assert status['can_write'] is False
+
+
+def test_fixed_checkout_entrypoint_works_outside_repository(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+    entry = Path(__file__).resolve().parents[1] / 'scripts/windows/ginger-queue-cli.py'
+    result = subprocess.run([sys.executable, str(entry), 'status', '--directory', str(tmp_path / 'missing')],
+                            cwd=tmp_path, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 2
+    assert 'Queue blocked:' in result.stderr
+    assert 'No module named' not in result.stderr
+
+
+def test_windows_controller_blocks_missing_confirmation_and_pending_attempt(queue, tmp_path):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    if sys.platform != 'win32':
+        pytest.skip('Windows PowerShell controller')
+    shell = Path(os.environ['WINDIR']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    script = Path(__file__).resolve().parents[1] / 'scripts/windows/ginger-queue-step.ps1'
+    command = [str(shell), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script),
+               '-Operation', 'Step', '-QueueDirectory', str(queue.directory)]
+    result = subprocess.run(command, capture_output=True, encoding='utf-8', cwd=tmp_path, timeout=15)
+    assert result.returncode != 0
+    assert 'Navigation confirmation required' in result.stderr
+    assert queue.status()['pending_attempt'] is None
+    attempt, _ = queue.begin(report())
+    result = subprocess.run(command + ['-ConfirmNavigation'], capture_output=True,
+                            encoding='utf-8', cwd=tmp_path, timeout=15)
+    assert result.returncode != 0
+    assert 'Previous navigation unresolved; no input permitted' in result.stderr
+    assert queue.status()['pending_attempt'] == attempt
+    assert queue.status()['observed_documents'] == 0

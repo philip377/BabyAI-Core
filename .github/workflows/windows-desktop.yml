@@ -25,7 +25,11 @@ jobs:
         run: ./tests/ginger-navigation-smoke.ps1
       - name: Install BabyAI Core package
         shell: pwsh
-        run: python -m pip install -e .
+        run: python -m pip install -e ".[dev]"
+      - name: Test persistent Ginger queue controller guards
+        # Uses synthetic files and rejects before live UI access.
+        shell: pwsh
+        run: python -m pytest tests/test_ginger_price_queue.py -q
       - name: Verify desktop bridge
         shell: pwsh
         env:

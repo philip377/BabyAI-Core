@@ -17,6 +17,9 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Accessibility;
 
+public sealed class GingerUiBusyException : InvalidOperationException {
+    public GingerUiBusyException() : base("Ginger UI is not responding; further input blocked") { }
+}
 public sealed class GingerMenuNode {
     public IAccessible Owner;
     public object Child;
@@ -123,7 +126,7 @@ public static class GingerMenuAccess {
         // This is a preflight observation, not proof that a later COM call cannot block.
         IntPtr response;
         if(SendMessageTimeoutW(root,0,IntPtr.Zero,IntPtr.Zero,2,200,out response)==IntPtr.Zero)
-            throw new InvalidOperationException("Ginger UI is not responding; further input blocked");
+            throw new GingerUiBusyException();
         IntPtr popup = GetLastActivePopup(root);
         if (popup != root && popup != IntPtr.Zero && IsWindowVisible(popup))
             throw new InvalidOperationException("A modal or owned window requires attention");
@@ -815,10 +818,17 @@ if ($Mode -eq 'OpenPrices' -and -not [GingerMenuAccess]::PricesVisible($window, 
     [GingerMenuAccess]::Invoke($window, $processId, 'журналы/текущие прайс-листы')
     $actions.Add('Текущие прайс-листы')
     $deadline = [Diagnostics.Stopwatch]::StartNew()
-    while (-not [GingerMenuAccess]::PricesVisible($window, $processId)) {
-        if ($deadline.Elapsed.TotalSeconds -ge 10) { throw 'Price table not verified after navigation; do not retry automatically' }
+    do {
+        $visible=$false
+        try { $visible=[GingerMenuAccess]::PricesVisible($window, $processId) }
+        catch {
+            if ($_.Exception.GetBaseException() -isnot [GingerUiBusyException]) { throw }
+            # Only observe the loading window; never repeat the menu action.
+        }
+        if($visible){break}
+        if ($deadline.Elapsed.TotalSeconds -ge 30) { throw 'Price table not verified after navigation; do not retry automatically' }
         Start-Sleep -Milliseconds 200
-    }
+    } while($true)
 }
 if ($Mode -eq 'OpenSelectedPrice') {
     if (-not $ConfirmNavigation) { throw 'Navigation confirmation required' }
