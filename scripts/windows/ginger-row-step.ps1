@@ -1,7 +1,7 @@
 ﻿# Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
-    [ValidateSet('Initialize','Step','Observe','Status')][string]$Operation='Status',
+    [ValidateSet('Initialize','Step','Observe','Read','Status')][string]$Operation='Status',
     [Parameter(Mandatory=$true)][string]$QueueDirectory,
     [switch]$ConfirmNavigation
 )
@@ -11,6 +11,7 @@ $ErrorActionPreference='Stop'
 $python=(Get-Command python.exe -ErrorAction Stop).Source
 function Invoke-Journal([string]$Action,[string]$ReportPath='',[string]$Attempt='') {
     $arguments=@('-X','utf8',(Join-Path $PSScriptRoot 'ginger-row-cli.py'),$Action,'--directory',$QueueDirectory)
+    if($Action -eq 'create'){$arguments+='--require-read'}
     if($ReportPath){$arguments+=@('--report',$ReportPath)}
     if($Attempt){$arguments+=@('--attempt',$Attempt)}
     $raw=& $python @arguments
@@ -22,6 +23,8 @@ if($Operation -eq 'Step' -and -not $ConfirmNavigation){throw 'Navigation confirm
 if($Operation -ne 'Initialize') {
     $state=Invoke-Journal 'status'
     if($Operation -eq 'Step' -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; no input permitted'}
+    if($Operation -eq 'Step' -and $state.requires_read -and -not $state.selected_sampled){throw 'Selected row must be sampled before navigation'}
+    if($Operation -eq 'Read' -and ($null -ne $state.pending_attempt -or $state.selected_sampled)){throw 'Pending navigation or already sampled row'}
     if($Operation -eq 'Step' -and $null -eq $state.next_position){$state | ConvertTo-Json; return}
     if($Operation -eq 'Observe' -and $null -eq $state.pending_attempt){throw 'No pending row observation'}
 }
@@ -47,6 +50,14 @@ function Save-Rows($Rows,[string]$Name) {
 $rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
 $before=Save-Rows $rows 'before.json'
 if($Operation -eq 'Initialize') {$result=Invoke-Journal 'create' $before}
+elseif($Operation -eq 'Read') {
+    $reading=[GingerMenuAccess]::ReadMatchingCandidates($window,$ownerId)
+    $afterRows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
+    [GingerMenuAccess]::RequireSameProductRows($rows,$afterRows,$true)
+    $path=Join-Path $diagnostics 'sample.json'
+    [pscustomobject]@{rows=@($afterRows);process_id=$ownerId;can_write=$false;candidate_snapshot=$reading} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding UTF8
+    $result=Invoke-Journal 'sample' $path
+}
 elseif($Operation -eq 'Observe') {$result=Invoke-Journal 'observe' $before ([string]$state.pending_attempt)}
 else {
     # Persist before input. A crash, timeout or uncertain result leaves this unresolved.

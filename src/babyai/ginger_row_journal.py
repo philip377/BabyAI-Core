@@ -47,7 +47,10 @@ class RowNavigationJournal:
     def __init__(self, directory):
         self.directory = Path(directory)
 
-    def create(self, report):
+    def create(self, report, *, require_read=False):
+        if type(require_read) is not bool:
+            raise PriceQueueError('Invalid row reading policy')
+        report = dict(report, require_read=require_read)
         snapshot(report)
         self.directory.mkdir(parents=True, exist_ok=True)
         if any(self.directory.iterdir()):
@@ -55,39 +58,56 @@ class RowNavigationJournal:
         PriceVisitQueue._write(self.directory / 'plan.json', report)
 
     def _state(self):
-        digest, selected, count = snapshot(PriceVisitQueue._read(self.directory / 'plan.json'))
+        plan = PriceVisitQueue._read(self.directory / 'plan.json')
+        digest, selected, count = snapshot(plan)
+        require_read = plan.get('require_read', False)
+        if type(require_read) is not bool:
+            raise PriceQueueError('Invalid row reading policy')
         names = sorted(p.name for p in self.directory.iterdir() if p.name != 'plan.json')
-        if len(names) > 1000:
+        if len(names) > 1500:
             raise PriceQueueError('Too many row events')
-        pending = None
+        pending, sampled = None, False
         for index, name in enumerate(names, 1):
             if name != f'{index:06d}.json':
                 raise PriceQueueError('Missing or unknown row event')
             event = PriceVisitQueue._read(self.directory / name)
+            if isinstance(event, dict) and event.get('kind') == 'sample':
+                if (set(event) != {'kind', 'target', 'digest', 'sample_sha', 'candidate_count'}
+                        or pending is not None or sampled
+                        or type(event['target']) is not int or event['target'] != selected
+                        or event['digest'] != digest or type(event['candidate_count']) is not int
+                        or not 0 <= event['candidate_count'] <= 256
+                        or not isinstance(event['sample_sha'], str)
+                        or not re.fullmatch('[0-9a-f]{64}', event['sample_sha'])):
+                    raise PriceQueueError('Invalid row sample receipt')
+                sampled = True
+                continue
             if (not isinstance(event, dict) or set(event) != {'kind', 'attempt', 'target', 'digest'}
                     or not isinstance(event['attempt'], str) or not re.fullmatch('[0-9a-f]{32}', event['attempt'])
                     or type(event['target']) is not int or event['target'] != selected + 1
                     or event['target'] > count or event['digest'] != digest):
                 raise PriceQueueError('Invalid row event')
-            if event['kind'] == 'begin' and pending is None:
+            if event['kind'] == 'begin' and pending is None and (sampled or not require_read):
                 pending = event['attempt']
             elif event['kind'] == 'observed' and pending == event['attempt']:
                 selected += 1
-                pending = None
+                pending, sampled = None, False
             else:
                 raise PriceQueueError('Invalid row transition')
-        return digest, selected, count, pending, len(names)
+        return digest, selected, count, pending, len(names), sampled, require_read
 
     def status(self):
-        _, selected, count, pending, _ = self._state()
-        return {'selected_position': selected, 'observed_rows': count, 'pending_attempt': pending,
+        _, selected, count, pending, _, sampled, require_read = self._state()
+        return {'selected_sampled': sampled, 'requires_read': require_read, 'selected_position': selected, 'observed_rows': count, 'pending_attempt': pending,
                 'next_position': selected + 1 if selected < count else None,
                 'can_write': False, 'products_processed': False, 'candidate_freshness_verified': False}
 
     def begin(self, report):
-        digest, selected, count, pending, sequence = self._state()
+        digest, selected, count, pending, sequence, sampled, require_read = self._state()
         if pending is not None:
             raise PriceQueueError('Unresolved row navigation; no input permitted')
+        if require_read and not sampled:
+            raise PriceQueueError('Selected row must be sampled before navigation')
         if snapshot(report) != (digest, selected, count):
             raise PriceQueueError('Product table or selection changed')
         if selected == count:
@@ -98,7 +118,7 @@ class RowNavigationJournal:
         return attempt
 
     def observe(self, attempt, report):
-        digest, selected, count, pending, sequence = self._state()
+        digest, selected, count, pending, sequence, sampled, require_read = self._state()
         if pending is None or attempt != pending:
             raise PriceQueueError('No matching pending row navigation')
         if snapshot(report) != (digest, selected + 1, count):
@@ -107,12 +127,47 @@ class RowNavigationJournal:
             {'kind': 'observed', 'attempt': attempt, 'target': selected + 1, 'digest': digest})
 
 
+    def record_sample(self, report):
+        digest, selected, count, pending, sequence, sampled, _ = self._state()
+        if pending is not None or sampled:
+            raise PriceQueueError('Pending navigation or already sampled row')
+        try:
+            if snapshot(report) != (digest, selected, count):
+                raise PriceQueueError('Product table changed before sampling')
+            reading = report['candidate_snapshot']
+            source = reading['Source']
+            expected = report['rows'][selected - 1]['Observation']
+            keys = ('TableHandle', 'ObservedRowPosition', 'DocumentNumber', 'Supplier', 'Title', 'PriceText', 'LinkedProductText')
+            if (any(source[k] != expected[k] or type(source[k]) is not type(expected[k]) for k in keys)
+                    or source['IdentityVerified'] is not False or source['CanMatch'] is not False
+                    or reading['IdentityVerified'] is not False or reading['CanMatch'] is not False
+                    or reading['SearchCompletionVerified'] is not False):
+                raise PriceQueueError('Sample source mismatch or unsupported freshness claim')
+            candidates = reading['Candidates']
+            if not isinstance(candidates, list) or len(candidates) > 256:
+                raise PriceQueueError('Invalid candidate count')
+            for position, candidate in enumerate(candidates, 1):
+                if (type(candidate['ObservedPosition']) is not int or candidate['ObservedPosition'] != position
+                        or candidate['IdentityVerified'] is not False or type(candidate['Selected']) is not bool
+                        or not isinstance(candidate['Title'], str) or not candidate['Title'].strip()
+                        or len(candidate['Title']) > 512 or not isinstance(candidate['DescriptionText'], str)
+                        or len(candidate['DescriptionText']) > 2048):
+                    raise PriceQueueError('Invalid candidate sample')
+        except (KeyError, TypeError) as exc:
+            raise PriceQueueError('Incomplete row sample') from exc
+        sample_sha = hashlib.sha256(json.dumps(reading, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+        PriceVisitQueue._write(self.directory / f'{sequence+1:06d}.json',
+            {'kind': 'sample', 'target': selected, 'digest': digest,
+             'sample_sha': sample_sha, 'candidate_count': len(candidates)})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['create', 'status', 'begin', 'observe'])
+    parser.add_argument('action', choices=['create', 'status', 'begin', 'observe', 'sample'])
     parser.add_argument('--directory', required=True, type=Path)
     parser.add_argument('--report', type=Path)
     parser.add_argument('--attempt')
+    parser.add_argument('--require-read', action='store_true')
     args = parser.parse_args()
     journal = RowNavigationJournal(args.directory)
     try:
@@ -122,10 +177,12 @@ def main():
                 parser.error('--report required')
             report = PriceVisitQueue._read(args.report)
         if args.action == 'create':
-            journal.create(report)
+            journal.create(report, require_read=args.require_read)
         elif args.action == 'begin':
             print(json.dumps({'attempt': journal.begin(report), 'can_write': False}))
             return
+        elif args.action == 'sample':
+            journal.record_sample(report)
         elif args.action == 'observe':
             journal.observe(args.attempt, report)
         print(json.dumps(journal.status()))

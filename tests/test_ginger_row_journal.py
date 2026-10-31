@@ -118,3 +118,75 @@ def test_windows_row_controller_guards_before_ui(tmp_path):
     assert result.returncode != 0
     assert 'Unresolved row navigation; no input permitted' in result.stderr
     assert journal.status()['pending_attempt'] == token
+
+
+def sample_report(selected=1):
+    import copy
+    fresh = report(selected)
+    fresh['candidate_snapshot'] = {
+        'Source': copy.deepcopy(fresh['rows'][selected - 1]['Observation']),
+        'IdentityVerified': False, 'CanMatch': False, 'SearchCompletionVerified': False,
+        'Candidates': [{'ObservedPosition': 1, 'Title': 'Candidate', 'DescriptionText': 'Price: 10',
+                        'Selected': False, 'IdentityVerified': False}]}
+    return fresh
+
+
+def test_required_sample_survives_restart(tmp_path):
+    journal = RowNavigationJournal(tmp_path)
+    journal.create(report(), require_read=True)
+    with pytest.raises(PriceQueueError): journal.begin(report())
+    journal.record_sample(sample_report())
+    resumed = RowNavigationJournal(tmp_path)
+    assert resumed.status()['selected_sampled'] is True
+    assert resumed.status()['candidate_freshness_verified'] is False
+    with pytest.raises(PriceQueueError): resumed.record_sample(sample_report())
+    token = resumed.begin(report())
+    with pytest.raises(PriceQueueError): resumed.record_sample(sample_report(2))
+    resumed.observe(token, report(2))
+    assert resumed.status()['selected_sampled'] is False
+    with pytest.raises(PriceQueueError): resumed.begin(report(2))
+    resumed.record_sample(sample_report(2))
+    assert resumed.status()['selected_sampled'] is True
+
+
+@pytest.mark.parametrize('defect', ['source', 'price', 'bool_position', 'freshness', 'permission', 'order', 'title', 'count', 'missing'])
+def test_invalid_sample_cannot_unlock_navigation(tmp_path, defect):
+    journal = RowNavigationJournal(tmp_path)
+    journal.create(report(), require_read=True)
+    fresh = sample_report()
+    reading = fresh['candidate_snapshot']
+    if defect == 'source': reading['Source']['ObservedRowPosition'] = 2
+    elif defect == 'price': reading['Source']['PriceText'] = '11'
+    elif defect == 'bool_position': reading['Source']['ObservedRowPosition'] = True
+    elif defect == 'freshness': reading['SearchCompletionVerified'] = True
+    elif defect == 'permission': reading['CanMatch'] = True
+    elif defect == 'order': reading['Candidates'][0]['ObservedPosition'] = 2
+    elif defect == 'title': reading['Candidates'][0]['Title'] = ''
+    elif defect == 'count': reading['Candidates'] *= 257
+    else: del reading['Source']
+    with pytest.raises(PriceQueueError): journal.record_sample(fresh)
+    assert journal.status()['selected_sampled'] is False
+    with pytest.raises(PriceQueueError): journal.begin(report())
+
+
+def test_legacy_policy_not_upgraded_and_empty_sample_is_not_completion(tmp_path):
+    journal = RowNavigationJournal(tmp_path)
+    journal.create(report())
+    plan = tmp_path / 'plan.json'
+    data = json.loads(plan.read_text()); del data['require_read']
+    plan.write_text(json.dumps(data))
+    assert journal.status()['requires_read'] is False
+    fresh = sample_report(); fresh['candidate_snapshot']['Candidates'] = []
+    journal.record_sample(fresh)
+    assert journal.status()['products_processed'] is False
+    assert journal.status()['candidate_freshness_verified'] is False
+
+
+def test_corrupt_sample_receipt_blocks_replay(tmp_path):
+    journal = RowNavigationJournal(tmp_path)
+    journal.create(report(), require_read=True)
+    journal.record_sample(sample_report())
+    event = tmp_path / '000001.json'
+    data = json.loads(event.read_text()); data['sample_sha'] = 'partial'
+    event.write_text(json.dumps(data))
+    with pytest.raises(PriceQueueError): journal.status()
