@@ -71,7 +71,18 @@ function Read-QueuedDocument {
         throw 'Document changed after tab navigation'
     }
     [GingerMenuAccess]::OpenDocumentMatching($window,$ownerId,$current,$true)
-    $snapshot=[GingerMenuAccess]::ReadMatchingCandidates($window,$ownerId)
+    $readWait=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        try {
+            $snapshot=[GingerMenuAccess]::ReadMatchingCandidates($window,$ownerId)
+            break
+        } catch {
+            # Only retry observation when the window explicitly reports busy.
+            # Structural/identity failures stop immediately. No input is repeated.
+            if($_.Exception.GetBaseException() -isnot [GingerUiBusyException] -or $readWait.Elapsed.TotalSeconds -ge 10){throw}
+            Start-Sleep -Milliseconds 200
+        }
+    } while($true)
     $readingPath=Join-Path $diagnostics 'selected-position-and-candidates.json'
     $snapshot | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $readingPath -Encoding UTF8
     return (Invoke-Queue 'read' $readingPath ([string]$state.pending_attempt))

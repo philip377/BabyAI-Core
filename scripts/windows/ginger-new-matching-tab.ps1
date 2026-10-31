@@ -10,6 +10,25 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -ReferencedAssemblies @([Drawing.Bitmap].Assembly.Location) -TypeDefinition @'
 using System.Drawing;
 public static class GingerTabContrast {
+    // Trim empty tab background for OCR only; click geometry remains native.
+    public static Bitmap TrimInk(Bitmap source) {
+        int left=source.Width, top=source.Height, right=-1, bottom=-1;
+        for(int y=6;y<source.Height-6;y++) for(int x=6;x<source.Width-6;x++) {
+            Color c=source.GetPixel(x,y);
+            if(c.R<100 && c.G<100 && c.B<100) {
+                left=System.Math.Min(left,x); right=System.Math.Max(right,x);
+                top=System.Math.Min(top,y); bottom=System.Math.Max(bottom,y);
+            }
+        }
+        if(right<left || bottom<top) throw new System.InvalidOperationException("No tab text pixels");
+        Bitmap result=new Bitmap(right-left+25,bottom-top+25);
+        using(Graphics g=Graphics.FromImage(result)) {
+            g.Clear(Color.White);
+            g.DrawImage(source,new Rectangle(12,12,right-left+1,bottom-top+1),
+                new Rectangle(left,top,right-left+1,bottom-top+1),GraphicsUnit.Pixel);
+        }
+        return result;
+    }
     public static Bitmap LightText(Bitmap source) {
         Bitmap result=new Bitmap(source.Width,source.Height);
         for(int y=0;y<source.Height;y++) for(int x=0;x<source.Width;x++) {
@@ -54,11 +73,16 @@ function Read-TabFrame($Tab,[string]$Name) {
             }
         }
         $ratio=$blue/[double][Math]::Max(1,$samples)
-        $ocrPath=$path
+        $ocrSource=$scaled
+        $contrast=$null
         if($ratio -ge 0.5) {
             $contrast=[GingerTabContrast]::LightText($scaled)
-            try {$ocrPath=Join-Path $directory ($Name+'-ocr.png'); $contrast.Save($ocrPath,[Drawing.Imaging.ImageFormat]::Png)} finally {$contrast.Dispose()}
+            $ocrSource=$contrast
         }
+        try {
+            $trimmed=[GingerTabContrast]::TrimInk($ocrSource)
+            try {$ocrPath=Join-Path $directory ($Name+'-ocr.png'); $trimmed.Save($ocrPath,[Drawing.Imaging.ImageFormat]::Png)} finally {$trimmed.Dispose()}
+        } finally {if($null -ne $contrast){$contrast.Dispose()}}
         [pscustomobject]@{path=$path;ocr_path=$ocrPath;hash=$digest;blue_ratio=$ratio}
     } finally {$memory.Dispose();$drawing.Dispose();$scaled.Dispose();$graphics.Dispose();$bmp.Dispose()}
 }
@@ -78,6 +102,7 @@ for($i=0;$i -lt $candidates.Count;$i++) {
     $label=([GingerMenuAccess]::Normalize(($texts -join ' ')) -replace '\s+',' ').Replace('—','-').Replace('–','-')
     $readings+= [pscustomobject]@{tab=$candidates[$i];frame=$frame;label=$label;index=$i}
 }
+$readings | Select-Object index,label,@{n='blue_ratio';e={$_.frame.blue_ratio}} | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $directory 'labels.json') -Encoding UTF8
 $selected=@($readings | Where-Object label -eq 'сопоставление - новые')
 if($selected.Count -ne 1){throw 'Exact new matching tab label not uniquely recognized; no click'}
 Require-PriceDocument
