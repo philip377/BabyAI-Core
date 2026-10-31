@@ -32,7 +32,7 @@ jobs:
       - name: Test persistent Ginger queue controller guards
         # Uses synthetic files and rejects before live UI access.
         shell: pwsh
-        run: python -m pytest tests/test_ginger_price_queue.py -q
+        run: python -m pytest tests/test_ginger_price_queue.py tests/test_ginger_row_journal.py -q
       - name: Verify desktop bridge
         shell: pwsh
         env:
