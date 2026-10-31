@@ -242,6 +242,42 @@ try {
     if($observed.Title -ne 'Synthetic perfume 100 ml' -or $observed.PriceText -ne '123,45' -or
        $observed.LinkedProductText -ne '<не указано>' -or $observed.ObservedRowPosition -ne 1 -or
        $observed.IdentityVerified -or $observed.CanMatch){throw 'Product observation incorrectly identified or authorized'}
+    foreach($i in @(1,2)) {
+        $grid.Rows[$i].Cells[0].Value='Same displayed product'
+        $grid.Rows[$i].Cells[1].Value='125,00'
+        $grid.Rows[$i].Cells[2].Value='<none>'
+    }
+    $rows=[GingerMenuAccess]::ReadProductRows($root,$ownerId)
+    $denied=$false
+    try{[void][GingerMenuAccess]::SelectNextProduct($root,$ownerId,$rows,$false)}catch{$denied=$true}
+    if(-not $denied -or -not $grid.Rows[0].Cells[0].Selected){throw 'Unconfirmed product navigation accepted'}
+    $grid.CurrentCell=$grid.Rows[0].Cells[0]
+    $wasReadOnly=$grid.ReadOnly
+    $grid.ReadOnly=$false
+    if(-not $grid.BeginEdit($true)){throw 'Fixture could not enter edit mode'}
+    [Windows.Forms.Application]::DoEvents()
+    $denied=$false
+    try{[void][GingerMenuAccess]::SelectNextProduct($root,$ownerId,$rows,$true)}catch{$denied=$true}
+    if(-not $denied -or -not $grid.IsCurrentCellInEditMode){throw 'Product navigation committed active edit'}
+    [void]$grid.CancelEdit()
+    $grid.ReadOnly=$wasReadOnly
+    $saved=$grid.Rows[2].Cells[1].Value
+    $grid.Rows[2].Cells[1].Value='Changed unselected row'
+    $denied=$false
+    try{[void][GingerMenuAccess]::SelectNextProduct($root,$ownerId,$rows,$true)}catch{$denied=$true}
+    if(-not $denied -or -not $grid.Rows[0].Cells[0].Selected){throw 'Stale table allowed product navigation'}
+    $grid.Rows[2].Cells[1].Value=$saved
+    $next=[GingerMenuAccess]::SelectNextProduct($root,$ownerId,$rows,$true)
+    if($next.ObservedRowPosition -ne 2 -or $next.CanMatch -or $next.IdentityVerified){throw 'Next row incorrectly selected or authorized'}
+    $rows=[GingerMenuAccess]::ReadProductRows($root,$ownerId)
+    $next=[GingerMenuAccess]::SelectNextProduct($root,$ownerId,$rows,$true)
+    if($next.ObservedRowPosition -ne 3){throw 'Product order lost'}
+    $rows=[GingerMenuAccess]::ReadProductRows($root,$ownerId)
+    $end=[GingerMenuAccess]::SelectNextProduct($root,$ownerId,$rows,$true)
+    if($null -ne $end -or -not $grid.Rows[2].Cells[0].Selected){throw 'Product queue wrapped'}
+    $grid.ClearSelection()
+    $grid.Rows[0].Cells[0].Selected=$true
+    Write-Output 'PASS: next product selection; confirmation, full-table freshness, order, no wrap and no matching permission'
     $candidatesPanel=New-Object Windows.Forms.ListView
     $candidatesPanel.View='Details'
     [void]$candidatesPanel.Columns.Add('Товар')

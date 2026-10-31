@@ -1,7 +1,7 @@
 ﻿# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
 [CmdletBinding()]
 param(
-    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice', 'ReadSelectedProduct', 'ReadMatchingCandidates', 'SelectNextIncluded')][string]$Mode = 'Inspect',
+    [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice', 'ReadSelectedProduct', 'ReadMatchingCandidates', 'SelectNextIncluded', 'SelectNextProduct')][string]$Mode = 'Inspect',
     [switch]$ConfirmNavigation,
     [string]$AfterPriceNumber
 )
@@ -67,6 +67,11 @@ public sealed class GingerCandidateSnapshot {
     public long PanelHandle;
     public GingerCatalogueCandidate[] Candidates;
     public bool IdentityVerified=false, CanMatch=false, SearchCompletionVerified=false;
+}
+public sealed class GingerProductRow {
+    public GingerSelectedProduct Observation;
+    public bool Selected;
+    internal IAccessible Target;
 }
 public sealed class GingerSelectedProduct {
     public long TableHandle;
@@ -597,7 +602,7 @@ public static class GingerMenuAccess {
         if(SendInput(2,input,Marshal.SizeOf(typeof(Input)))!=2) throw new InvalidOperationException("Tab click outcome unknown; no retry");
     }
     // These are UI observations only. Position and displayed names are never product IDs.
-    private static GingerSelectedProduct ReadSelectedProductOnce(IntPtr root,uint process) {
+    private static GingerSelectedProduct ReadSelectedProductOnce(IntPtr root,uint process, List<GingerProductRow> all=null) {
         GingerPriceDocument document=ReadPriceDocument(root,process);
         GingerSelectedProduct result=null;
         int tables=0;
@@ -635,6 +640,14 @@ public static class GingerMenuAccess {
                     if(accessible==null) throw new InvalidOperationException("Unreadable product cell");
                     selected |= (Convert.ToInt32(accessible.get_accState(0)) & 2)!=0;
                 }
+                if(all!=null) all.Add(new GingerProductRow {
+                    Observation=new GingerSelectedProduct {
+                        TableHandle=hwnd.ToInt64(),ObservedRowPosition=position,
+                        DocumentNumber=document.Number,Supplier=document.Supplier,
+                        Title=CellValue(nameCell),PriceText=CellValue(cells[price] as IAccessible),
+                        LinkedProductText=CellValue(cells[linked] as IAccessible)
+                    }, Selected=selected, Target=nameCell
+                });
                 if(!selected) continue;
                 if(result!=null) throw new InvalidOperationException("Multiple selected products");
                 result=new GingerSelectedProduct {
@@ -664,6 +677,53 @@ public static class GingerMenuAccess {
            first.DocumentNumber!=second.DocumentNumber || first.Supplier!=second.Supplier ||
            first.Title!=second.Title || first.PriceText!=second.PriceText || first.LinkedProductText!=second.LinkedProductText)
             throw new InvalidOperationException("Selected product changed between observations");
+    }
+    private static GingerProductRow[] ReadProductRowsOnce(IntPtr root,uint process) {
+        List<GingerProductRow> rows=new List<GingerProductRow>();
+        ReadSelectedProductOnce(root,process,rows);
+        return rows.ToArray();
+    }
+    public static void RequireSameProductRows(GingerProductRow[] first,GingerProductRow[] second,bool selection) {
+        if(first==null || second==null || first.Length!=second.Length)
+            throw new InvalidOperationException("Product row count changed");
+        for(int i=0;i<first.Length;i++) {
+            RequireSameSelectedProduct(first[i].Observation,second[i].Observation);
+            if(selection && first[i].Selected!=second[i].Selected)
+                throw new InvalidOperationException("Product selection changed");
+        }
+    }
+    public static GingerProductRow[] ReadProductRows(IntPtr root,uint process) {
+        GingerProductRow[] first=ReadProductRowsOnce(root,process),second=ReadProductRowsOnce(root,process);
+        RequireSameProductRows(first,second,true);
+        return second;
+    }
+    // One explicit navigation step only. It does not certify candidate freshness.
+    public static GingerSelectedProduct SelectNextProduct(IntPtr root,uint process,GingerProductRow[] expected,bool confirmed) {
+        if(!confirmed) throw new InvalidOperationException("Navigation confirmation required");
+        GingerProductRow[] fresh=ReadProductRows(root,process);
+        RequireSameProductRows(expected,fresh,true);
+        int current=Array.FindIndex(fresh,r=>r.Selected);
+        if(current<0 || Array.FindAll(fresh,r=>r.Selected).Length!=1)
+            throw new InvalidOperationException("Exactly one selected product required");
+        if(current==fresh.Length-1) return null; // No wrap; not proof of complete processing.
+        foreach(IntPtr child in Windows(new IntPtr(fresh[current].Observation.TableHandle),process)) {
+            StringBuilder cls=new StringBuilder(256); GetClassNameW(child,cls,cls.Capacity);
+            if(IsWindowVisible(child) && cls.ToString().IndexOf("EDIT",StringComparison.OrdinalIgnoreCase)>=0)
+                throw new InvalidOperationException("Finish the active table edit before navigation");
+        }
+        GingerProductRow[] last=ReadProductRowsOnce(root,process);
+        RequireSameProductRows(fresh,last,true);
+        GingerProductRow target=last[current+1];
+        int state=Convert.ToInt32(target.Target.get_accState(0));
+        if((state & (1|0x8000|0x10000))!=0 || (state & 0x200000)==0)
+            throw new InvalidOperationException("Next product is not visibly selectable");
+        RequireWindow(root,process);
+        target.Target.accSelect(3,0);
+        GingerProductRow[] after=ReadProductRows(root,process);
+        RequireSameProductRows(fresh,after,false);
+        if(!after[current+1].Selected || Array.FindAll(after,r=>r.Selected).Length!=1)
+            throw new InvalidOperationException("Next product selection unverified; no automatic retry");
+        return after[current+1].Observation;
     }
     private static long ListCount(IntPtr hwnd,uint process) {
         uint owner; IntPtr count;
@@ -773,6 +833,12 @@ $prices = $null
 $selectedProduct = $null
 $candidateSnapshot = $null
 if ($Mode -eq 'ReadMatchingCandidates') { $candidateSnapshot = [GingerMenuAccess]::ReadMatchingCandidates($window, $processId) }
+if ($Mode -eq 'SelectNextProduct') {
+    if (-not $ConfirmNavigation) { throw 'Navigation confirmation required' }
+    $beforeProducts=[GingerMenuAccess]::ReadProductRows($window,$processId)
+    $selectedProduct=[GingerMenuAccess]::SelectNextProduct($window,$processId,$beforeProducts,$true)
+    $actions.Add('Next source row observed; candidate freshness and processing completion not established')
+}
 if ($Mode -eq 'ReadSelectedProduct') { $selectedProduct = [GingerMenuAccess]::ReadSelectedProduct($window, $processId) }
 $matchingStatus = 'not_requested'
 $matchingView = $null
