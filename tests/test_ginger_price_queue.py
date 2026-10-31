@@ -38,7 +38,7 @@ def test_reopen_keeps_pending_and_order_without_claiming_business_completion(que
     resumed.observe(attempt, document(second.number))
     assert resumed.next(report()) is None
     assert resumed.status() == {'planned_documents': 2, 'observed_documents': 2,
-        'pending_attempt': None, 'navigation_exhausted': True,
+        'sampled_documents': 0, 'pending_document': None, 'pending_attempt': None, 'awaiting_read': False, 'requires_read': False, 'navigation_exhausted': True,
         'products_processed': False, 'can_write': False}
     with pytest.raises(PriceQueueError):
         resumed.begin(report())
@@ -181,3 +181,90 @@ def test_windows_controller_blocks_missing_confirmation_and_pending_attempt(queu
     assert 'Previous navigation unresolved; no input permitted' in result.stderr
     assert queue.status()['pending_attempt'] == attempt
     assert queue.status()['observed_documents'] == 0
+
+
+def sample(number='1'):
+    return {'IdentityVerified': False, 'CanMatch': False, 'SearchCompletionVerified': False,
+            'Source': {'DocumentNumber': number, 'Supplier': 'Same supplier', 'Title': 'Perfume',
+                       'PriceText': '12.34', 'LinkedProductText': '<none>', 'ObservedRowPosition': 1,
+                       'IdentityVerified': False, 'CanMatch': False},
+            'Candidates': [{'ObservedPosition': 1, 'Title': 'Perfume tester',
+                            'DescriptionText': 'Price: 0', 'Selected': False, 'IdentityVerified': False}]}
+
+
+def test_required_read_survives_restart_and_blocks_next(tmp_path):
+    queue = PriceVisitQueue(tmp_path / 'read-plan')
+    queue.create(report(), require_read=True)
+    attempt, _ = queue.begin(report())
+    with pytest.raises(PriceQueueError): queue.record_read(attempt, sample())
+    queue.observe(attempt, document('1'))
+    resumed = PriceVisitQueue(queue.directory)
+    assert resumed.status()['observed_documents'] == 1
+    assert resumed.status()['sampled_documents'] == 0
+    assert resumed.status()['awaiting_read'] is True
+    with pytest.raises(PriceQueueError): resumed.begin(report())
+    with pytest.raises(PriceQueueError): resumed.observe(attempt, document('1'))
+    resumed.record_read(attempt, sample())
+    assert resumed.status()['sampled_documents'] == 1
+    assert resumed.status()['pending_attempt'] is None
+    assert resumed.status()['products_processed'] is False
+    assert resumed.next(report()).number == '3'
+    with pytest.raises(PriceQueueError): resumed.record_read(attempt, sample())
+
+
+@pytest.mark.parametrize('defect', ['wrong_document', 'permission', 'search_ready', 'missing', 'order', 'position', 'wrong_attempt'])
+def test_invalid_read_keeps_queue_blocked(tmp_path, defect):
+    queue = PriceVisitQueue(tmp_path / defect)
+    queue.create(report(), require_read=True)
+    attempt, _ = queue.begin(report())
+    queue.observe(attempt, document('1'))
+    reading = sample()
+    token = attempt
+    if defect == 'wrong_document': reading['Source']['DocumentNumber'] = '3'
+    elif defect == 'permission': reading['CanMatch'] = True
+    elif defect == 'search_ready': reading['SearchCompletionVerified'] = True
+    elif defect == 'missing': del reading['Source']['PriceText']
+    elif defect == 'order': reading['Candidates'][0]['ObservedPosition'] = 2
+    elif defect == 'position': reading['Source']['ObservedRowPosition'] = True
+    else: token = '0' * 32
+    with pytest.raises(PriceQueueError): queue.record_read(token, reading)
+    assert queue.status()['awaiting_read'] is True
+    assert queue.status()['pending_attempt'] == attempt
+
+
+def test_legacy_plan_is_not_silently_upgraded(queue):
+    plan = queue.directory / 'plan.json'
+    data = json.loads(plan.read_text())
+    del data['require_read']
+    plan.write_text(json.dumps(data))
+    attempt, _ = queue.begin(report())
+    queue.observe(attempt, document('1'))
+    assert queue.status()['requires_read'] is False
+    assert queue.status()['sampled_documents'] == 0
+    assert queue.next(report()).number == '3'
+
+
+def test_damaged_read_receipt_blocks_resume(tmp_path):
+    queue = PriceVisitQueue(tmp_path / 'damaged-read')
+    queue.create(report(), require_read=True)
+    attempt, _ = queue.begin(report())
+    queue.observe(attempt, document('1'))
+    queue.record_read(attempt, sample())
+    receipt = queue.directory / '000003.json'
+    data = json.loads(receipt.read_text())
+    data['sha256'] = 'incomplete'
+    receipt.write_text(json.dumps(data))
+    with pytest.raises(PriceQueueError): queue.next(report())
+
+
+def test_empty_candidates_are_only_a_sample(tmp_path):
+    queue = PriceVisitQueue(tmp_path / 'empty-reading')
+    queue.create(report(), require_read=True)
+    attempt, _ = queue.begin(report())
+    queue.observe(attempt, document('1'))
+    reading = sample()
+    reading['Candidates'] = []
+    queue.record_read(attempt, reading)
+    assert queue.status()['sampled_documents'] == 1
+    assert queue.status()['products_processed'] is False
+    assert queue.status()['can_write'] is False

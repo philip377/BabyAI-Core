@@ -14,7 +14,7 @@ public static class GingerTabContrast {
         Bitmap result=new Bitmap(source.Width,source.Height);
         for(int y=0;y<source.Height;y++) for(int x=0;x<source.Width;x++) {
             Color c=source.GetPixel(x,y);
-            result.SetPixel(x,y,c.R>210 && c.G>210 && c.B>210 ? Color.Black : Color.White);
+            result.SetPixel(x,y,c.R>150 && c.G>150 && c.B>150 ? Color.Black : Color.White);
         }
         return result;
     }
