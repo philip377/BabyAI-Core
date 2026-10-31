@@ -268,3 +268,26 @@ def test_empty_candidates_are_only_a_sample(tmp_path):
     assert queue.status()['sampled_documents'] == 1
     assert queue.status()['products_processed'] is False
     assert queue.status()['can_write'] is False
+
+
+def test_windows_exhausted_controller_returns_without_ginger(tmp_path):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    if sys.platform != 'win32':
+        pytest.skip('Windows PowerShell controller')
+    queue = PriceVisitQueue(tmp_path / 'finished')
+    fresh = report()
+    fresh['prices']['Rows'] = []
+    queue.create(fresh, require_read=True)
+    shell = Path(os.environ['WINDIR']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    script = Path(__file__).resolve().parents[1] / 'scripts/windows/ginger-queue-step.ps1'
+    result = subprocess.run([str(shell), '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', str(script), '-Operation', 'Step', '-QueueDirectory', str(queue.directory),
+        '-ConfirmNavigation'], capture_output=True, encoding='utf-8', cwd=tmp_path, timeout=15)
+    assert result.returncode == 0, result.stderr
+    status = json.loads(result.stdout)
+    assert status['navigation_exhausted'] is True
+    assert status['products_processed'] is False
+    assert status['can_write'] is False

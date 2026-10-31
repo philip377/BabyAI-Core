@@ -39,6 +39,7 @@ if($Operation -in @('Step','ReadCurrent') -and -not $ConfirmNavigation){throw 'N
 if($Operation -in @('Step','ReadCurrent')) {
     $status=Invoke-Queue 'status'
     if($Operation -eq 'Step' -and $null -ne $status.pending_attempt){throw 'Previous navigation unresolved; no input permitted'}
+    if($Operation -eq 'Step' -and $status.navigation_exhausted){$status | ConvertTo-Json -Depth 6; return}
     if($Operation -eq 'ReadCurrent' -and -not $status.awaiting_read){throw 'No opened document awaiting reading'}
 }
 $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'ginger-navigation.ps1'))
@@ -82,7 +83,20 @@ if($Operation -eq 'ReadCurrent') {
     [pscustomobject]@{status=$result; diagnostics=$diagnostics; products_processed=$false; can_write=$false} | ConvertTo-Json -Depth 6
     return
 }
-# A fresh list must already be visible. This controller never guesses a return action.
+# Use the existing guarded semantic menu driver, never a guessed Back/Close click.
+# Pending intent and exhausted-plan guards above run before any UI access.
+if($Operation -eq 'Step' -and -not [GingerMenuAccess]::PricesVisible($window,$ownerId)) {
+    $powershell=Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    $navigation=Join-Path $PSScriptRoot 'ginger-navigation.ps1'
+    $returnRaw=& $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $navigation -Mode OpenPrices -ConfirmNavigation 2> (Join-Path $diagnostics 'return-error.txt')
+    if($LASTEXITCODE -ne 0){throw 'Price list return failed; no automatic retry'}
+    $returned=($returnRaw -join "`n") | ConvertFrom-Json
+    $returned | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $diagnostics 'return-to-prices.json') -Encoding UTF8
+    if($returned.process_id -ne $ownerId -or $returned.prices_visible -ne $true -or $returned.catalogue_changed -ne $false) {
+        throw 'Price list return not verified'
+    }
+}
+# Re-read the complete list and validate it against the durable plan before selecting.
 $prices=[GingerMenuAccess]::ReadPrices($window,$ownerId)
 $report=[pscustomobject]@{process_id=$ownerId; catalogue_changed=$false; row_identity_verified=$false; prices=$prices}
 
