@@ -1,7 +1,7 @@
 ﻿# Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
-    [ValidateSet('Initialize','Step','Observe','Read','Status')][string]$Operation='Status',
+    [ValidateSet('Initialize','Step','Observe','Read','InspectSearch','Status')][string]$Operation='Status',
     [Parameter(Mandatory=$true)][string]$QueueDirectory,
     [switch]$ConfirmNavigation
 )
@@ -24,6 +24,7 @@ if($Operation -ne 'Initialize') {
     $state=Invoke-Journal 'status'
     if($Operation -eq 'Step' -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; no input permitted'}
     if($Operation -eq 'Step' -and $state.requires_read -and -not $state.selected_sampled){throw 'Selected row must be sampled before navigation'}
+    if($Operation -eq 'InspectSearch' -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; observation blocked'}
     if($Operation -eq 'Read' -and ($null -ne $state.pending_attempt -or $state.selected_sampled)){throw 'Pending navigation or already sampled row'}
     if($Operation -eq 'Step' -and $null -eq $state.next_position){$state | ConvertTo-Json; return}
     if($Operation -eq 'Observe' -and $null -eq $state.pending_attempt){throw 'No pending row observation'}
@@ -50,6 +51,17 @@ function Save-Rows($Rows,[string]$Name) {
 $rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
 $before=Save-Rows $rows 'before.json'
 if($Operation -eq 'Initialize') {$result=Invoke-Journal 'create' $before}
+elseif($Operation -eq 'InspectSearch') {
+    $context=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
+    $afterRows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
+    [GingerMenuAccess]::RequireSameProductRows($rows,$afterRows,$true)
+    $selected=@($afterRows | Where-Object Selected)
+    if($selected.Count -ne 1){throw 'Exactly one selected product required'}
+    [GingerMenuAccess]::RequireSameSelectedProduct($selected[0].Observation,$context.Products.Source)
+    $path=Join-Path $diagnostics 'search-context.json'
+    $context | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding UTF8
+    $result=[pscustomobject]@{observed_position=$context.Products.Source.ObservedRowPosition;query_words_match_source=$context.QueryWordsMatchSource;search_word_count=@($context.SearchWords.Candidates).Count;candidate_count=@($context.Products.Candidates).Count;candidate_freshness_verified=$false;can_write=$false}
+}
 elseif($Operation -eq 'Read') {
     $reading=[GingerMenuAccess]::ReadMatchingCandidates($window,$ownerId)
     $afterRows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)

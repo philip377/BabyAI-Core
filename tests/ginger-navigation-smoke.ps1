@@ -295,6 +295,46 @@ try {
     if($snapshot.Candidates.Length -ne 2 -or $snapshot.CanMatch -or $snapshot.IdentityVerified -or
        $snapshot.Candidates[0].IdentityVerified -or $snapshot.Candidates[1].Title -notlike '*(тестер)' -or
        -not $snapshot.Candidates[0].DescriptionText.Contains('123.45')){throw 'Candidate text lost or identity invented'}
+    $searchPanel=New-Object Windows.Forms.ListView
+    $searchPanel.View='Details'
+    $searchPanel.CheckBoxes=$true
+    [void]$searchPanel.Columns.Add('Слово'); [void]$searchPanel.Columns.Add('Поиск')
+    $form.Controls.Add($searchPanel)
+    $word=$searchPanel.Items.Add('Synthetic')
+    [void]$word.SubItems.Add('Yes')
+    [Windows.Forms.Application]::DoEvents()
+    $context=[GingerMenuAccess]::ReadSearchContext($root,$ownerId)
+    if($context.SearchWords.Candidates.Length -ne 1 -or $context.SearchWords.Candidates[0].Title -ne 'Synthetic' -or
+       $context.Products.Candidates.Length -ne 2 -or $context.CanMatch -or $context.SearchCompletionVerified){throw 'Search context lost or overclaimed'}
+    if($context.QueryWordsMatchSource){throw 'Partial query declared full source match'}
+    $word.Text='Synthetic perfume 100 ml'
+    $lexical=[GingerMenuAccess]::ReadSearchContext($root,$ownerId)
+    if(-not $lexical.QueryWordsMatchSource -or $lexical.SearchCompletionVerified -or $lexical.CanMatch){throw 'Lexical query evidence lost or overclaimed'}
+    $word.Text='Synthetic'
+    if($context.SearchWords.Candidates[0].Checked -ne $false){throw 'Unchecked search word not observed'}
+    $word.Checked=$true
+    $changedContext=[GingerMenuAccess]::ReadSearchContext($root,$ownerId)
+    if($changedContext.SearchWords.Candidates[0].Checked -ne $true){throw 'Checked search word not observed'}
+    $denied=$false
+    try{[GingerMenuAccess]::RequireSameSearchContext($context,$changedContext)}catch{$denied=$true}
+    if(-not $denied){throw 'Search checkbox change ignored'}
+    $word.Checked=$false
+    $word.Text='Changed query'
+    $changedContext=[GingerMenuAccess]::ReadSearchContext($root,$ownerId)
+    $denied=$false
+    try{[GingerMenuAccess]::RequireSameSearchContext($context,$changedContext)}catch{$denied=$true}
+    if(-not $denied){throw 'Query change accepted with unchanged candidates'}
+    $word.Text='Synthetic'
+    $word.SubItems[1].Text='No'
+    $changedContext=[GingerMenuAccess]::ReadSearchContext($root,$ownerId)
+    $denied=$false
+    try{[GingerMenuAccess]::RequireSameSearchContext($context,$changedContext)}catch{$denied=$true}
+    if(-not $denied){throw 'Search description change ignored'}
+    $searchPanel.Dispose()
+    $denied=$false
+    try{[void][GingerMenuAccess]::ReadSearchContext($root,$ownerId)}catch{$denied=$true}
+    if(-not $denied){throw 'Missing search words panel accepted'}
+    Write-Output 'PASS: search words and candidates; changed query/description and missing panel rejected; no freshness claim'
     $retail.SubItems[1].Text='124.45'
     $changed=[GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)
     $denied=$false

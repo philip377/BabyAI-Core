@@ -60,6 +60,7 @@ public sealed class GingerCatalogueCandidate {
     public int ObservedPosition;
     public string Title, DescriptionText;
     public bool Selected;
+    public bool? Checked; // Only exposed by checkbox rows; never inferred from label text.
     public bool IdentityVerified=false;
 }
 public sealed class GingerCandidateSnapshot {
@@ -67,6 +68,12 @@ public sealed class GingerCandidateSnapshot {
     public long PanelHandle;
     public GingerCatalogueCandidate[] Candidates;
     public bool IdentityVerified=false, CanMatch=false, SearchCompletionVerified=false;
+}
+public sealed class GingerSearchContext {
+    // Raw UI text only; search rows do not prove query completion or product identity.
+    public GingerCandidateSnapshot SearchWords, Products;
+    public bool QueryWordsMatchSource; // Lexical evidence only, not completion or identity.
+    public bool CanMatch=false, SearchCompletionVerified=false;
 }
 public sealed class GingerProductRow {
     public GingerSelectedProduct Observation;
@@ -732,7 +739,7 @@ public static class GingerMenuAccess {
             throw new InvalidOperationException("Candidate count unavailable");
         return count.ToInt64();
     }
-    private static GingerCandidateSnapshot ReadCandidatesOnce(IntPtr root,uint process) {
+    private static GingerCandidateSnapshot ReadCandidatesOnce(IntPtr root,uint process,bool searchWords=false) {
         GingerSelectedProduct source=ReadSelectedProductOnce(root,process);
         GingerCandidateSnapshot result=null;
         foreach(IntPtr hwnd in Windows(root,process)) {
@@ -740,7 +747,7 @@ public static class GingerMenuAccess {
             if(!IsWindowVisible(hwnd) || !cls.ToString().Contains("SysListView32")) continue;
             bool products=false;
             foreach(string[] columns in Headers(hwnd,process))
-                products |= Column(columns,"товар")>=0 && Column(columns,"цена")>=0;
+                products |= searchWords ? Column(columns,"слово")>=0 && Column(columns,"поиск")>=0 : Column(columns,"товар")>=0 && Column(columns,"цена")>=0;
             if(!products) continue;
             if(result!=null) throw new InvalidOperationException("Ambiguous candidate panels");
             long count=ListCount(hwnd,process);
@@ -758,13 +765,16 @@ public static class GingerMenuAccess {
                     throw new InvalidOperationException("Invalid candidate child identifier");
                 int role=Convert.ToInt32(owner.get_accRole(id));
                 if(role==9 && nested!=null) continue; // Native header window, not a product.
-                if(role!=34) throw new InvalidOperationException("Unexpected candidate child role");
+                if(role!=34 && !(searchWords && role==44)) throw new InvalidOperationException("Unexpected candidate child role: "+role);
                 string title=owner.get_accName(id), description=owner.get_accDescription(id)??"";
                 if(String.IsNullOrWhiteSpace(title) || title=="(null)" || title.Length>512 || description.Length>2048)
                     throw new InvalidOperationException("Missing or oversized candidate text");
+                int itemState=Convert.ToInt32(owner.get_accState(id));
+                if(searchWords && role==44 && (itemState & 32)!=0)
+                    throw new InvalidOperationException("Indeterminate search checkbox");
                 candidates.Add(new GingerCatalogueCandidate {
                     ObservedPosition=candidates.Count+1,Title=title,DescriptionText=description,
-                    Selected=(Convert.ToInt32(owner.get_accState(id)) & 2)!=0
+                    Selected=(itemState & 2)!=0, Checked=searchWords && role==44 ? (bool?)((itemState & 16)!=0) : null
                 });
             }
             if(candidates.Count!=count || ListCount(hwnd,process)!=count || list.accChildCount!=childCount)
@@ -784,7 +794,7 @@ public static class GingerMenuAccess {
         for(int i=0;i<first.Candidates.Length;i++) {
             GingerCatalogueCandidate a=first.Candidates[i], b=second.Candidates[i];
             if(a==null || b==null || a.ObservedPosition!=b.ObservedPosition || a.Title!=b.Title ||
-               a.DescriptionText!=b.DescriptionText || a.Selected!=b.Selected)
+               a.DescriptionText!=b.DescriptionText || a.Selected!=b.Selected || a.Checked!=b.Checked)
                 throw new InvalidOperationException("Candidate rows changed between observations");
         }
     }
@@ -792,6 +802,30 @@ public static class GingerMenuAccess {
         GingerCandidateSnapshot first=ReadCandidatesOnce(root,process), second=ReadCandidatesOnce(root,process);
         RequireSameCandidates(first,second);
         return second;
+    }
+    private static GingerSearchContext ReadSearchContextOnce(IntPtr root,uint process) {
+        GingerCandidateSnapshot words=ReadCandidatesOnce(root,process,true);
+        GingerCandidateSnapshot products=ReadCandidatesOnce(root,process);
+        RequireSameSelectedProduct(words.Source,products.Source);
+        if(words.PanelHandle==products.PanelHandle)
+            throw new InvalidOperationException("Search and product panels must be distinct");
+        string[] queryWords=Array.ConvertAll(words.Candidates,row=>row.Title);
+        bool lexical=words.Candidates.Length>0 && Normalize(String.Join(" ",queryWords))==Normalize(products.Source.Title);
+        return new GingerSearchContext {SearchWords=words,Products=products,QueryWordsMatchSource=lexical};
+    }
+    public static void RequireSameSearchContext(GingerSearchContext first,GingerSearchContext second) {
+        if(first==null || second==null) throw new InvalidOperationException("Missing search context");
+        if(first.QueryWordsMatchSource!=second.QueryWordsMatchSource)
+            throw new InvalidOperationException("Query/source relation changed");
+        RequireSameCandidates(first.SearchWords,second.SearchWords);
+        RequireSameCandidates(first.Products,second.Products);
+        RequireSameSelectedProduct(first.SearchWords.Source,first.Products.Source);
+        RequireSameSelectedProduct(second.SearchWords.Source,second.Products.Source);
+    }
+    public static GingerSearchContext ReadSearchContext(IntPtr root,uint process) {
+        GingerSearchContext first=ReadSearchContextOnce(root,process),second=ReadSearchContextOnce(root,process);
+        RequireSameSearchContext(first,second);
+        return second; // A stable query and result list still cannot certify search completion.
     }
     public static GingerMatchingView InspectMatching(IntPtr root,uint process) {
         GingerMatchingView result=new GingerMatchingView();
