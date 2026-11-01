@@ -298,3 +298,39 @@ class GingerSupplierMatcher:
         if top >= 0.90 and top - runner_up >= 0.10:
             return MatchResult("suggested", selected)
         return MatchResult("review", selected)
+
+
+def explain_candidate(position: SupplierPosition, candidate: CatalogPosition) -> dict:
+    """Explain title evidence only. This never grants matching permission or an SKU identity."""
+    if not position.supplier_id.strip() or not position.title.strip() or not candidate.title.strip():
+        raise ValueError("Supplier and both titles are required")
+    source = _features(position, brand_hint=candidate.brand)
+    target = _features(candidate, brand_hint=position.brand)
+    differences, uncertainties = [], []
+    for name, left, right, label in (
+        ("brand", source.brand, target.brand, "Бренд"),
+        ("volume", source.volume_ml, target.volume_ml, "Объём"),
+        ("concentration", source.concentration, target.concentration, "Концентрация"),
+        ("tester", source.is_tester, target.is_tester, "Тестер"),
+        ("barcode", source.barcode, target.barcode, "Штрихкод"),
+    ):
+        if left is None or right is None or left == "" or right == "":
+            uncertainties.append({"field": name, "source": left, "candidate": right,
+                                  "message": label + ": не хватает данных"})
+        elif left != right:
+            differences.append({"field": name, "source": left, "candidate": right,
+                                "message": label + ": значения различаются"})
+    if source.name != target.name:
+        differences.append({"field": "name", "source": source.name, "candidate": target.name,
+                            "message": "Название или вариант товара различаются"})
+    if source.is_set != target.is_set:
+        differences.append({"field": "set", "source": source.is_set, "candidate": target.is_set,
+                            "message": "Признаки набора различаются"})
+    # Supplier abbreviations must be confirmed, never silently translated into perfume types.
+    if re.search(r"\bash\s*/\s*l\b", position.title, re.I):
+        uncertainties.append({"field": "supplier_abbreviation", "message":
+                              "Обозначение ash/l требует подтверждения; его смысл не установлен"})
+    return {"source_title": position.title, "candidate_title": candidate.title,
+            "differences": differences, "uncertainties": uncertainties,
+            "status": "manual_review", "can_match": False, "can_write": False,
+            "identity_verified": False, "search_completion_verified": False}
