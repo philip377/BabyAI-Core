@@ -60,6 +60,11 @@ public sealed class GingerCatalogueCandidate {
     public int ObservedPosition;
     public string Title, DescriptionText;
     public bool Selected;
+    public string DefaultAction;
+    public int StateImage;
+    public int[] Bounds;
+    internal IAccessible ActionOwner;
+    internal object ActionChild;
     public bool? Checked; // Only exposed by checkbox rows; never inferred from label text.
     public bool IdentityVerified=false;
 }
@@ -834,8 +839,15 @@ public static class GingerMenuAccess {
                 int itemState=Convert.ToInt32(owner.get_accState(id));
                 if(searchWords && role==44 && (itemState & 32)!=0)
                     throw new InvalidOperationException("Indeterminate search checkbox");
+                IntPtr imageState=IntPtr.Zero;
+                if(searchWords && SendMessageTimeoutW(hwnd,0x102C,new IntPtr(candidates.Count),new IntPtr(0xF000),2,100,out imageState)==IntPtr.Zero)
+                    throw new InvalidOperationException("Search state image unavailable");
+                int bx=0,by=0,bw=0,bh=0;
+                if(searchWords)owner.accLocation(out bx,out by,out bw,out bh,id);
                 candidates.Add(new GingerCatalogueCandidate {
                     ObservedPosition=candidates.Count+1,Title=title,DescriptionText=description,
+                    DefaultAction=searchWords ? owner.get_accDefaultAction(id) : null,
+                    StateImage=(int)((imageState.ToInt64() & 0xF000)>>12),Bounds=searchWords ? new int[]{bx,by,bw,bh} : null,ActionOwner=owner,ActionChild=id,
                     Selected=(itemState & 2)!=0, Checked=searchWords && role==44 ? (bool?)((itemState & 16)!=0) : null
                 });
             }
@@ -848,6 +860,12 @@ public static class GingerMenuAccess {
         RequireWindow(root,process);
         return result;
     }
+    private static bool SameBounds(int[] a,int[] b) {
+        if(a==null || b==null)return a==b;
+        if(a.Length!=b.Length)return false;
+        for(int i=0;i<a.Length;i++)if(a[i]!=b[i])return false;
+        return true;
+    }
     public static void RequireSameCandidates(GingerCandidateSnapshot first,GingerCandidateSnapshot second) {
         if(first==null || second==null || first.Candidates==null || second.Candidates==null ||
            first.PanelHandle!=second.PanelHandle || first.Candidates.Length!=second.Candidates.Length)
@@ -856,7 +874,7 @@ public static class GingerMenuAccess {
         for(int i=0;i<first.Candidates.Length;i++) {
             GingerCatalogueCandidate a=first.Candidates[i], b=second.Candidates[i];
             if(a==null || b==null || a.ObservedPosition!=b.ObservedPosition || a.Title!=b.Title ||
-               a.DescriptionText!=b.DescriptionText || a.Selected!=b.Selected || a.Checked!=b.Checked)
+               a.DescriptionText!=b.DescriptionText || a.Selected!=b.Selected || a.Checked!=b.Checked || a.StateImage!=b.StateImage || a.DefaultAction!=b.DefaultAction || !SameBounds(a.Bounds,b.Bounds))
                 throw new InvalidOperationException("Candidate rows changed between observations");
         }
     }
@@ -869,6 +887,83 @@ public static class GingerMenuAccess {
         GingerCandidateSnapshot first=ReadCandidatesOnce(root,process,true),second=ReadCandidatesOnce(root,process,true);
         RequireSameCandidates(first,second);
         return second;
+    }
+    public static void VerifyEnabledSearchWord(GingerCandidateSnapshot before,GingerCandidateSnapshot after,string word) {
+        RequireSameSelectedProduct(before.Source,after.Source);
+        if(before.PanelHandle!=after.PanelHandle || before.Candidates.Length!=after.Candidates.Length)
+            throw new InvalidOperationException("Search panel changed after filter action");
+        int matches=0;
+        for(int i=0;i<before.Candidates.Length;i++) {
+            GingerCatalogueCandidate a=before.Candidates[i],b=after.Candidates[i];
+            if(a.Title!=b.Title || a.DescriptionText!=b.DescriptionText || a.ObservedPosition!=b.ObservedPosition)
+                throw new InvalidOperationException("Search terms changed after filter action");
+            if(a.Title==word) {
+                matches++;
+                if(b.StateImage!=2 || b.Checked!=true) throw new InvalidOperationException("Search star not enabled; do not retry");
+            } else if(a.StateImage!=b.StateImage || a.Checked!=b.Checked)
+                throw new InvalidOperationException("Another search filter changed");
+        }
+        if(matches!=1) throw new InvalidOperationException("Search word not unique");
+    }
+    public static GingerCandidateSnapshot EnableSearchWord(IntPtr root,uint process,GingerCandidateSnapshot expected,string word,bool confirmed) {
+        if(!confirmed) throw new InvalidOperationException("Filter confirmation required");
+        RequireForeground(root,process);
+        RequireInputScale(root);
+        GingerCandidateSnapshot fresh=ReadSearchWords(root,process);
+        RequireSameCandidates(expected,fresh);
+        if(Normalize(String.Join(" ",Array.ConvertAll(fresh.Candidates,c=>c.Title)))!=Normalize(fresh.Source.Title))
+            throw new InvalidOperationException("Search words do not describe selected source");
+        GingerCatalogueCandidate[] matches=Array.FindAll(fresh.Candidates,c=>c.Title==word);
+        if(matches.Length!=1) throw new InvalidOperationException("Search word not unique");
+        GingerCatalogueCandidate target=matches[0];
+        if(target.StateImage==2 && target.Checked==true) return fresh;
+        if((target.StateImage!=0 && target.StateImage!=1) || target.Checked==true)
+            throw new InvalidOperationException("Unsupported search star state");
+        foreach(IntPtr child in Windows(new IntPtr(fresh.Source.TableHandle),process)) {
+            StringBuilder cls=new StringBuilder(256);GetClassNameW(child,cls,256);
+            if(IsWindowVisible(child) && cls.ToString().IndexOf("EDIT",StringComparison.OrdinalIgnoreCase)>=0)
+                throw new InvalidOperationException("Active product editor blocks filter action");
+        }
+        int[] b=target.Bounds;
+        if(b==null || b.Length!=4 || b[2]<40 || b[3]<12 || b[3]>40)
+            throw new InvalidOperationException("Search row geometry unavailable");
+        // Verified in Ginger at 100% scale: the left state-image slot is 16 px wide.
+        Point point=new Point {X=b[0]+8,Y=b[1]+b[3]/2};
+        IntPtr panel=new IntPtr(fresh.PanelHandle);
+        IAccessible list=Client(panel);
+        object hit=list.accHitTest(point.X,point.Y);
+        IAccessible hitOwner=hit as IAccessible;
+        object hitId=hitOwner!=null?(object)0:hit;
+        if(hitOwner==null)hitOwner=list;
+        if(!(hitId is int) || hitOwner.get_accName(hitId)!=word)
+            throw new InvalidOperationException("Search star hit-test mismatch");
+        int hx,hy,hw,hh;hitOwner.accLocation(out hx,out hy,out hw,out hh,hitId);
+        if(hx!=b[0] || hy!=b[1] || hw!=b[2] || hh!=b[3] || WindowFromPoint(point)!=panel)
+            throw new InvalidOperationException("Search star covered or moved");
+        RequireSameSelectedProduct(fresh.Source,ReadSelectedProduct(root,process));
+        RequireSameCandidates(fresh,ReadSearchWords(root,process));
+        RequireForeground(root,process);
+        if(WindowFromPoint(point)!=panel) throw new InvalidOperationException("Search target changed");
+        int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
+        if(width<2 || height<2 || point.X<left || point.X>=left+width || point.Y<top || point.Y>=top+height)
+            throw new InvalidOperationException("Search star outside desktop");
+        int x=(int)(((long)(point.X-left)*65536+32768)/width),y=(int)(((long)(point.Y-top)*65536+32768)/height);
+        Input[] input=new Input[2];
+        input[0]=new Input {Mouse=new MouseInput {X=x,Y=y,Flags=0xC003}};
+        input[1]=new Input {Mouse=new MouseInput {X=x,Y=y,Flags=0xC005}};
+        if(SendInput(2,input,Marshal.SizeOf(typeof(Input)))!=2)
+            throw new InvalidOperationException("Filter input outcome unknown; no retry");
+        var timer=System.Diagnostics.Stopwatch.StartNew();
+        while(true) {
+            try {
+                GingerCandidateSnapshot after=ReadSearchWords(root,process);
+                VerifyEnabledSearchWord(fresh,after,word);
+                return after;
+            } catch(GingerUiBusyException) {
+                if(timer.ElapsedMilliseconds>=10000)throw;
+                System.Threading.Thread.Sleep(200);
+            }
+        }
     }
     private static GingerSearchContext ReadSearchContextOnce(IntPtr root,uint process) {
         GingerCandidateSnapshot words=ReadCandidatesOnce(root,process,true);

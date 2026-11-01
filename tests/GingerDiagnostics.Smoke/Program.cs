@@ -17,6 +17,23 @@ if (args.Length == 2 && args[0] == "--reports")
     return;
 }
 
+// Single, explicitly confirmed search filter trial. No default CI input.
+if (args.Length >= 1 && args[0] == "--enable-search-word")
+{
+    if(args.Length != 4 || args[3] != "--confirm-navigation")
+        throw new InvalidOperationException("Explicit filter confirmation required");
+    var script=Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,"../../../../../scripts/windows/ginger-search-star.ps1"));
+    var start=new ProcessStartInfo {
+        FileName=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe"),
+        UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,
+        StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8
+    };
+    foreach(var argument in new[]{"-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",script,"-Word",args[1],"-ReceiptDirectory",Path.GetFullPath(args[2]),"-ConfirmNavigation"})
+        start.ArgumentList.Add(argument);
+    Console.WriteLine(await GingerDiagnostics.RunAsync(start,TimeSpan.FromSeconds(60),CancellationToken.None));
+    return;
+}
+
 // Explicit row receipt trial. Default CI never invokes this branch.
 if (args.Length >= 1 && args[0] == "--row-controller")
 {

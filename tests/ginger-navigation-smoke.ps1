@@ -316,6 +316,18 @@ try {
     if($context.SearchWords.Candidates[0].Checked -ne $false){throw 'Unchecked search word not observed'}
     $word.Checked=$true
     $changedContext=[GingerMenuAccess]::ReadSearchContext($root,$ownerId)
+    [GingerMenuAccess]::VerifyEnabledSearchWord($context.SearchWords,$changedContext.SearchWords,'Synthetic')
+    $denied=$false
+    try{[void][GingerMenuAccess]::EnableSearchWord($root,$ownerId,$context.SearchWords,'Synthetic',$false)}catch{$denied=$true}
+    if(-not $denied){throw 'Unconfirmed star action accepted'}
+    $denied=$false
+    try{[GingerMenuAccess]::VerifyEnabledSearchWord($context.SearchWords,$context.SearchWords,'Synthetic')}catch{$denied=$true}
+    if(-not $denied){throw 'Unchanged star accepted as enabled'}
+    $stableWords=[GingerMenuAccess]::ReadSearchWords($root,$ownerId)
+    $stableWords.Candidates[0].Bounds[0]+=1
+    $denied=$false
+    try{[GingerMenuAccess]::RequireSameCandidates($stableWords,$changedContext.SearchWords)}catch{$denied=$true}
+    if(-not $denied){throw 'Moved search row accepted for input'}
     if($changedContext.SearchWords.Candidates[0].Checked -ne $true){throw 'Checked search word not observed'}
     $denied=$false
     try{[GingerMenuAccess]::RequireSameSearchContext($context,$changedContext)}catch{$denied=$true}
