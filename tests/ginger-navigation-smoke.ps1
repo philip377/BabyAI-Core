@@ -323,6 +323,13 @@ try {
     $denied=$false
     try{[GingerMenuAccess]::VerifyEnabledSearchWord($context.SearchWords,$context.SearchWords,'Synthetic')}catch{$denied=$true}
     if(-not $denied){throw 'Unchanged star accepted as enabled'}
+    if(-not [GingerMenuAccess]::SearchWordsDescribeSource(@('MARBERT','MAN','TOO','ash','/','l','100','ml'),'MARBERT MAN TOO ash/l 100 ml')){throw 'Punctuation tokenization rejected'}
+    if([GingerMenuAccess]::SearchWordsDescribeSource(@('MARBERT','MANTOO','100','ml'),'MARBERT MAN TOO 100 ml')){throw 'Different words accepted'}
+    if([GingerMenuAccess]::SearchWordsDescribeSource(@('MARBERT','100','ml'),'MARBERT 50 ml')){throw 'Different volume accepted'}
+    [GingerMenuAccess]::VerifySearchWordState($changedContext.SearchWords,$context.SearchWords,'Synthetic',$false)
+    $denied=$false
+    try{[GingerMenuAccess]::VerifySearchWordState($changedContext.SearchWords,$changedContext.SearchWords,'Synthetic',$false)}catch{$denied=$true}
+    if(-not $denied){throw 'Checked star accepted as disabled'}
     $stableWords=[GingerMenuAccess]::ReadSearchWords($root,$ownerId)
     $stableWords.Candidates[0].Bounds[0]+=1
     $denied=$false

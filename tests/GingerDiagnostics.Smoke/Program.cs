@@ -18,7 +18,7 @@ if (args.Length == 2 && args[0] == "--reports")
 }
 
 // Single, explicitly confirmed search filter trial. No default CI input.
-if (args.Length >= 1 && args[0] == "--enable-search-word")
+if (args.Length >= 1 && (args[0] == "--enable-search-word" || args[0] == "--disable-search-word"))
 {
     if(args.Length != 4 || args[3] != "--confirm-navigation")
         throw new InvalidOperationException("Explicit filter confirmation required");
@@ -30,6 +30,7 @@ if (args.Length >= 1 && args[0] == "--enable-search-word")
     };
     foreach(var argument in new[]{"-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",script,"-Word",args[1],"-ReceiptDirectory",Path.GetFullPath(args[2]),"-ConfirmNavigation"})
         start.ArgumentList.Add(argument);
+    if(args[0] == "--disable-search-word") start.ArgumentList.Add("-Disable");
     Console.WriteLine(await GingerDiagnostics.RunAsync(start,TimeSpan.FromSeconds(60),CancellationToken.None));
     return;
 }

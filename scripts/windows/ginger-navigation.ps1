@@ -889,6 +889,22 @@ public static class GingerMenuAccess {
         return second;
     }
     public static void VerifyEnabledSearchWord(GingerCandidateSnapshot before,GingerCandidateSnapshot after,string word) {
+        VerifySearchWordState(before,after,word,true);
+    }
+    public static bool SearchWordsDescribeSource(string[] words,string source) {
+        if(words==null || words.Length==0 || String.IsNullOrWhiteSpace(source))return false;
+        string pattern=@"\p{L}+|\p{N}+|[^\s]";
+        var expected=System.Text.RegularExpressions.Regex.Matches(source.ToLowerInvariant(),pattern);
+        var actual=System.Text.RegularExpressions.Regex.Matches(String.Join(" ",words).ToLowerInvariant(),pattern);
+        if(expected.Count!=actual.Count)return false;
+        for(int i=0;i<expected.Count;i++)if(expected[i].Value!=actual[i].Value)return false;
+        return true;
+    }
+    private static bool SearchWordState(GingerCatalogueCandidate row,bool enabled) {
+        if(enabled)return row.StateImage==2 && row.Checked==true;
+        return (row.StateImage==0 || row.StateImage==1) && row.Checked!=true;
+    }
+    public static void VerifySearchWordState(GingerCandidateSnapshot before,GingerCandidateSnapshot after,string word,bool enabled) {
         RequireSameSelectedProduct(before.Source,after.Source);
         if(before.PanelHandle!=after.PanelHandle || before.Candidates.Length!=after.Candidates.Length)
             throw new InvalidOperationException("Search panel changed after filter action");
@@ -899,25 +915,28 @@ public static class GingerMenuAccess {
                 throw new InvalidOperationException("Search terms changed after filter action");
             if(a.Title==word) {
                 matches++;
-                if(b.StateImage!=2 || b.Checked!=true) throw new InvalidOperationException("Search star not enabled; do not retry");
+                if(!SearchWordState(b,enabled)) throw new InvalidOperationException("Search star state not verified; do not retry");
             } else if(a.StateImage!=b.StateImage || a.Checked!=b.Checked)
                 throw new InvalidOperationException("Another search filter changed");
         }
         if(matches!=1) throw new InvalidOperationException("Search word not unique");
     }
     public static GingerCandidateSnapshot EnableSearchWord(IntPtr root,uint process,GingerCandidateSnapshot expected,string word,bool confirmed) {
+        return SetSearchWord(root,process,expected,word,true,confirmed);
+    }
+    public static GingerCandidateSnapshot SetSearchWord(IntPtr root,uint process,GingerCandidateSnapshot expected,string word,bool enabled,bool confirmed) {
         if(!confirmed) throw new InvalidOperationException("Filter confirmation required");
         RequireForeground(root,process);
         RequireInputScale(root);
         GingerCandidateSnapshot fresh=ReadSearchWords(root,process);
         RequireSameCandidates(expected,fresh);
-        if(Normalize(String.Join(" ",Array.ConvertAll(fresh.Candidates,c=>c.Title)))!=Normalize(fresh.Source.Title))
+        if(!SearchWordsDescribeSource(Array.ConvertAll(fresh.Candidates,c=>c.Title),fresh.Source.Title))
             throw new InvalidOperationException("Search words do not describe selected source");
         GingerCatalogueCandidate[] matches=Array.FindAll(fresh.Candidates,c=>c.Title==word);
         if(matches.Length!=1) throw new InvalidOperationException("Search word not unique");
         GingerCatalogueCandidate target=matches[0];
-        if(target.StateImage==2 && target.Checked==true) return fresh;
-        if((target.StateImage!=0 && target.StateImage!=1) || target.Checked==true)
+        if(SearchWordState(target,enabled)) return fresh;
+        if(!SearchWordState(target,!enabled))
             throw new InvalidOperationException("Unsupported search star state");
         foreach(IntPtr child in Windows(new IntPtr(fresh.Source.TableHandle),process)) {
             StringBuilder cls=new StringBuilder(256);GetClassNameW(child,cls,256);
@@ -957,7 +976,7 @@ public static class GingerMenuAccess {
         while(true) {
             try {
                 GingerCandidateSnapshot after=ReadSearchWords(root,process);
-                VerifyEnabledSearchWord(fresh,after,word);
+                VerifySearchWordState(fresh,after,word,enabled);
                 return after;
             } catch(GingerUiBusyException) {
                 if(timer.ElapsedMilliseconds>=10000)throw;

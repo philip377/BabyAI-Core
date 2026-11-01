@@ -1,6 +1,6 @@
-﻿# Explicit development trial. One enable action; never toggles off or retries input.
+﻿# Explicit development trial. One explicit desired-state action; never retries input.
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$Word,[Parameter(Mandatory=$true)][string]$ReceiptDirectory,[switch]$ConfirmNavigation)
+param([Parameter(Mandatory=$true)][string]$Word,[Parameter(Mandatory=$true)][string]$ReceiptDirectory,[switch]$ConfirmNavigation,[switch]$Disable)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
@@ -16,10 +16,16 @@ $ownerId=[uint32]$p[0].Id
 $before=[GingerMenuAccess]::ReadSearchWords($window,$ownerId)
 $counts=[GingerMenuAccess]::InspectMatching($window,$ownerId)
 [void][IO.Directory]::CreateDirectory($ReceiptDirectory)
-$intent=[pscustomobject]@{word=$Word;before=$before;counts=$counts;process_id=$ownerId;can_write=$false}
+$intent=[pscustomobject]@{word=$Word;enabled=(-not $Disable);before=$before;counts=$counts;process_id=$ownerId;can_write=$false}
 $stream=[IO.File]::Open((Join-Path $ReceiptDirectory 'intent.json'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
 try {$bytes=[Text.Encoding]::UTF8.GetBytes(($intent | ConvertTo-Json -Depth 8));$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)} finally {$stream.Dispose()}
-$after=[GingerMenuAccess]::EnableSearchWord($window,$ownerId,$before,$Word,$true)
+try {
+$after=[GingerMenuAccess]::SetSearchWord($window,$ownerId,$before,$Word,(-not $Disable),$true)
 $countsAfter=[GingerMenuAccess]::InspectMatching($window,$ownerId)
-[pscustomobject]@{word=$Word;after=$after;counts=$countsAfter;can_write=$false} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $ReceiptDirectory 'observed.json') -Encoding UTF8
-[pscustomobject]@{word=$Word;enabled=$true;before_candidates=$counts.ProductRows;after_candidates=$countsAfter.ProductRows;search_completion_verified=$false;can_write=$false;receipt=$ReceiptDirectory} | ConvertTo-Json
+[pscustomobject]@{word=$Word;enabled=(-not $Disable);after=$after;counts=$countsAfter;can_write=$false} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $ReceiptDirectory 'observed.json') -Encoding UTF8
+[pscustomobject]@{word=$Word;enabled=(-not $Disable);before_candidates=$counts.ProductRows;after_candidates=$countsAfter.ProductRows;search_completion_verified=$false;can_write=$false;receipt=$ReceiptDirectory} | ConvertTo-Json
+
+} catch {
+    [pscustomobject]@{status='outcome_unverified';word=$Word;enabled=(-not $Disable);error=$_.Exception.Message;automatic_retry_allowed=$false;can_write=$false} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $ReceiptDirectory 'failure.json') -Encoding UTF8
+    throw
+}
