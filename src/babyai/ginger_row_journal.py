@@ -9,7 +9,7 @@ from uuid import uuid4
 from .ginger_price_queue import PriceQueueError, PriceVisitQueue
 
 
-def snapshot(report):
+def snapshot(report, *, allow_ambiguous=False):
     """Validate a complete bounded observation from the trusted local driver."""
     try:
         rows = report['rows']
@@ -34,11 +34,11 @@ def snapshot(report):
             clean.append(dict(fields, TableHandle=item['TableHandle'], ObservedRowPosition=position))
             if row['Selected']:
                 selected.append(position)
-        if len(selected) != 1:
+        if len(selected) != 1 and not allow_ambiguous:
             raise PriceQueueError('Exactly one selected row required')
         digest = hashlib.sha256(json.dumps({'process': report['process_id'], 'rows': clean},
                               sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
-        return digest, selected[0], len(rows)
+        return digest, selected[0] if len(selected) == 1 else None, len(rows)
     except (KeyError, TypeError) as exc:
         raise PriceQueueError('Incomplete product report') from exc
 
@@ -66,7 +66,7 @@ class RowNavigationJournal:
         names = sorted(p.name for p in self.directory.iterdir() if p.name != 'plan.json')
         if len(names) > 1500:
             raise PriceQueueError('Too many row events')
-        pending, sampled = None, False
+        pending, sampled, pending_kind = None, False, None
         for index, name in enumerate(names, 1):
             if name != f'{index:06d}.json':
                 raise PriceQueueError('Missing or unknown row event')
@@ -84,26 +84,31 @@ class RowNavigationJournal:
                 continue
             if (not isinstance(event, dict) or set(event) != {'kind', 'attempt', 'target', 'digest'}
                     or not isinstance(event['attempt'], str) or not re.fullmatch('[0-9a-f]{32}', event['attempt'])
-                    or type(event['target']) is not int or event['target'] != selected + 1
+                    or type(event['target']) is not int
+                    or event['target'] != (selected if event['kind'] in {'recover', 'restored'} else selected + 1)
                     or event['target'] > count or event['digest'] != digest):
                 raise PriceQueueError('Invalid row event')
             if event['kind'] == 'begin' and pending is None and (sampled or not require_read):
-                pending = event['attempt']
-            elif event['kind'] == 'observed' and pending == event['attempt']:
+                pending, pending_kind = event['attempt'], 'begin'
+            elif event['kind'] == 'recover' and pending is None:
+                pending, pending_kind = event['attempt'], 'recover'
+            elif event['kind'] == 'restored' and pending == event['attempt'] and pending_kind == 'recover':
+                pending, sampled, pending_kind = None, False, None
+            elif event['kind'] == 'observed' and pending == event['attempt'] and pending_kind == 'begin':
                 selected += 1
-                pending, sampled = None, False
+                pending, sampled, pending_kind = None, False, None
             else:
                 raise PriceQueueError('Invalid row transition')
-        return digest, selected, count, pending, len(names), sampled, require_read
+        return digest, selected, count, pending, len(names), sampled, require_read, pending_kind
 
     def status(self):
-        _, selected, count, pending, _, sampled, require_read = self._state()
-        return {'selected_sampled': sampled, 'requires_read': require_read, 'selected_position': selected, 'observed_rows': count, 'pending_attempt': pending,
+        _, selected, count, pending, _, sampled, require_read, pending_kind = self._state()
+        return {'pending_kind': pending_kind, 'selected_sampled': sampled, 'requires_read': require_read, 'selected_position': selected, 'observed_rows': count, 'pending_attempt': pending,
                 'next_position': selected + 1 if selected < count else None,
                 'can_write': False, 'products_processed': False, 'candidate_freshness_verified': False}
 
     def begin(self, report):
-        digest, selected, count, pending, sequence, sampled, require_read = self._state()
+        digest, selected, count, pending, sequence, sampled, require_read, pending_kind = self._state()
         if pending is not None:
             raise PriceQueueError('Unresolved row navigation; no input permitted')
         if require_read and not sampled:
@@ -118,8 +123,8 @@ class RowNavigationJournal:
         return attempt
 
     def observe(self, attempt, report):
-        digest, selected, count, pending, sequence, sampled, require_read = self._state()
-        if pending is None or attempt != pending:
+        digest, selected, count, pending, sequence, sampled, require_read, pending_kind = self._state()
+        if pending is None or attempt != pending or pending_kind != 'begin':
             raise PriceQueueError('No matching pending row navigation')
         if snapshot(report) != (digest, selected + 1, count):
             raise PriceQueueError('Next row not verified; pending intent retained')
@@ -127,8 +132,29 @@ class RowNavigationJournal:
             {'kind': 'observed', 'attempt': attempt, 'target': selected + 1, 'digest': digest})
 
 
+    def begin_recovery(self, report):
+        digest, selected, count, pending, sequence, _, _, _ = self._state()
+        if pending is not None:
+            raise PriceQueueError('Unresolved navigation; recovery cannot repeat input')
+        fresh_digest, _, fresh_count = snapshot(report, allow_ambiguous=True)
+        if (fresh_digest, fresh_count) != (digest, count):
+            raise PriceQueueError('Recovery table changed; no input permitted')
+        attempt = uuid4().hex
+        PriceVisitQueue._write(self.directory / f'{sequence+1:06d}.json',
+            {'kind': 'recover', 'attempt': attempt, 'target': selected, 'digest': digest})
+        return attempt, selected
+
+    def observe_recovery(self, attempt, report):
+        digest, selected, count, pending, sequence, _, _, pending_kind = self._state()
+        if pending is None or pending != attempt or pending_kind != 'recover':
+            raise PriceQueueError('No matching pending recovery')
+        if snapshot(report) != (digest, selected, count):
+            raise PriceQueueError('Checkpoint selection not verified')
+        PriceVisitQueue._write(self.directory / f'{sequence+1:06d}.json',
+            {'kind': 'restored', 'attempt': attempt, 'target': selected, 'digest': digest})
+
     def record_sample(self, report):
-        digest, selected, count, pending, sequence, sampled, _ = self._state()
+        digest, selected, count, pending, sequence, sampled, _, _ = self._state()
         if pending is not None or sampled:
             raise PriceQueueError('Pending navigation or already sampled row')
         try:
@@ -163,7 +189,7 @@ class RowNavigationJournal:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['create', 'status', 'begin', 'observe', 'sample'])
+    parser.add_argument('action', choices=['create', 'status', 'begin', 'observe', 'sample', 'recover', 'restored'])
     parser.add_argument('--directory', required=True, type=Path)
     parser.add_argument('--report', type=Path)
     parser.add_argument('--attempt')
@@ -181,6 +207,12 @@ def main():
         elif args.action == 'begin':
             print(json.dumps({'attempt': journal.begin(report), 'can_write': False}))
             return
+        elif args.action == 'recover':
+            attempt, position = journal.begin_recovery(report)
+            print(json.dumps({'attempt': attempt, 'position': position, 'can_write': False}))
+            return
+        elif args.action == 'restored':
+            journal.observe_recovery(args.attempt, report)
         elif args.action == 'sample':
             journal.record_sample(report)
         elif args.action == 'observe':

@@ -616,7 +616,7 @@ public static class GingerMenuAccess {
         if(SendInput(2,input,Marshal.SizeOf(typeof(Input)))!=2) throw new InvalidOperationException("Tab click outcome unknown; no retry");
     }
     // These are UI observations only. Position and displayed names are never product IDs.
-    private static GingerSelectedProduct ReadSelectedProductOnce(IntPtr root,uint process, List<GingerProductRow> all=null,List<GingerSelectionEvidence> evidence=null) {
+    private static GingerSelectedProduct ReadSelectedProductOnce(IntPtr root,uint process, List<GingerProductRow> all=null,List<GingerSelectionEvidence> evidence=null,bool allowAmbiguous=false) {
         GingerPriceDocument document=ReadPriceDocument(root,process);
         GingerSelectedProduct result=null;
         int tables=0;
@@ -671,7 +671,7 @@ public static class GingerMenuAccess {
                         LinkedProductText=CellValue(cells[linked] as IAccessible)
                     }, Selected=selected, Target=nameCell
                 });
-                if(!selected) continue;
+                if(allowAmbiguous || !selected) continue;
                 if(result!=null) throw new InvalidOperationException("Multiple selected products");
                 result=new GingerSelectedProduct {
                     TableHandle=hwnd.ToInt64(), ObservedRowPosition=position,
@@ -685,8 +685,8 @@ public static class GingerMenuAccess {
         GingerPriceDocument after=ReadPriceDocument(root,process);
         if(after.Number!=document.Number || after.Supplier!=document.Supplier)
             throw new InvalidOperationException("Supplier document changed during read");
-        if(result==null && evidence==null) throw new InvalidOperationException("Exactly one selected product required");
-        if(evidence!=null && tables!=1) throw new InvalidOperationException("Product table missing");
+        if(result==null && evidence==null && !allowAmbiguous) throw new InvalidOperationException("Exactly one selected product required");
+        if((evidence!=null || allowAmbiguous) && tables!=1) throw new InvalidOperationException("Product table missing");
         RequireWindow(root,process);
         return result;
     }
@@ -717,9 +717,9 @@ public static class GingerMenuAccess {
            first.Title!=second.Title || first.PriceText!=second.PriceText || first.LinkedProductText!=second.LinkedProductText)
             throw new InvalidOperationException("Selected product changed between observations");
     }
-    private static GingerProductRow[] ReadProductRowsOnce(IntPtr root,uint process) {
+    private static GingerProductRow[] ReadProductRowsOnce(IntPtr root,uint process,bool allowAmbiguous=false) {
         List<GingerProductRow> rows=new List<GingerProductRow>();
-        ReadSelectedProductOnce(root,process,rows);
+        ReadSelectedProductOnce(root,process,rows,null,allowAmbiguous);
         return rows.ToArray();
     }
     public static void RequireSameProductRows(GingerProductRow[] first,GingerProductRow[] second,bool selection) {
@@ -735,6 +735,36 @@ public static class GingerMenuAccess {
         GingerProductRow[] first=ReadProductRowsOnce(root,process),second=ReadProductRowsOnce(root,process);
         RequireSameProductRows(first,second,true);
         return second;
+    }
+    public static GingerProductRow[] ReadProductRowsForRecovery(IntPtr root,uint process) {
+        GingerProductRow[] first=ReadProductRowsOnce(root,process,true),second=ReadProductRowsOnce(root,process,true);
+        RequireSameProductRows(first,second,true);
+        return second;
+    }
+    // The controller must persist and validate a checkpoint recovery intent before this call.
+    public static GingerSelectedProduct RestoreProductSelection(IntPtr root,uint process,GingerProductRow[] expected,int position,bool confirmed) {
+        if(!confirmed) throw new InvalidOperationException("Navigation confirmation required");
+        GingerProductRow[] fresh=ReadProductRowsForRecovery(root,process);
+        RequireSameProductRows(expected,fresh,true);
+        if(position<1 || position>fresh.Length) throw new InvalidOperationException("Recovery position outside table");
+        foreach(IntPtr child in Windows(new IntPtr(fresh[position-1].Observation.TableHandle),process)) {
+            StringBuilder cls=new StringBuilder(256); GetClassNameW(child,cls,cls.Capacity);
+            if(IsWindowVisible(child) && cls.ToString().IndexOf("EDIT",StringComparison.OrdinalIgnoreCase)>=0)
+                throw new InvalidOperationException("Finish the active table edit before recovery");
+        }
+        GingerProductRow[] last=ReadProductRowsOnce(root,process,true);
+        RequireSameProductRows(fresh,last,true);
+        GingerProductRow target=last[position-1];
+        int state=Convert.ToInt32(target.Target.get_accState(0));
+        if((state & (1|0x8000|0x10000))!=0 || (state & 0x200000)==0)
+            throw new InvalidOperationException("Recovery row is not visibly selectable");
+        RequireWindow(root,process);
+        target.Target.accSelect(3,0);
+        GingerProductRow[] after=ReadProductRows(root,process);
+        RequireSameProductRows(fresh,after,false);
+        if(!after[position-1].Selected || Array.FindAll(after,r=>r.Selected).Length!=1)
+            throw new InvalidOperationException("Recovery selection unverified; no automatic retry");
+        return after[position-1].Observation;
     }
     // One explicit navigation step only. It does not certify candidate freshness.
     public static GingerSelectedProduct SelectNextProduct(IntPtr root,uint process,GingerProductRow[] expected,bool confirmed) {

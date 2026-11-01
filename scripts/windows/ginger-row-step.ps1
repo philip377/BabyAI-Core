@@ -1,7 +1,7 @@
 ﻿# Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
-    [ValidateSet('Initialize','Step','Observe','Read','InspectSearch','InspectSelection','Status')][string]$Operation='Status',
+    [ValidateSet('Initialize','Step','Recover','Observe','Read','InspectSearch','InspectSelection','Status')][string]$Operation='Status',
     [Parameter(Mandatory=$true)][string]$QueueDirectory,
     [switch]$ConfirmNavigation
 )
@@ -19,10 +19,10 @@ function Invoke-Journal([string]$Action,[string]$ReportPath='',[string]$Attempt=
     return (($raw -join "`n") | ConvertFrom-Json)
 }
 if($Operation -eq 'Status'){Invoke-Journal 'status' | ConvertTo-Json; return}
-if($Operation -eq 'Step' -and -not $ConfirmNavigation){throw 'Navigation confirmation required'}
+if($Operation -in @('Step','Recover') -and -not $ConfirmNavigation){throw 'Navigation confirmation required'}
 if($Operation -ne 'Initialize') {
     $state=Invoke-Journal 'status'
-    if($Operation -eq 'Step' -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; no input permitted'}
+    if($Operation -in @('Step','Recover') -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; no input permitted'}
     if($Operation -eq 'Step' -and $state.requires_read -and -not $state.selected_sampled){throw 'Selected row must be sampled before navigation'}
     if($Operation -eq 'InspectSearch' -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; observation blocked'}
     if($Operation -eq 'Read' -and ($null -ne $state.pending_attempt -or $state.selected_sampled)){throw 'Pending navigation or already sampled row'}
@@ -55,7 +55,8 @@ if($Operation -eq 'InspectSelection') {
     [pscustomobject]@{observed_rows=$evidence.Count;selected_positions=$selected;diagnostics=$diagnostics;can_write=$false;input_sent=$false} | ConvertTo-Json -Depth 4
     return
 }
-$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
+if($Operation -eq 'Recover') {$rows=[GingerMenuAccess]::ReadProductRowsForRecovery($window,$ownerId)}
+else {$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)}
 $before=Save-Rows $rows 'before.json'
 if($Operation -eq 'Initialize') {$result=Invoke-Journal 'create' $before}
 elseif($Operation -eq 'InspectSearch') {
@@ -77,7 +78,16 @@ elseif($Operation -eq 'Read') {
     [pscustomobject]@{rows=@($afterRows);process_id=$ownerId;can_write=$false;candidate_snapshot=$reading} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding UTF8
     $result=Invoke-Journal 'sample' $path
 }
-elseif($Operation -eq 'Observe') {$result=Invoke-Journal 'observe' $before ([string]$state.pending_attempt)}
+elseif($Operation -eq 'Recover') {
+    $intent=Invoke-Journal 'recover' $before
+    [void][GingerMenuAccess]::RestoreProductSelection($window,$ownerId,$rows,[int]$intent.position,$true)
+    $after=Save-Rows ([GingerMenuAccess]::ReadProductRows($window,$ownerId)) 'after.json'
+    $result=Invoke-Journal 'restored' $after ([string]$intent.attempt)
+}
+elseif($Operation -eq 'Observe') {
+    $action=if($state.pending_kind -eq 'recover'){'restored'}else{'observe'}
+    $result=Invoke-Journal $action $before ([string]$state.pending_attempt)
+}
 else {
     # Persist before input. A crash, timeout or uncertain result leaves this unresolved.
     $intent=Invoke-Journal 'begin' $before

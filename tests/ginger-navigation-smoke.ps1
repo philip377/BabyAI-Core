@@ -386,6 +386,20 @@ try {
     if($selectedEvidence.Count -ne 2 -or $evidence[0].CanWrite){throw 'Multi-selection diagnostic lost evidence or granted write'}
     if(-not $grid.Rows[0].Cells[0].Selected -or -not $grid.Rows[1].Cells[0].Selected){throw 'Diagnostic changed selection'}
     Write-Output 'PASS: ambiguous selection inspected without choosing a source or changing selection'
+    $recoveryRows=[GingerMenuAccess]::ReadProductRowsForRecovery($root,$ownerId)
+    $denied=$false
+    try{[void][GingerMenuAccess]::RestoreProductSelection($root,$ownerId,$recoveryRows,1,$false)}catch{$denied=$true}
+    if(-not $denied){throw 'Unconfirmed recovery accepted'}
+    $savedTitle=$grid.Rows[2].Cells[0].Value
+    $grid.Rows[2].Cells[0].Value='Changed before recovery'
+    $denied=$false
+    try{[void][GingerMenuAccess]::RestoreProductSelection($root,$ownerId,$recoveryRows,1,$true)}catch{$denied=$true}
+    if(-not $denied){throw 'Changed recovery table accepted'}
+    $grid.Rows[2].Cells[0].Value=$savedTitle
+    $restored=[GingerMenuAccess]::RestoreProductSelection($root,$ownerId,$recoveryRows,1,$true)
+    if($restored.ObservedRowPosition -ne 1 -or $restored.CanMatch -or $grid.Rows[1].Cells[0].Selected){throw 'Recovery selection incorrect'}
+    Write-Output 'PASS: recovery rejects absent confirmation and changed table; restores one explicit position'
+
     $grid.ClearSelection()
     $grid.Rows[0].Cells[0].Selected=$true
     $grid.Rows[0].Cells[0].Value=''
