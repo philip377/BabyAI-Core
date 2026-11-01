@@ -20,7 +20,7 @@ if (args.Length == 2 && args[0] == "--reports")
 // Explicit row receipt trial. Default CI never invokes this branch.
 if (args.Length >= 1 && args[0] == "--row-controller")
 {
-    if (args.Length is < 3 or > 4 || args[1] is not ("Initialize" or "Step" or "Recover" or "Observe" or "Read" or "InspectSearch" or "InspectSelection" or "Status") ||
+    if (args.Length is < 3 or > 4 || args[1] is not ("Initialize" or "Step" or "Recover" or "Observe" or "Read" or "InspectSearch" or "InspectQuery" or "InspectSelection" or "Status") ||
         (args[1] is "Step" or "Recover" && (args.Length != 4 || args[3] != "--confirm-navigation")) ||
         (args[1] is not ("Step" or "Recover") && args.Length != 3))
         throw new InvalidOperationException("Explicit row operation and navigation confirmation required");

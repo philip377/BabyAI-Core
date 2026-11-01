@@ -303,6 +303,8 @@ try {
     $word=$searchPanel.Items.Add('Synthetic')
     [void]$word.SubItems.Add('Yes')
     [Windows.Forms.Application]::DoEvents()
+    $queryOnly=[GingerMenuAccess]::ReadSearchWords($root,$ownerId)
+    if($queryOnly.Candidates.Length -ne 1 -or $queryOnly.CanMatch -or $queryOnly.SearchCompletionVerified){throw 'Query-only read lost data or overclaimed'}
     $context=[GingerMenuAccess]::ReadSearchContext($root,$ownerId)
     if($context.SearchWords.Candidates.Length -ne 1 -or $context.SearchWords.Candidates[0].Title -ne 'Synthetic' -or
        $context.Products.Candidates.Length -ne 2 -or $context.CanMatch -or $context.SearchCompletionVerified){throw 'Search context lost or overclaimed'}

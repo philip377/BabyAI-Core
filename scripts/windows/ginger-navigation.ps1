@@ -813,7 +813,7 @@ public static class GingerMenuAccess {
             if(!products) continue;
             if(result!=null) throw new InvalidOperationException("Ambiguous candidate panels");
             long count=ListCount(hwnd,process);
-            if(count>256) throw new InvalidOperationException("Candidate read limit exceeded");
+            if(count>256) throw new InvalidOperationException((searchWords ? "Search word" : "Candidate")+" read limit exceeded: observed "+count+", maximum 256");
             IAccessible list=Client(hwnd);
             if(list==null || Convert.ToInt32(list.get_accRole(0))!=33 || list.accChildCount>260)
                 throw new InvalidOperationException("Unsupported candidate list");
@@ -862,6 +862,11 @@ public static class GingerMenuAccess {
     }
     public static GingerCandidateSnapshot ReadMatchingCandidates(IntPtr root,uint process) {
         GingerCandidateSnapshot first=ReadCandidatesOnce(root,process), second=ReadCandidatesOnce(root,process);
+        RequireSameCandidates(first,second);
+        return second;
+    }
+    public static GingerCandidateSnapshot ReadSearchWords(IntPtr root,uint process) {
+        GingerCandidateSnapshot first=ReadCandidatesOnce(root,process,true),second=ReadCandidatesOnce(root,process,true);
         RequireSameCandidates(first,second);
         return second;
     }

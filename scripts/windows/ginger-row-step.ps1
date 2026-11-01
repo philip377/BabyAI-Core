@@ -1,7 +1,7 @@
 ﻿# Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
-    [ValidateSet('Initialize','Step','Recover','Observe','Read','InspectSearch','InspectSelection','Status')][string]$Operation='Status',
+    [ValidateSet('Initialize','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','Status')][string]$Operation='Status',
     [Parameter(Mandatory=$true)][string]$QueueDirectory,
     [switch]$ConfirmNavigation
 )
@@ -24,7 +24,7 @@ if($Operation -ne 'Initialize') {
     $state=Invoke-Journal 'status'
     if($Operation -in @('Step','Recover') -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; no input permitted'}
     if($Operation -eq 'Step' -and $state.requires_read -and -not $state.selected_sampled){throw 'Selected row must be sampled before navigation'}
-    if($Operation -eq 'InspectSearch' -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; observation blocked'}
+    if($Operation -in @('InspectSearch','InspectQuery') -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; observation blocked'}
     if($Operation -eq 'Read' -and ($null -ne $state.pending_attempt -or $state.selected_sampled)){throw 'Pending navigation or already sampled row'}
     if($Operation -eq 'Step' -and $null -eq $state.next_position){$state | ConvertTo-Json; return}
     if($Operation -eq 'Observe' -and $null -eq $state.pending_attempt){throw 'No pending row observation'}
@@ -59,6 +59,16 @@ if($Operation -eq 'Recover') {$rows=[GingerMenuAccess]::ReadProductRowsForRecove
 else {$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)}
 $before=Save-Rows $rows 'before.json'
 if($Operation -eq 'Initialize') {$result=Invoke-Journal 'create' $before}
+elseif($Operation -eq 'InspectQuery') {
+    $query=[GingerMenuAccess]::ReadSearchWords($window,$ownerId)
+    $afterRows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
+    [GingerMenuAccess]::RequireSameProductRows($rows,$afterRows,$true)
+    $selected=@($afterRows | Where-Object Selected)
+    if($selected.Count -ne 1){throw 'Exactly one selected source required'}
+    [GingerMenuAccess]::RequireSameSelectedProduct($selected[0].Observation,$query.Source)
+    $query | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $diagnostics 'search-words.json') -Encoding UTF8
+    $result=[pscustomobject]@{observed_position=$query.Source.ObservedRowPosition;search_word_count=@($query.Candidates).Count;checked_words=@($query.Candidates | Where-Object {$_.Checked -eq $true}).Count;unknown_check_state=@($query.Candidates | Where-Object {$null -eq $_.Checked}).Count;candidate_freshness_verified=$false;can_write=$false}
+}
 elseif($Operation -eq 'InspectSearch') {
     $context=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
     $afterRows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
