@@ -75,6 +75,13 @@ public sealed class GingerSearchContext {
     public bool QueryWordsMatchSource; // Lexical evidence only, not completion or identity.
     public bool CanMatch=false, SearchCompletionVerified=false;
 }
+public sealed class GingerSelectionEvidence {
+    public long TableHandle;
+    public int Position, RowState;
+    public int[] CellStates;
+    public string DocumentNumber, Supplier;
+    public bool CanWrite=false;
+}
 public sealed class GingerProductRow {
     public GingerSelectedProduct Observation;
     public bool Selected;
@@ -609,7 +616,7 @@ public static class GingerMenuAccess {
         if(SendInput(2,input,Marshal.SizeOf(typeof(Input)))!=2) throw new InvalidOperationException("Tab click outcome unknown; no retry");
     }
     // These are UI observations only. Position and displayed names are never product IDs.
-    private static GingerSelectedProduct ReadSelectedProductOnce(IntPtr root,uint process, List<GingerProductRow> all=null) {
+    private static GingerSelectedProduct ReadSelectedProductOnce(IntPtr root,uint process, List<GingerProductRow> all=null,List<GingerSelectionEvidence> evidence=null) {
         GingerPriceDocument document=ReadPriceDocument(root,process);
         GingerSelectedProduct result=null;
         int tables=0;
@@ -641,11 +648,20 @@ public static class GingerMenuAccess {
                 }
                 if(!headerSeen) throw new InvalidOperationException("Product header missing");
                 position++;
-                bool selected=(Convert.ToInt32(row.get_accState(0)) & 2)!=0;
+                int rowState=Convert.ToInt32(row.get_accState(0));
+                List<int> cellStates=new List<int>();
+                bool selected=(rowState & 2)!=0;
                 foreach(object cell in cells) {
                     IAccessible accessible=cell as IAccessible;
                     if(accessible==null) throw new InvalidOperationException("Unreadable product cell");
-                    selected |= (Convert.ToInt32(accessible.get_accState(0)) & 2)!=0;
+                    int cellState=Convert.ToInt32(accessible.get_accState(0));
+                    cellStates.Add(cellState);
+                    selected |= (cellState & 2)!=0;
+                }
+                if(evidence!=null) {
+                    evidence.Add(new GingerSelectionEvidence {TableHandle=hwnd.ToInt64(),Position=position,
+                        RowState=rowState,CellStates=cellStates.ToArray(),DocumentNumber=document.Number,Supplier=document.Supplier});
+                    continue; // Diagnostic only: do not choose an authoritative source from multiple rows.
                 }
                 if(all!=null) all.Add(new GingerProductRow {
                     Observation=new GingerSelectedProduct {
@@ -669,9 +685,25 @@ public static class GingerMenuAccess {
         GingerPriceDocument after=ReadPriceDocument(root,process);
         if(after.Number!=document.Number || after.Supplier!=document.Supplier)
             throw new InvalidOperationException("Supplier document changed during read");
-        if(result==null) throw new InvalidOperationException("Exactly one selected product required");
+        if(result==null && evidence==null) throw new InvalidOperationException("Exactly one selected product required");
+        if(evidence!=null && tables!=1) throw new InvalidOperationException("Product table missing");
         RequireWindow(root,process);
         return result;
+    }
+    public static GingerSelectionEvidence[] InspectProductSelection(IntPtr root,uint process) {
+        List<GingerSelectionEvidence> first=new List<GingerSelectionEvidence>(),second=new List<GingerSelectionEvidence>();
+        ReadSelectedProductOnce(root,process,null,first);
+        ReadSelectedProductOnce(root,process,null,second);
+        if(first.Count!=second.Count) throw new InvalidOperationException("Selection evidence changed");
+        for(int i=0;i<first.Count;i++) {
+            GingerSelectionEvidence a=first[i],b=second[i];
+            if(a.TableHandle!=b.TableHandle || a.Position!=b.Position || a.DocumentNumber!=b.DocumentNumber ||
+                a.Supplier!=b.Supplier || a.RowState!=b.RowState || a.CellStates.Length!=b.CellStates.Length)
+                throw new InvalidOperationException("Selection evidence changed");
+            for(int j=0;j<a.CellStates.Length;j++) if(a.CellStates[j]!=b.CellStates[j])
+                throw new InvalidOperationException("Cell selection evidence changed");
+        }
+        return second.ToArray();
     }
     public static GingerSelectedProduct ReadSelectedProduct(IntPtr root,uint process) {
         GingerSelectedProduct first=ReadSelectedProductOnce(root,process);

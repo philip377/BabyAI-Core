@@ -1,7 +1,7 @@
 ﻿# Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
-    [ValidateSet('Initialize','Step','Observe','Read','InspectSearch','Status')][string]$Operation='Status',
+    [ValidateSet('Initialize','Step','Observe','Read','InspectSearch','InspectSelection','Status')][string]$Operation='Status',
     [Parameter(Mandatory=$true)][string]$QueueDirectory,
     [switch]$ConfirmNavigation
 )
@@ -47,6 +47,13 @@ function Save-Rows($Rows,[string]$Name) {
     $path=Join-Path $diagnostics $Name
     [pscustomobject]@{rows=@($Rows);process_id=$ownerId;can_write=$false} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $path -Encoding UTF8
     return $path
+}
+if($Operation -eq 'InspectSelection') {
+    $evidence=@([GingerMenuAccess]::InspectProductSelection($window,$ownerId))
+    $evidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $diagnostics 'selection-evidence.json') -Encoding UTF8
+    $selected=@($evidence | Where-Object {($_.RowState -band 2) -ne 0 -or @($_.CellStates | Where-Object {($_ -band 2) -ne 0}).Count -gt 0} | ForEach-Object Position)
+    [pscustomobject]@{observed_rows=$evidence.Count;selected_positions=$selected;diagnostics=$diagnostics;can_write=$false;input_sent=$false} | ConvertTo-Json -Depth 4
+    return
 }
 $rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
 $before=Save-Rows $rows 'before.json'

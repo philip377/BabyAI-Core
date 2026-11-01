@@ -381,6 +381,11 @@ try {
     $denied=$false
     try{[void][GingerMenuAccess]::ReadSelectedProduct($root,$ownerId)}catch{$denied=$true}
     if(-not $denied){throw 'Ambiguous product selection accepted'}
+    $evidence=@([GingerMenuAccess]::InspectProductSelection($root,$ownerId))
+    $selectedEvidence=@($evidence | Where-Object {@($_.CellStates | Where-Object {($_ -band 2) -ne 0}).Count -gt 0})
+    if($selectedEvidence.Count -ne 2 -or $evidence[0].CanWrite){throw 'Multi-selection diagnostic lost evidence or granted write'}
+    if(-not $grid.Rows[0].Cells[0].Selected -or -not $grid.Rows[1].Cells[0].Selected){throw 'Diagnostic changed selection'}
+    Write-Output 'PASS: ambiguous selection inspected without choosing a source or changing selection'
     $grid.ClearSelection()
     $grid.Rows[0].Cells[0].Selected=$true
     $grid.Rows[0].Cells[0].Value=''
