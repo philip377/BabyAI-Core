@@ -23,7 +23,10 @@ try {
 $after=[GingerMenuAccess]::SetSearchWord($window,$ownerId,$before,$Word,(-not $Disable),$true)
 $countsAfter=[GingerMenuAccess]::InspectMatching($window,$ownerId)
 [pscustomobject]@{word=$Word;enabled=(-not $Disable);after=$after;counts=$countsAfter;can_write=$false} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $ReceiptDirectory 'observed.json') -Encoding UTF8
-[pscustomobject]@{word=$Word;enabled=(-not $Disable);before_candidates=$counts.ProductRows;after_candidates=$countsAfter.ProductRows;search_completion_verified=$false;can_write=$false;receipt=$ReceiptDirectory} | ConvertTo-Json
+$observation=& "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ginger-search-observe.ps1') -ReceiptDirectory $ReceiptDirectory
+if($LASTEXITCODE -ne 0){throw 'Filter observed but complete review unavailable; use read-only observation, never retry input'}
+$review=($observation -join "`n") | ConvertFrom-Json
+[pscustomobject]@{word=$Word;enabled=(-not $Disable);before_candidates=$counts.ProductRows;after_candidates=$countsAfter.ProductRows;search_completion_verified=$false;can_write=$false;receipt=$ReceiptDirectory;report=$review.report} | ConvertTo-Json
 
 } catch {
     [pscustomobject]@{status='outcome_unverified';word=$Word;enabled=(-not $Disable);error=$_.Exception.Message;automatic_retry_allowed=$false;can_write=$false} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $ReceiptDirectory 'failure.json') -Encoding UTF8

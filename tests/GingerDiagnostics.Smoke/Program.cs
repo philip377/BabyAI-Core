@@ -31,7 +31,7 @@ if (args.Length >= 1 && (args[0] == "--enable-search-word" || args[0] == "--disa
     foreach(var argument in new[]{"-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",script,"-Word",args[1],"-ReceiptDirectory",Path.GetFullPath(args[2]),"-ConfirmNavigation"})
         start.ArgumentList.Add(argument);
     if(args[0] == "--disable-search-word") start.ArgumentList.Add("-Disable");
-    Console.WriteLine(await GingerDiagnostics.RunAsync(start,TimeSpan.FromSeconds(60),CancellationToken.None));
+    Console.WriteLine(await GingerDiagnostics.RunAsync(start,TimeSpan.FromSeconds(120),CancellationToken.None));
     return;
 }
 
