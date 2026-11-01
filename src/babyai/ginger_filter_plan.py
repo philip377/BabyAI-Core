@@ -105,6 +105,7 @@ class FilterPlan:
         plan, _, completed, pending, _ = self._state()
         return {"completed_steps": completed, "total_steps": len(plan["steps"]),
                 "pending_step": pending["step"] if pending is not None else None,
+                "pending_action": copy.deepcopy(plan["steps"][completed]) if pending is not None else None,
                 "next_step": copy.deepcopy(plan["steps"][completed]) if completed < len(plan["steps"]) and pending is None else None,
                 "status": "observe_only" if pending is not None else "steps_observed" if completed == len(plan["steps"]) else "ready",
                 "can_write": False, "search_completion_verified": False, "automatic_retry_allowed": False}
