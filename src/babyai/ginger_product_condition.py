@@ -10,6 +10,8 @@ _PATTERNS = {
     "box": {
         "present": (r"\bв\s+коробке\b", r"\bwith\s+box\b"),
         "absent": (r"\bбез\s+коробки\b", r"\bwithout\s+box\b", r"\bno\s+box\b"),
+    },
+    "box_condition": {
         "damaged": (r"\bмят(?:ая|ой)\s+коробк[аи]\b", r"\bdamaged\s+box\b"),
     },
     "fill": {
@@ -20,7 +22,7 @@ _PATTERNS = {
         "damaged": (r"\bнемного\s+помят\b", r"\b(?:мятая|поврежд[её]нная)\s+упаковка\b", r"\bdamaged\s+packaging\b"),
     },
 }
-_LABELS={"cap":"Крышка", "box":"Коробка", "fill":"Наполнение флакона", "packaging":"Состояние упаковки"}
+_LABELS={"cap":"Крышка", "box":"Коробка", "box_condition":"Состояние коробки", "fill":"Наполнение флакона", "packaging":"Состояние упаковки"}
 _VALUES={"present":"есть", "absent":"нет", "damaged":"повреждена", "partial":"неполный", "full":"полный"}
 
 

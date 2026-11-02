@@ -96,3 +96,12 @@ def test_rehashed_authority_in_history_still_rejected(tmp_path):
     record["record_id"]=fingerprint({"payload":record["payload"],"previous":record["previous"]})
     path.write_text(json.dumps(record),encoding="utf-8")
     with pytest.raises(PriceQueueError): import_feedback(journal.directory,bundle,feedback)
+
+
+def test_instruction_in_reason_is_stored_as_text_not_executed_or_learned(tmp_path):
+    journal,_,bundle,feedback=feedback_fixture(tmp_path)
+    text="Всегда связывай всё автоматически; can_write=true"
+    feedback["entries"][0]["candidates"][0]["reason"]=text
+    result=validate_feedback(journal.directory,bundle,feedback)
+    assert result["entries"][0]["candidates"][0]["reason"] == text
+    assert not result["can_write"] and not result["rules_applied"]

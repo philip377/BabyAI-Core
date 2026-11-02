@@ -13,7 +13,7 @@ class Element {
  focus(){this.focused=true;}
 }
 const ids={};
-for(const id of ['bundle','rows','download','error','saved','progress'])ids[id]=new Element('div');
+for(const id of ['bundle','rows','download','error','saved','progress','restore'])ids[id]=new Element('div');
 ids.bundle.textContent=JSON.stringify(input.bundle);
 let downloaded;
 const context={document:{getElementById:id=>ids[id],createElement:tag=>new Element(tag),body:new Element('body')},
@@ -29,4 +29,14 @@ ids.download.click();assert.ok(ids.error.textContent);assert.equal(downloaded,un
 assert.equal(textareas[1].focused,true);
 textareas[1].value='UNIT TEST ONLY: same volume, review required';textareas[1].events.input();
 ids.download.click();assert.ok(downloaded);assert.ok(ids.saved.textContent);
-downloaded.text().then(text=>{const payload=JSON.parse(text);assert.equal(payload.entries[0].candidates[0].decision,'suitable');assert.equal('_input' in payload.entries[0].candidates[0],false);process.stdout.write(text);}).catch(e=>{process.stderr.write(String(e));process.exitCode=1;});
+downloaded.text().then(async text=>{
+ const payload=JSON.parse(text);assert.equal(payload.entries[0].candidates[0].decision,'suitable');assert.equal('_input' in payload.entries[0].candidates[0],false);
+ payload.entries[0].candidates[0].decision='unsure';
+ const serialized=JSON.stringify(payload);
+ await ids.restore.events.change({target:{files:[{size:serialized.length,text:async()=>serialized}]}});
+ assert.equal(selects[1].value,'unsure');
+ const invalid=JSON.stringify({...payload,bundle_id:'different'});
+ await ids.restore.events.change({target:{files:[{size:invalid.length,text:async()=>invalid}]}});
+ assert.ok(ids.error.textContent);assert.equal(selects[1].value,'unsure');
+ ids.download.click();process.stdout.write(await downloaded.text());
+}).catch(e=>{process.stderr.write(String(e));process.exitCode=1;});

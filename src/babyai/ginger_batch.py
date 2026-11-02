@@ -1,5 +1,7 @@
 """Bounded review-only row pass using guarded controllers. No implicit retries."""
 import argparse
+from datetime import datetime, timezone
+import time
 from contextlib import contextmanager
 import json
 import os
@@ -89,6 +91,17 @@ def reconcile_stopped_prepare(row_directory, run_directory, fresh_report):
     return result
 
 
+class ControllerFailure(PriceQueueError):
+    """Bounded private diagnostics; callers persist these locally, never retry input."""
+    def __init__(self, message, return_code=None, stdout=b"", stderr=b""):
+        super().__init__(message)
+        self.details = {"return_code": return_code,
+                        "stdout_tail": stdout[-16000:].decode("utf-8-sig", errors="replace"),
+                        "stderr_tail": stderr[-16000:].decode("utf-8-sig", errors="replace"),
+                        "output_truncated": len(stdout)>16000 or len(stderr)>16000,
+                        "automatic_retry_allowed": False}
+
+
 class ControllerBackend:
     def __init__(self, row_directory, runner):
         self.row_directory = Path(row_directory)
@@ -118,7 +131,7 @@ class ControllerBackend:
             process.communicate()
             raise PriceQueueError("Controller timeout; inspect journals, do not retry")
         if process.returncode != 0:
-            raise PriceQueueError("Controller failed; inspect its saved diagnostics, do not retry")
+            raise ControllerFailure("Controller failed; inspect its saved diagnostics, do not retry", process.returncode, stdout, stderr)
         if len(stdout) > 4_000_000: raise PriceQueueError("Controller output too large")
         return json.loads(stdout.decode("utf-8-sig"))
 
@@ -130,12 +143,29 @@ def run_batch(backend, run_directory, max_rows, *, confirmed=False):
     directory.mkdir(parents=True, exist_ok=False)
     _save(directory/"plan.json", {"max_new_reviews": max_rows, "can_write": False})
     events, completed = 0, []
+    run_start = time.perf_counter_ns()
+    timings = []
     def act(operation, target=None):
         nonlocal events
         index = events; events += 1
-        _save(directory/f"action-{index:03d}-intent.json", {"operation": operation, "target": str(target) if target else None})
-        result = backend.call(operation, target)
-        _save(directory/f"action-{index:03d}-observed.json", result)
+        started_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        started = time.perf_counter_ns()
+        _save(directory/f"action-{index:03d}-intent.json", {"operation": operation, "target": str(target) if target else None,
+                                                         "started_at_utc": started_at})
+        try:
+            result = backend.call(operation, target)
+            if not isinstance(result,dict): raise PriceQueueError("Controller result must be an object")
+        except Exception as exc:
+            failure = {"operation":operation, "started_at_utc":started_at,
+                       "elapsed_ms":max(0,(time.perf_counter_ns()-started)//1_000_000),
+                       "error":str(exc), "automatic_retry_allowed":False}
+            if isinstance(exc,ControllerFailure): failure["controller_diagnostics"] = exc.details
+            _save(directory/f"action-{index:03d}-failure.json",failure)
+            raise
+        timing = {"operation":operation,"started_at_utc":started_at,
+                  "elapsed_ms":max(0,(time.perf_counter_ns()-started)//1_000_000)}
+        timings.append(timing)
+        _save(directory/f"action-{index:03d}-observed.json",dict(result,execution=timing))
         return result
     try:
         for _ in range(max_rows):
@@ -174,7 +204,10 @@ def run_batch(backend, run_directory, max_rows, *, confirmed=False):
             completed.append(position)
             _save(directory/f"row-{position:04d}.json", {"position": position, "status": "needs_manual_review", "can_write": False})
         result = {"reviewed_positions": completed, "status": "bounded_pass_complete",
-                  "can_write": False, "products_processed": False, "human_approved": False}
+                  "can_write": False, "products_processed": False, "human_approved": False,
+                  "timing": {"elapsed_ms":max(0,(time.perf_counter_ns()-run_start)//1_000_000),
+                             "completed_actions":len(timings),
+                             "action_elapsed_ms":sum(item["elapsed_ms"] for item in timings)}}
         _save(directory/"result.json", result)
         return result
     except Exception as exc:

@@ -31,6 +31,7 @@ const root=document.getElementById('rows');
 const download=document.getElementById('download');
 const error=document.getElementById('error');
 const inputs=[];
+const rowControls=new Map(),candidateControls=new Map();
 function node(tag,text,parent,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;if(parent)parent.append(e);return e;}
 function hasChanges(entry){return entry.decision!=='unreviewed'||entry.note.trim()||entry.candidates.some(c=>c.decision!=='unreviewed'||c.reason.trim());}
 function progress(){const count=draft.entries.filter(hasChanges).length;document.getElementById('progress').textContent=`С пояснениями: ${count} из ${draft.entries.length}`;download.disabled=count===0;}
@@ -43,8 +44,9 @@ for(const row of bundle.rows){
  node('h2',`Строка ${row.position}: ${row.title}`,section);
  node('p',`Прайс ${row.document} · ${row.supplier} · Цена из прайса: ${row.price_text}`,section,'meta');
  node('p',`Сохранённых кандидатов: ${row.candidates.length}. Это наблюдение, а не новый поиск.`,section,'muted');
- selector(section,'Что делать с этой строкой?', [['unreviewed','Ещё не смотрел'],['needs_more_search','Нужен другой поиск'],['skip','Пропустить'],['unsure','Не уверен']],v=>entry.decision=v);
- note(section,'Пояснение по строке (необязательно)',v=>entry.note=v);
+ const rowSelect=selector(section,'Что делать с этой строкой?', [['unreviewed','Ещё не смотрел'],['needs_more_search','Нужен другой поиск'],['skip','Пропустить'],['unsure','Не уверен']],v=>entry.decision=v);
+ const rowNote=note(section,'Пояснение по строке (необязательно)',v=>entry.note=v);
+ rowControls.set(row.row_key,{select:rowSelect,note:rowNote,entry});
  if(row.candidates.length===0)node('p','Пустой список не доказывает отсутствие товара. Создание карточки не предлагается.',section,'warning');
  for(const candidate of row.candidates){
   const item={candidate_key:candidate.candidate_key,decision:'unreviewed',reason:''};entry.candidates.push(item);
@@ -55,8 +57,9 @@ for(const row of bundle.rows){
    node('li',label+': '+d.message+details,list,group==='differences'?'difference':'');
   }
   const reason=note(article,'Почему? Для «подходит» и «не подходит» пояснение обязательно.',v=>item.reason=v);
-  selector(article,'Твоё мнение о кандидате', [['unreviewed','Ещё не смотрел'],['suitable','Подходит по моему мнению'],['unsuitable','Не подходит'],['unsure','Не уверен']],v=>{item.decision=v;reason.required=v==='suitable'||v==='unsuitable';});
+  const candidateSelect=selector(article,'Твоё мнение о кандидате', [['unreviewed','Ещё не смотрел'],['suitable','Подходит по моему мнению'],['unsuitable','Не подходит'],['unsure','Не уверен']],v=>{item.decision=v;reason.required=v==='suitable'||v==='unsuitable';});
   item._input=reason;
+  candidateControls.set(candidate.candidate_key,{select:candidateSelect,reason,item,rowKey:row.row_key});
  }
 }
 download.addEventListener('click',()=>{
@@ -69,6 +72,32 @@ download.addEventListener('click',()=>{
  if(blob.size>2000000){error.textContent='Файл слишком большой. Сократи пояснения или проверь меньше позиций за раз.';return;}
  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='ginger-feedback-'+bundle.bundle_id.slice(0,12)+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
  document.getElementById('saved').textContent='Файл с пояснениями подготовлен для скачивания. Пришли его в эту задачу для проверки и сохранения. В Ginger ничего не изменено.';
+});
+document.getElementById('restore').addEventListener('change',async event=>{
+ error.textContent='';
+ try{
+  const file=event.target.files[0];if(!file)return;if(file.size>2000000)throw new Error('Файл слишком большой.');
+  const loaded=JSON.parse(await file.text());
+  const keys=(object,expected)=>object&&typeof object==='object'&&!Array.isArray(object)&&Object.keys(object).sort().join(',')===expected.slice().sort().join(',');
+  const text=value=>typeof value==='string'&&value.length<=2000&&!/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value);
+  if(!keys(loaded,['schema','bundle_id','entries'])||loaded.schema!==1||loaded.bundle_id!==bundle.bundle_id||!Array.isArray(loaded.entries)||loaded.entries.length>bundle.rows.length)throw new Error('Файл относится к другой проверке или имеет неверный формат.');
+  const seen=new Set(),updates=[];
+  for(const entry of loaded.entries){
+   if(!keys(entry,['row_key','decision','note','candidates'])||!rowControls.has(entry.row_key)||seen.has(entry.row_key)||!['unreviewed','skip','unsure','needs_more_search'].includes(entry.decision)||!text(entry.note)||!Array.isArray(entry.candidates))throw new Error('Неверная строка в файле пояснений.');
+   seen.add(entry.row_key);const selected=new Set();
+   for(const item of entry.candidates){
+    const control=candidateControls.get(item.candidate_key);
+    if(!keys(item,['candidate_key','decision','reason'])||!control||control.rowKey!==entry.row_key||selected.has(item.candidate_key)||!['unreviewed','suitable','unsuitable','unsure'].includes(item.decision)||!text(item.reason)||(['suitable','unsuitable'].includes(item.decision)&&!item.reason.trim()))throw new Error('Неверный кандидат или отсутствует причина.');
+    selected.add(item.candidate_key);
+   }
+   updates.push(entry);
+  }
+  for(const entry of updates){
+   const control=rowControls.get(entry.row_key);control.entry.decision=entry.decision;control.entry.note=entry.note;control.select.value=entry.decision;control.note.value=entry.note;
+   for(const item of entry.candidates){const c=candidateControls.get(item.candidate_key);c.item.decision=item.decision;c.item.reason=item.reason;c.select.value=item.decision;c.reason.value=item.reason;c.reason.required=['suitable','unsuitable'].includes(item.decision);}
+  }
+  progress();document.getElementById('saved').textContent='Пояснения восстановлены только в этой странице. В Ginger ничего не изменено.';
+ }catch(problem){error.textContent='Не удалось восстановить пояснения: '+problem.message;}
 });
 progress();
 """
@@ -84,6 +113,7 @@ def render_form(bundle):
 <header><h1>Проверка кандидатов Ginger</h1><p>Отметь, что подходит и почему. Пояснения относятся только к показанным позициям. Они не связывают товары и не становятся общим правилом автоматически.</p></header>
 <main><div class="warning">Это отдельная локальная форма. Изменения остаются в открытой странице до скачивания файла. Закрытие страницы без сохранения потеряет введённые пояснения.</div>
 <div class="toolbar"><button id="download" type="button" disabled>Скачать мои пояснения</button><span id="progress" aria-live="polite"></span></div>
+<label for="restore">Продолжить с ранее скачанного файла пояснений</label><input id="restore" type="file" accept="application/json,.json">
 <p id="error" role="alert"></p><p id="saved" aria-live="polite"></p><div id="rows"></div>
 <p class="muted">Нет соединения с сервером Ginger. Подтверждение записи в этой форме отсутствует.</p></main>
 <script id="bundle" type="application/json" nonce="{nonce}">{data}</script><script nonce="{nonce}">{SCRIPT}</script></body></html>'''

@@ -127,3 +127,39 @@ def test_reconciliation_rejects_uncertain_state(tmp_path, defect):
         reconcile_stopped_prepare(journal.directory, run, report)
     assert not completion.exists()
     assert not (run/"reconciliation.json").exists()
+
+
+def test_success_records_observed_action_timings(tmp_path):
+    import json
+    result=run_batch(Backend(),tmp_path/"run",1,confirmed=True)
+    assert result["timing"]["completed_actions"] == 4
+    assert result["timing"]["elapsed_ms"] >= result["timing"]["action_elapsed_ms"] >= 0
+    observed=json.loads((tmp_path/"run/action-000-observed.json").read_text())
+    assert observed["execution"]["operation"] == "NextReviewed"
+    assert observed["execution"]["started_at_utc"].endswith("+00:00")
+
+
+def test_controller_failure_receipt_is_bounded_and_not_retried(tmp_path):
+    import json
+    from babyai.ginger_batch import ControllerFailure
+    class Failing(Backend):
+        def call(self,operation,target):
+            self.calls.append(operation)
+            raise ControllerFailure("failure",9,b"x"*20000,b"diagnostic")
+    backend=Failing()
+    with pytest.raises(ControllerFailure): run_batch(backend,tmp_path/"run",2,confirmed=True)
+    assert backend.calls == ["NextReviewed"]
+    failure=json.loads((tmp_path/"run/action-000-failure.json").read_text())
+    assert len(failure["controller_diagnostics"]["stdout_tail"]) == 16000
+    assert failure["controller_diagnostics"]["stderr_tail"] == "diagnostic"
+    assert failure["controller_diagnostics"]["output_truncated"]
+    assert not failure["automatic_retry_allowed"]
+    assert not (tmp_path/"run/action-000-observed.json").exists()
+
+
+def test_non_object_controller_result_is_not_recorded_as_observed(tmp_path):
+    class Invalid(Backend):
+        def call(self,operation,target): return []
+    with pytest.raises(PriceQueueError): run_batch(Invalid(),tmp_path/"run",1,confirmed=True)
+    assert (tmp_path/"run/action-000-failure.json").exists()
+    assert not (tmp_path/"run/action-000-observed.json").exists()

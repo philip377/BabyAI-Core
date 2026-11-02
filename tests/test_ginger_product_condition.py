@@ -46,3 +46,11 @@ def test_negated_positive_condition_not_asserted(title):
 
 def test_multiple_spaces_in_negation_do_not_create_full_evidence():
     assert condition_evidence("A не   полный флакон")["fill"] == ["partial"]
+
+
+def test_present_and_damaged_box_are_not_conflicting_facts():
+    facts=condition_evidence("A в коробке, мятая коробка")
+    assert facts["box"] == ["present"] and facts["box_condition"] == ["damaged"]
+    _,unknown=explain_conditions("A в коробке, мятая коробка","A в коробке")
+    assert len(unknown) == 1 and unknown[0]["field"] == "condition_box_condition"
+    assert "противоречивые" not in unknown[0]["message"]
