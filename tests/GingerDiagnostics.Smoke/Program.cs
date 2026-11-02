@@ -17,6 +17,22 @@ if (args.Length == 2 && args[0] == "--reports")
     return;
 }
 
+// Read-only row review finalization with a bounded hidden subprocess.
+if(args.Length >= 1 && args[0] == "--finish-row-review")
+{
+    if(args.Length != 3)throw new InvalidOperationException("Row journal and preparation directory required");
+    var script=Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,"../../../../../scripts/windows/ginger-row-step.ps1"));
+    var start=new ProcessStartInfo {
+        FileName=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","WindowsPowerShell","v1.0","powershell.exe"),
+        UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true,
+        StandardOutputEncoding=Encoding.UTF8,StandardErrorEncoding=Encoding.UTF8
+    };
+    foreach(var argument in new[]{"-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",script,"-Operation","FinishReview","-QueueDirectory",Path.GetFullPath(args[1]),"-PreparationDirectory",Path.GetFullPath(args[2])})
+        start.ArgumentList.Add(argument);
+    Console.WriteLine(await GingerDiagnostics.RunAsync(start,TimeSpan.FromSeconds(120),CancellationToken.None));
+    return;
+}
+
 // Bounded persistent filter controller; no default CI input.
 if(args.Length >= 1 && args[0] == "--filter-controller")
 {

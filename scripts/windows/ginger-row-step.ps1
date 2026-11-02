@@ -1,9 +1,10 @@
 ﻿# Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
-    [ValidateSet('Initialize','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','PrepareFilters','Status')][string]$Operation='Status',
+    [ValidateSet('Initialize','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','PrepareFilters','FinishReview','Status')][string]$Operation='Status',
     [Parameter(Mandatory=$true)][string]$QueueDirectory,
-    [switch]$ConfirmNavigation
+    [switch]$ConfirmNavigation,
+    [string]$PreparationDirectory
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -24,7 +25,7 @@ if($Operation -ne 'Initialize') {
     $state=Invoke-Journal 'status'
     if($Operation -in @('Step','Recover') -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; no input permitted'}
     if($Operation -eq 'Step' -and $state.requires_read -and -not $state.selected_sampled){throw 'Selected row must be sampled before navigation'}
-    if($Operation -in @('InspectSearch','InspectQuery','PrepareFilters') -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; observation blocked'}
+    if($Operation -in @('InspectSearch','InspectQuery','PrepareFilters','FinishReview') -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; observation blocked'}
     if($Operation -eq 'Read' -and ($null -ne $state.pending_attempt -or $state.selected_sampled)){throw 'Pending navigation or already sampled row'}
     if($Operation -eq 'Step' -and $null -eq $state.next_position){$state | ConvertTo-Json; return}
     if($Operation -eq 'Observe' -and $null -eq $state.pending_attempt){throw 'No pending row observation'}
@@ -59,6 +60,19 @@ if($Operation -eq 'Recover') {$rows=[GingerMenuAccess]::ReadProductRowsForRecove
 else {$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)}
 $before=Save-Rows $rows 'before.json'
 if($Operation -eq 'Initialize') {$result=Invoke-Journal 'create' $before}
+elseif($Operation -eq 'FinishReview') {
+    if(-not $PreparationDirectory){throw 'Preparation directory required'}
+    $first=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
+    Start-Sleep -Milliseconds 500
+    $second=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
+    $afterRows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
+    [GingerMenuAccess]::RequireSameProductRows($rows,$afterRows,$true)
+    $reportPath=Join-Path $diagnostics 'finish-review.json'
+    [pscustomobject]@{first=$first;second=$second;rows_report=[pscustomobject]@{rows=@($afterRows);process_id=$ownerId;can_write=$false}} | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $reportPath -Encoding UTF8
+    $raw=& $python -X utf8 (Join-Path $PSScriptRoot 'ginger-row-review.py') --row-directory $QueueDirectory --preparation-directory $PreparationDirectory --report $reportPath
+    if($LASTEXITCODE -ne 0){throw 'Row review blocked; no navigation permitted by this operation'}
+    $result=($raw -join "`n") | ConvertFrom-Json
+}
 elseif($Operation -eq 'PrepareFilters') {
     $context=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
     $afterRows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
