@@ -69,11 +69,14 @@ def _note(value):
 
 def validate_feedback(row_directory, bundle, feedback):
     rows = validate_bundle(row_directory, bundle)
-    if (not isinstance(feedback, dict) or set(feedback) != {"schema", "bundle_id", "entries"}
-            or type(feedback["schema"]) is not int or feedback["schema"] != 1
+    if (not isinstance(feedback, dict) or set(feedback) != {"schema", "bundle_id", "base_revision", "entries"}
+            or type(feedback["schema"]) is not int or feedback["schema"] != 2
             or feedback["bundle_id"] != bundle["bundle_id"] or not isinstance(feedback["entries"], list)
             or len(feedback["entries"]) > len(rows)):
         raise PriceQueueError("Feedback belongs to another bundle or has unsupported fields")
+    revision=feedback["base_revision"]
+    if revision is not None and (not isinstance(revision,str) or len(revision)!=64 or any(c not in "0123456789abcdef" for c in revision)):
+        raise PriceQueueError("Invalid feedback base revision")
     clean, seen = [], set()
     for entry in feedback["entries"]:
         if not isinstance(entry, dict) or set(entry) != {"row_key", "decision", "note", "candidates"}:
@@ -106,18 +109,14 @@ def validate_feedback(row_directory, bundle, feedback):
         if entry["decision"] != "unreviewed" or note or annotations:
             clean.append(dict(entry, note=note, candidates=annotations))
     if not clean: raise PriceQueueError("No human annotations to import")
-    return {"schema":1, "bundle_id":bundle["bundle_id"], "entries":clean,
+    return {"schema":2, "bundle_id":bundle["bundle_id"], "base_revision":revision, "entries":clean,
             "status":"annotation_only", "can_write":False, "can_match":False, "rules_applied":False}
 
 
-def import_feedback(row_directory, bundle, feedback):
-    # Caller holds batch_lock; observations may be old, but their exact receipt must still exist.
-    payload = validate_feedback(row_directory, bundle, feedback)
+def feedback_history(row_directory):
     directory = Path(str(Path(row_directory).resolve()) + ".feedback")
-    directory.mkdir(parents=True, exist_ok=True)
-    files = sorted(directory.iterdir())
-    prior = None
-    duplicate = None
+    files = sorted(directory.iterdir()) if directory.exists() else []
+    prior, records = None, []
     for index, path in enumerate(files):
         if path.name != f"{index:06d}.json": raise PriceQueueError("Invalid feedback history")
         record = _read(path)
@@ -126,13 +125,50 @@ def import_feedback(row_directory, bundle, feedback):
             raise PriceQueueError("Feedback history corrupted")
         old = record["payload"]
         if (not isinstance(old,dict) or old.get("status") != "annotation_only"
+                or type(old.get("schema")) is not int or old["schema"] not in (1,2) or not isinstance(old.get("entries"),list)
                 or any(old.get(key) is not False for key in ("can_write","can_match","rules_applied"))):
             raise PriceQueueError("Feedback history contains unsupported authority")
+        if old["schema"] == 2 and old.get("base_revision") != record["previous"]:
+            raise PriceQueueError("Feedback revision does not match its history")
         prior = record["record_id"]
-        if record["payload"] == payload: duplicate = path
-    if duplicate is not None: return {"record":str(duplicate), "status":"already_recorded", "can_write":False}
+        records.append((path,record))
+    return directory, records
+
+
+def latest_feedback(row_directory, bundle):
+    rows=validate_bundle(row_directory,bundle)
+    _,records=feedback_history(row_directory)
+    merged={}
+    for _,record in records:
+        entries=[]
+        for entry in record["payload"]["entries"]:
+            if not isinstance(entry,dict) or not isinstance(entry.get("row_key"),str):
+                raise PriceQueueError("Invalid historical feedback row")
+            if entry["row_key"] in rows: entries.append(entry)
+        if not entries: continue
+        checked=validate_feedback(row_directory,bundle,{"schema":2,"bundle_id":bundle["bundle_id"],"base_revision":None,"entries":entries})
+        for entry in checked["entries"]:
+            key=entry["row_key"]
+            prior=merged.get(key,{"candidates":[]})
+            candidates={item["candidate_key"]:item for item in prior["candidates"]}
+            candidates.update({item["candidate_key"]:item for item in entry["candidates"]})
+            merged[key]=dict(entry,candidates=list(candidates.values()))
+    return {"schema":2,"bundle_id":bundle["bundle_id"],"base_revision":records[-1][1]["record_id"] if records else None,"entries":list(merged.values())}
+
+
+def import_feedback(row_directory, bundle, feedback):
+    # Caller holds batch_lock; old observations must still have their exact receipts.
+    payload = validate_feedback(row_directory, bundle, feedback)
+    directory,records=feedback_history(row_directory)
+    for path,record in records:
+        if record["payload"] == payload:
+            return {"record":str(path), "status":"already_recorded", "can_write":False}
+    prior=records[-1][1]["record_id"] if records else None
+    if payload["base_revision"] != prior:
+        raise PriceQueueError("Feedback history changed; export the latest form before revising")
+    directory.mkdir(parents=True,exist_ok=True)
     body = {"payload":payload, "previous":prior}
-    path = directory/f"{len(files):06d}.json"
+    path = directory/f"{len(records):06d}.json"
     _save(path, dict(body, record_id=fingerprint(body)))
     return {"record":str(path), "status":"annotation_recorded", "can_write":False, "rules_applied":False}
 

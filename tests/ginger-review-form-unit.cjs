@@ -13,8 +13,9 @@ class Element {
  focus(){this.focused=true;}
 }
 const ids={};
-for(const id of ['bundle','rows','download','error','saved','progress','restore'])ids[id]=new Element('div');
+for(const id of ['bundle','rows','download','error','saved','progress','restore','initial-feedback'])ids[id]=new Element('div');
 ids.bundle.textContent=JSON.stringify(input.bundle);
+ids["initial-feedback"].textContent=JSON.stringify({schema:2,bundle_id:input.bundle.bundle_id,base_revision:null,entries:[]});
 let downloaded;
 const context={document:{getElementById:id=>ids[id],createElement:tag=>new Element(tag),body:new Element('body')},
  Blob,URL:{createObjectURL:blob=>{downloaded=blob;return 'blob:unit-only';},revokeObjectURL:()=>{}},setTimeout:fn=>fn()};

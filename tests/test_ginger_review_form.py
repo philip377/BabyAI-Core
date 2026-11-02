@@ -43,3 +43,19 @@ def test_form_script_download_matches_feedback_import_schema(tmp_path):
     assert result.returncode == 0, result.stderr
     payload=validate_feedback(journal.directory,bundle,json.loads(result.stdout))
     assert payload["status"] == "annotation_only" and not payload["can_write"]
+
+
+def test_export_preloads_exact_saved_annotations_as_inert_data(tmp_path):
+    from babyai.ginger_review_feedback import import_feedback
+    journal,_,bundle,feedback=feedback_fixture(tmp_path)
+    hostile='</script><script>alert(2)</script>'
+    feedback["entries"][0]["candidates"][0]["reason"]=hostile
+    import_feedback(journal.directory,bundle,feedback)
+    directory=tmp_path/"review-with-notes"
+    export_form(journal.directory,directory)
+    page=(directory/"index.html").read_text(encoding="utf-8")
+    assert hostile not in page
+    data=re.search(r'<script id="initial-feedback"[^>]*>(.*?)</script>',page,re.S).group(1)
+    loaded=json.loads(data)
+    assert loaded["entries"][0]["candidates"][0]["reason"] == hostile
+    assert loaded["base_revision"] is not None

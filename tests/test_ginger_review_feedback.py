@@ -11,7 +11,7 @@ def feedback_fixture(tmp_path):
     queue.add(saved)
     bundle=make_bundle(journal.directory)
     row=bundle["rows"][0]
-    feedback={"schema":1,"bundle_id":bundle["bundle_id"],"entries":[{
+    feedback={"schema":2,"bundle_id":bundle["bundle_id"],"base_revision":None,"entries":[{
         "row_key":row["row_key"],"decision":"unreviewed","note":"",
         "candidates":[{"candidate_key":row["candidates"][0]["candidate_key"],
                        "decision":"unsuitable","reason":"Другой вариант товара"}]}]}
@@ -29,6 +29,7 @@ def test_annotations_are_immutable_idempotent_and_never_approval(tmp_path):
     assert not record["payload"]["can_match"] and not record["payload"]["rules_applied"]
     assert before == {p.name:p.read_bytes() for p in queue.directory.iterdir()}
     feedback["entries"][0]["candidates"][0].update(decision="unsure",reason="Нужен штрихкод")
+    feedback["base_revision"]=record["record_id"]
     second=import_feedback(journal.directory,bundle,feedback)
     assert second["record"] != result["record"]
     assert json.loads(__import__('pathlib').Path(second["record"]).read_text(encoding="utf-8"))["previous"] == record["record_id"]
@@ -119,7 +120,7 @@ def test_cli_export_import_round_trip_from_other_directory(tmp_path):
     assert export.returncode == 0,export.stderr
     bundle=json.loads((output/"bundle.json").read_text(encoding="utf-8"))
     row=bundle["rows"][0]
-    feedback={"schema":1,"bundle_id":bundle["bundle_id"],"entries":[{"row_key":row["row_key"],"decision":"unsure",
+    feedback={"schema":2,"bundle_id":bundle["bundle_id"],"base_revision":None,"entries":[{"row_key":row["row_key"],"decision":"unsure",
         "note":"ТЕСТ: сначала проверить объём", "candidates":[]}]}
     incoming=tmp_path/"my-feedback.json"
     incoming.write_text(json.dumps(feedback,ensure_ascii=False),encoding="utf-8-sig")
@@ -133,3 +134,40 @@ def test_cli_export_import_round_trip_from_other_directory(tmp_path):
     assert second.returncode == 0,second.stderr
     assert json.loads(second.stdout)["status"] == "already_recorded"
     assert queue.status()["human_approved"] is False
+
+
+def test_stale_form_cannot_overwrite_newer_opinion(tmp_path):
+    journal,_,bundle,feedback=feedback_fixture(tmp_path)
+    import_feedback(journal.directory,bundle,feedback)
+    stale=copy.deepcopy(feedback)
+    stale["entries"][0]["candidates"][0].update(decision="suitable",reason="Изменил мнение")
+    with pytest.raises(PriceQueueError,match="history changed"):
+        import_feedback(journal.directory,bundle,stale)
+
+
+def test_latest_annotations_preload_and_allow_explicit_reversion(tmp_path):
+    from babyai.ginger_review_feedback import latest_feedback
+    journal,_,bundle,feedback=feedback_fixture(tmp_path)
+    import_feedback(journal.directory,bundle,feedback)
+    current=latest_feedback(journal.directory,bundle)
+    assert current["entries"][0]["candidates"][0]["decision"] == "unsuitable"
+    current["entries"][0]["candidates"][0].update(decision="unsure",reason="Уточняю")
+    import_feedback(journal.directory,bundle,current)
+    reverted=latest_feedback(journal.directory,bundle)
+    reverted["entries"][0]["candidates"][0]=copy.deepcopy(feedback["entries"][0]["candidates"][0])
+    assert import_feedback(journal.directory,bundle,reverted)["status"] == "annotation_recorded"
+    assert latest_feedback(journal.directory,bundle)["entries"][0]["candidates"][0]["decision"] == "unsuitable"
+    assert import_feedback(journal.directory,bundle,current)["status"] == "already_recorded"
+    assert latest_feedback(journal.directory,bundle)["entries"][0]["candidates"][0]["decision"] == "unsuitable"
+
+
+def test_old_annotation_not_transferred_to_changed_candidate(tmp_path):
+    from babyai.ginger_review_feedback import latest_feedback
+    journal,queue,bundle,feedback=feedback_fixture(tmp_path)
+    import_feedback(journal.directory,bundle,feedback)
+    path=next(queue.directory.glob("*.json"))
+    report=json.loads(path.read_text(encoding="utf-8"))
+    report["review"]["candidates"][0]["candidate_title"]="Another candidate"
+    path.write_text(json.dumps(report),encoding="utf-8")
+    new_bundle=make_bundle(journal.directory)
+    assert latest_feedback(journal.directory,new_bundle)["entries"] == []

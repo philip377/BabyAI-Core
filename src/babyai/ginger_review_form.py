@@ -5,7 +5,7 @@ import secrets
 from pathlib import Path
 from .ginger_batch import batch_lock
 from .ginger_filter_plan import _save
-from .ginger_review_feedback import make_bundle
+from .ginger_review_feedback import make_bundle, latest_feedback
 
 STYLE = """
 :root{font:16px/1.5 system-ui,sans-serif;color:#182635;background:#edf2f6}body{margin:0}
@@ -26,7 +26,8 @@ label{display:block;margin:12px 0 5px;font-weight:600}ul{padding-left:24px}.diff
 SCRIPT = r"""
 'use strict';
 const bundle=JSON.parse(document.getElementById('bundle').textContent);
-const draft={schema:1,bundle_id:bundle.bundle_id,entries:[]};
+const savedInitial=JSON.parse(document.getElementById("initial-feedback").textContent);
+const draft={schema:2,bundle_id:bundle.bundle_id,base_revision:savedInitial.base_revision,entries:[]};
 const root=document.getElementById('rows');
 const download=document.getElementById('download');
 const error=document.getElementById('error');
@@ -67,20 +68,16 @@ download.addEventListener('click',()=>{
  for(const entry of draft.entries)for(const candidate of entry.candidates){if((candidate.decision==='suitable'||candidate.decision==='unsuitable')&&!candidate.reason.trim()){
   error.textContent='Добавь причину выбранного ответа. Это поможет понять правило.';candidate._input.focus();return;
  }}
- const payload={schema:draft.schema,bundle_id:draft.bundle_id,entries:draft.entries.map(e=>({...e,candidates:e.candidates.map(({_input,...c})=>c)}))};
+ const payload={schema:draft.schema,bundle_id:draft.bundle_id,base_revision:draft.base_revision,entries:draft.entries.map(e=>({...e,candidates:e.candidates.map(({_input,...c})=>c)}))};
  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
  if(blob.size>2000000){error.textContent='Файл слишком большой. Сократи пояснения или проверь меньше позиций за раз.';return;}
  const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='ginger-feedback-'+bundle.bundle_id.slice(0,12)+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
  document.getElementById('saved').textContent='Файл с пояснениями подготовлен для скачивания. Пришли его в эту задачу для проверки и сохранения. В Ginger ничего не изменено.';
 });
-document.getElementById('restore').addEventListener('change',async event=>{
- error.textContent='';
- try{
-  const file=event.target.files[0];if(!file)return;if(file.size>2000000)throw new Error('Файл слишком большой.');
-  const loaded=JSON.parse(await file.text());
+function applyFeedback(loaded){
   const keys=(object,expected)=>object&&typeof object==='object'&&!Array.isArray(object)&&Object.keys(object).sort().join(',')===expected.slice().sort().join(',');
   const text=value=>typeof value==='string'&&value.length<=2000&&!/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value);
-  if(!keys(loaded,['schema','bundle_id','entries'])||loaded.schema!==1||loaded.bundle_id!==bundle.bundle_id||!Array.isArray(loaded.entries)||loaded.entries.length>bundle.rows.length)throw new Error('Файл относится к другой проверке или имеет неверный формат.');
+  if(!keys(loaded,['schema','bundle_id','base_revision','entries'])||loaded.schema!==2||loaded.base_revision!==draft.base_revision||loaded.bundle_id!==bundle.bundle_id||!Array.isArray(loaded.entries)||loaded.entries.length>bundle.rows.length)throw new Error('Файл относится к другой проверке или имеет неверный формат.');
   const seen=new Set(),updates=[];
   for(const entry of loaded.entries){
    if(!keys(entry,['row_key','decision','note','candidates'])||!rowControls.has(entry.row_key)||seen.has(entry.row_key)||!['unreviewed','skip','unsure','needs_more_search'].includes(entry.decision)||!text(entry.note)||!Array.isArray(entry.candidates))throw new Error('Неверная строка в файле пояснений.');
@@ -97,16 +94,28 @@ document.getElementById('restore').addEventListener('change',async event=>{
    for(const item of entry.candidates){const c=candidateControls.get(item.candidate_key);c.item.decision=item.decision;c.item.reason=item.reason;c.select.value=item.decision;c.reason.value=item.reason;c.reason.required=['suitable','unsuitable'].includes(item.decision);}
   }
   progress();document.getElementById('saved').textContent='Пояснения восстановлены только в этой странице. В Ginger ничего не изменено.';
+}
+document.getElementById('restore').addEventListener('change',async event=>{
+ error.textContent='';
+ try{
+  const file=event.target.files[0];if(!file)return;if(file.size>2000000)throw new Error('Файл слишком большой.');
+  applyFeedback(JSON.parse(await file.text()));
  }catch(problem){error.textContent='Не удалось восстановить пояснения: '+problem.message;}
 });
+try{
+ const initial=savedInitial;
+ if(initial.entries.length){applyFeedback(initial);document.getElementById('saved').textContent='Показаны ранее сохранённые пояснения к этим же наблюдениям. Это не разрешение на связывание.';}
+}catch(problem){error.textContent='Не удалось загрузить сохранённые пояснения: '+problem.message;}
 progress();
 """
 
 
-def render_form(bundle):
+def render_form(bundle, initial_feedback=None):
     nonce=secrets.token_hex(16)
     # Literal backslash-u is required; data cannot terminate the inert JSON script element.
     data=json.dumps(bundle,ensure_ascii=False).replace("&",chr(92)+"u0026").replace("<",chr(92)+"u003c").replace(">",chr(92)+"u003e")
+    initial=initial_feedback if initial_feedback is not None else {"schema":2,"bundle_id":bundle["bundle_id"],"base_revision":None,"entries":[]}
+    initial_data=json.dumps(initial,ensure_ascii=False).replace("&",chr(92)+"u0026").replace("<",chr(92)+"u003c").replace(">",chr(92)+"u003e")
     return f'''<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; connect-src 'none'; form-action 'none'; base-uri 'none'">
 <title>UNIX — проверка кандидатов Ginger</title><style nonce="{nonce}">{STYLE}</style></head><body>
@@ -116,15 +125,16 @@ def render_form(bundle):
 <label for="restore">Продолжить с ранее скачанного файла пояснений</label><input id="restore" type="file" accept="application/json,.json">
 <p id="error" role="alert"></p><p id="saved" aria-live="polite"></p><div id="rows"></div>
 <p class="muted">Нет соединения с сервером Ginger. Подтверждение записи в этой форме отсутствует.</p></main>
-<script id="bundle" type="application/json" nonce="{nonce}">{data}</script><script nonce="{nonce}">{SCRIPT}</script></body></html>'''
+<script id="bundle" type="application/json" nonce="{nonce}">{data}</script><script id="initial-feedback" type="application/json" nonce="{nonce}">{initial_data}</script><script nonce="{nonce}">{SCRIPT}</script></body></html>'''
 
 
 def export_form(row_directory, output_directory):
     bundle=make_bundle(row_directory)
+    initial=latest_feedback(row_directory,bundle)
     directory=Path(output_directory)
     directory.mkdir(parents=True,exist_ok=False)
     _save(directory/"bundle.json",bundle)
-    with (directory/"index.html").open("x",encoding="utf-8") as stream: stream.write(render_form(bundle))
+    with (directory/"index.html").open("x",encoding="utf-8") as stream: stream.write(render_form(bundle,initial))
     return {"form":str((directory/"index.html").resolve()),"bundle":str((directory/"bundle.json").resolve()),"can_write":False}
 
 
