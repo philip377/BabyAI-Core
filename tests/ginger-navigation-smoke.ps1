@@ -323,6 +323,10 @@ try {
     $denied=$false
     try{[GingerMenuAccess]::VerifyEnabledSearchWord($context.SearchWords,$context.SearchWords,'Synthetic')}catch{$denied=$true}
     if(-not $denied){throw 'Unchanged star accepted as enabled'}
+    if(-not [GingerMenuAccess]::SearchWordsDescribeSource(@('CARTIER','DELICES','DE','parfum','30','ml','vintage'),'CARTIER DELICES DE CARTIER parfum 30 ml vintage')){throw 'Nonadjacent duplicate rejected'}
+    if([GingerMenuAccess]::SearchWordsDescribeSource(@('CARTIER','DE','parfum','30','ml','vintage'),'CARTIER DELICES DE CARTIER parfum 30 ml vintage')){throw 'Missing variant accepted'}
+    if([GingerMenuAccess]::SearchWordsDescribeSource(@('A','30','ml','B'),'A 30 ml B 30 ml')){throw 'Nonadjacent quantity removed'}
+    if([GingerMenuAccess]::SearchWordsDescribeSource(@('A','/','B'),'A / B / A')){throw 'Punctuation removed'}
     if(-not [GingerMenuAccess]::SearchWordsDescribeSource(@('HUGO','BOSS','SOUL','90','ml'),'HUGO BOSS BOSS SOUL 90 ml')){throw 'Adjacent duplicate word rejected'}
     if([GingerMenuAccess]::SearchWordsDescribeSource(@('HUGO','BOSS','90','ml'),'HUGO BOSS BOSS SOUL 90 ml')){throw 'Missing variant accepted after deduplication'}
     if([GingerMenuAccess]::SearchWordsDescribeSource(@('A','90','ml'),'A 90 90 ml')){throw 'Repeated quantity silently removed'}

@@ -15,12 +15,15 @@ def propose_filters(context):
     panel = context["SearchWords"]
     rows = panel["Candidates"]
     words = [row["Title"] for row in rows]
-    tokens = lambda value: re.findall(r"\w+|[^\w\s]", value.casefold())
+    tokens = lambda value: re.findall(r"[^\W\d_]+|\d+|[^\s]", value.casefold())
     expected = tokens(panel["Source"]["Title"])
     collapsed = []
+    seen_letters = set()
     for token in expected:
-        if not (collapsed and token.isalpha() and collapsed[-1] == token):
+        if not (token.isalpha() and token in seen_letters):
             collapsed.append(token)
+        if token.isalpha():
+            seen_letters.add(token)
     actual = tokens(" ".join(words))
     if not words or (actual != expected and actual != collapsed):
         raise PriceQueueError("Search words do not describe selected supplier row")

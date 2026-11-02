@@ -83,3 +83,22 @@ def test_adjacent_duplicate_supplier_word_collapsed_by_ginger(tmp_path):
     assert propose_filters(ctx)["steps"]
     ctx["SearchWords"]["Candidates"][2]["Title"]="OTHER"
     with pytest.raises(PriceQueueError): propose_filters(ctx)
+
+
+@pytest.mark.parametrize("source,words,allowed", [
+    ("CHANEL CRISTALLE edt 100ml tester", "CHANEL CRISTALLE edt 100 ml tester", True),
+    ("CHANEL CRISTALLE edt 100ml tester", "CHANEL CRISTALLE edt 10 ml tester", False),
+    ("CARTIER DELICES DE CARTIER parfum 30 ml vintage", "CARTIER DELICES DE parfum 30 ml vintage", True),
+    ("CARTIER DELICES DE CARTIER parfum 30 ml vintage", "CARTIER DE parfum 30 ml vintage", False),
+    ("CARTIER DELICES DE CARTIER parfum 30 ml vintage", "DELICES CARTIER DE parfum 30 ml vintage", False),
+    ("A 30 ml B 30 ml", "A 30 ml B", False),
+    ("A / B / A", "A / B", False),
+])
+def test_nonadjacent_duplicate_preserves_variants_order_numbers_punctuation(tmp_path, source, words, allowed):
+    _, _, ctx=fixture(tmp_path)
+    for panel in ("SearchWords","Products"): ctx[panel]["Source"]["Title"]=source
+    template=ctx["SearchWords"]["Candidates"][0]
+    ctx["SearchWords"]["Candidates"]=[dict(template,Title=word,ObservedPosition=i) for i,word in enumerate(words.split(),1)]
+    if allowed: assert propose_filters(ctx)["can_match"] is False
+    else:
+        with pytest.raises(PriceQueueError): propose_filters(ctx)
