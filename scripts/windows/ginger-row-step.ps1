@@ -1,7 +1,7 @@
 # Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
-    [ValidateSet('Initialize','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','PrepareFilters','PrepareRemoval','FinishReview','NextReviewed','Status')][string]$Operation='Status',
+    [ValidateSet('Initialize','Compare','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','PrepareFilters','PrepareRemoval','FinishReview','NextReviewed','Status')][string]$Operation='Status',
     [Parameter(Mandatory=$true)][string]$QueueDirectory,
     [switch]$ConfirmNavigation,
     [string]$PreparationDirectory,
@@ -64,10 +64,11 @@ if($Operation -eq 'InspectSelection') {
     [pscustomobject]@{observed_rows=$evidence.Count;selected_positions=$selected;diagnostics=$diagnostics;can_write=$false;input_sent=$false} | ConvertTo-Json -Depth 4
     return
 }
-if($Operation -eq 'Recover') {$rows=[GingerMenuAccess]::ReadProductRowsForRecovery($window,$ownerId)}
+if($Operation -in @('Recover','Compare')) {$rows=[GingerMenuAccess]::ReadProductRowsForRecovery($window,$ownerId)}
 else {$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)}
 $before=Save-Rows $rows 'before.json'
-if($Operation -eq 'Initialize') {$result=Invoke-Journal 'create' $before}
+if($Operation -eq 'Compare') {$result=Invoke-Journal 'compare' $before}
+elseif($Operation -eq 'Initialize') {$result=Invoke-Journal 'create' $before}
 elseif($Operation -eq 'FinishReview') {
     if(-not $PreparationDirectory){throw 'Preparation directory required'}
     $first=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)

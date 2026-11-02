@@ -242,3 +242,28 @@ def test_pending_forward_navigation_cannot_be_recovered(tmp_path):
     with pytest.raises(PriceQueueError): journal.begin_recovery(multi_report())
     with pytest.raises(PriceQueueError): journal.observe_recovery(token, report())
     assert journal.status()['pending_kind'] == 'begin'
+
+
+@pytest.mark.parametrize('case,expected', [
+    ('same', 'checkpoint_observed'), ('selection', 'selection_changed'),
+    ('ambiguous', 'selection_ambiguous'), ('process', 'table_changed'),
+    ('price', 'table_changed'), ('pending', 'pending_observation_required')])
+def test_compare_never_adopts_new_selection_or_clears_intent(tmp_path, case, expected):
+    journal = RowNavigationJournal(tmp_path)
+    journal.create(report())
+    fresh = report()
+    if case == 'selection': fresh = report(2)
+    elif case == 'ambiguous': fresh['rows'][1]['Selected'] = True
+    elif case == 'process': fresh['process_id'] += 1
+    elif case == 'price': fresh['rows'][0]['Observation']['PriceText'] = '999'
+    elif case == 'pending':
+        journal.begin(report())
+        fresh = report(2)
+    original = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    result = journal.compare(fresh)
+    assert result['status'] == expected
+    assert result['journal_position'] == 1
+    assert all(result[key] is False for key in ('input_sent', 'journal_updated', 'can_write', 'can_match', 'candidate_freshness_verified'))
+    assert original == {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    assert journal.status()['selected_position'] == 1
+    if case == 'pending': assert journal.status()['pending_attempt'] is not None

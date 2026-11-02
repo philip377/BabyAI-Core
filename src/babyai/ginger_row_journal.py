@@ -107,6 +107,27 @@ class RowNavigationJournal:
                 'next_position': selected + 1 if selected < count else None,
                 'can_write': False, 'products_processed': False, 'candidate_freshness_verified': False}
 
+    def compare(self, report):
+        """Classify a fresh observation without adopting selection or clearing intent."""
+        digest, selected, count, pending, _, _, _, _ = self._state()
+        fresh_digest, fresh_selected, fresh_count = snapshot(report, allow_ambiguous=True)
+        same_table = (digest, count) == (fresh_digest, fresh_count)
+        if not same_table:
+            status = 'table_changed'
+        elif pending is not None:
+            status = 'pending_observation_required'
+        elif fresh_selected is None:
+            status = 'selection_ambiguous'
+        elif fresh_selected != selected:
+            status = 'selection_changed'
+        else:
+            status = 'checkpoint_observed'
+        return {'status': status, 'same_table': same_table,
+                'journal_position': selected, 'observed_position': fresh_selected,
+                'pending_attempt': pending, 'input_sent': False,
+                'journal_updated': False, 'can_write': False, 'can_match': False,
+                'candidate_freshness_verified': False}
+
     def begin(self, report):
         digest, selected, count, pending, sequence, sampled, require_read, pending_kind = self._state()
         if pending is not None:
@@ -189,7 +210,7 @@ class RowNavigationJournal:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['create', 'status', 'begin', 'observe', 'sample', 'recover', 'restored'])
+    parser.add_argument('action', choices=['create', 'status', 'compare', 'begin', 'observe', 'sample', 'recover', 'restored'])
     parser.add_argument('--directory', required=True, type=Path)
     parser.add_argument('--report', type=Path)
     parser.add_argument('--attempt')
@@ -202,6 +223,9 @@ def main():
             if args.report is None:
                 parser.error('--report required')
             report = PriceVisitQueue._read(args.report)
+        if args.action == 'compare':
+            print(json.dumps(journal.compare(report)))
+            return
         if args.action == 'create':
             journal.create(report, require_read=args.require_read)
         elif args.action == 'begin':
