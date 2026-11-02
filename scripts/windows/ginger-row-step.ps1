@@ -1,7 +1,7 @@
 ﻿# Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
-    [ValidateSet('Initialize','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','PrepareFilters','FinishReview','Status')][string]$Operation='Status',
+    [ValidateSet('Initialize','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','PrepareFilters','FinishReview','NextReviewed','Status')][string]$Operation='Status',
     [Parameter(Mandatory=$true)][string]$QueueDirectory,
     [switch]$ConfirmNavigation,
     [string]$PreparationDirectory
@@ -18,6 +18,12 @@ function Invoke-Journal([string]$Action,[string]$ReportPath='',[string]$Attempt=
     $raw=& $python @arguments
     if($LASTEXITCODE -ne 0){throw 'Row journal blocked; no automatic retry'}
     return (($raw -join "`n") | ConvertFrom-Json)
+}
+if($Operation -eq 'NextReviewed') {
+    if(-not $ConfirmNavigation){throw 'Navigation confirmation required'}
+    $gate=& $python -X utf8 (Join-Path $PSScriptRoot 'ginger-review-queue.py') gate-next --row-directory $QueueDirectory
+    if($LASTEXITCODE -ne 0){throw 'Current review not queued; no input permitted'}
+    $Operation='Step'
 }
 if($Operation -eq 'Status'){Invoke-Journal 'status' | ConvertTo-Json; return}
 if($Operation -in @('Step','Recover') -and -not $ConfirmNavigation){throw 'Navigation confirmation required'}
@@ -72,6 +78,9 @@ elseif($Operation -eq 'FinishReview') {
     $raw=& $python -X utf8 (Join-Path $PSScriptRoot 'ginger-row-review.py') --row-directory $QueueDirectory --preparation-directory $PreparationDirectory --report $reportPath
     if($LASTEXITCODE -ne 0){throw 'Row review blocked; no navigation permitted by this operation'}
     $result=($raw -join "`n") | ConvertFrom-Json
+    $queued=& $python -X utf8 (Join-Path $PSScriptRoot 'ginger-review-queue.py') add --row-directory $QueueDirectory --report $result.report
+    if($LASTEXITCODE -ne 0){throw 'Row read but review queue blocked; do not advance'}
+    $result | Add-Member -NotePropertyName review_queue -NotePropertyValue (($queued -join "`n") | ConvertFrom-Json)
 }
 elseif($Operation -eq 'PrepareFilters') {
     $context=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)

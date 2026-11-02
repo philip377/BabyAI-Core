@@ -74,9 +74,9 @@ if (args.Length >= 1 && (args[0] == "--enable-search-word" || args[0] == "--disa
 // Explicit row receipt trial. Default CI never invokes this branch.
 if (args.Length >= 1 && args[0] == "--row-controller")
 {
-    if (args.Length is < 3 or > 4 || args[1] is not ("Initialize" or "Step" or "Recover" or "Observe" or "Read" or "InspectSearch" or "InspectQuery" or "InspectSelection" or "PrepareFilters" or "Status") ||
-        (args[1] is "Step" or "Recover" && (args.Length != 4 || args[3] != "--confirm-navigation")) ||
-        (args[1] is not ("Step" or "Recover") && args.Length != 3))
+    if (args.Length is < 3 or > 4 || args[1] is not ("Initialize" or "Step" or "Recover" or "Observe" or "Read" or "InspectSearch" or "InspectQuery" or "InspectSelection" or "PrepareFilters" or "NextReviewed" or "Status") ||
+        (args[1] is "Step" or "Recover" or "NextReviewed" && (args.Length != 4 || args[3] != "--confirm-navigation")) ||
+        (args[1] is not ("Step" or "Recover" or "NextReviewed") && args.Length != 3))
         throw new InvalidOperationException("Explicit row operation and navigation confirmation required");
     var script = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
         "../../../../../scripts/windows/ginger-row-step.ps1"));
@@ -90,7 +90,7 @@ if (args.Length >= 1 && args[0] == "--row-controller")
     foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
         "-File", script, "-Operation", args[1], "-QueueDirectory", Path.GetFullPath(args[2]) })
         start.ArgumentList.Add(argument);
-    if (args[1] is "Step" or "Recover") start.ArgumentList.Add("-ConfirmNavigation");
+    if (args[1] is "Step" or "Recover" or "NextReviewed") start.ArgumentList.Add("-ConfirmNavigation");
     Console.WriteLine(await GingerDiagnostics.RunAsync(start, TimeSpan.FromSeconds(60), CancellationToken.None));
     return;
 }
