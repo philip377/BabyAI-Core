@@ -896,8 +896,16 @@ public static class GingerMenuAccess {
         string pattern=@"\p{L}+|\p{N}+|[^\s]";
         var expected=System.Text.RegularExpressions.Regex.Matches(source.ToLowerInvariant(),pattern);
         var actual=System.Text.RegularExpressions.Regex.Matches(String.Join(" ",words).ToLowerInvariant(),pattern);
-        if(expected.Count!=actual.Count)return false;
-        for(int i=0;i<expected.Count;i++)if(expected[i].Value!=actual[i].Value)return false;
+        List<string> collapsed=new List<string>();
+        foreach(System.Text.RegularExpressions.Match token in expected) {
+            bool letters=System.Text.RegularExpressions.Regex.IsMatch(token.Value,@"^\p{L}+$");
+            if(collapsed.Count==0 || !letters || collapsed[collapsed.Count-1]!=token.Value)collapsed.Add(token.Value);
+        }
+        bool exact=expected.Count==actual.Count;
+        if(exact)for(int i=0;i<expected.Count;i++)if(expected[i].Value!=actual[i].Value){exact=false;break;}
+        if(exact)return true;
+        if(collapsed.Count!=actual.Count)return false;
+        for(int i=0;i<actual.Count;i++)if(collapsed[i]!=actual[i].Value)return false;
         return true;
     }
     private static bool SearchWordState(GingerCatalogueCandidate row,bool enabled) {

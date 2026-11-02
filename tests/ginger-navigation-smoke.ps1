@@ -323,6 +323,9 @@ try {
     $denied=$false
     try{[GingerMenuAccess]::VerifyEnabledSearchWord($context.SearchWords,$context.SearchWords,'Synthetic')}catch{$denied=$true}
     if(-not $denied){throw 'Unchanged star accepted as enabled'}
+    if(-not [GingerMenuAccess]::SearchWordsDescribeSource(@('HUGO','BOSS','SOUL','90','ml'),'HUGO BOSS BOSS SOUL 90 ml')){throw 'Adjacent duplicate word rejected'}
+    if([GingerMenuAccess]::SearchWordsDescribeSource(@('HUGO','BOSS','90','ml'),'HUGO BOSS BOSS SOUL 90 ml')){throw 'Missing variant accepted after deduplication'}
+    if([GingerMenuAccess]::SearchWordsDescribeSource(@('A','90','ml'),'A 90 90 ml')){throw 'Repeated quantity silently removed'}
     if(-not [GingerMenuAccess]::SearchWordsDescribeSource(@('MARBERT','MAN','TOO','ash','/','l','100','ml'),'MARBERT MAN TOO ash/l 100 ml')){throw 'Punctuation tokenization rejected'}
     if([GingerMenuAccess]::SearchWordsDescribeSource(@('MARBERT','MANTOO','100','ml'),'MARBERT MAN TOO 100 ml')){throw 'Different words accepted'}
     if([GingerMenuAccess]::SearchWordsDescribeSource(@('MARBERT','100','ml'),'MARBERT 50 ml')){throw 'Different volume accepted'}

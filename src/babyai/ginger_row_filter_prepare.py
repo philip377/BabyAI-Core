@@ -16,7 +16,13 @@ def propose_filters(context):
     rows = panel["Candidates"]
     words = [row["Title"] for row in rows]
     tokens = lambda value: re.findall(r"\w+|[^\w\s]", value.casefold())
-    if not words or tokens(" ".join(words)) != tokens(panel["Source"]["Title"]):
+    expected = tokens(panel["Source"]["Title"])
+    collapsed = []
+    for token in expected:
+        if not (collapsed and token.isalpha() and collapsed[-1] == token):
+            collapsed.append(token)
+    actual = tokens(" ".join(words))
+    if not words or (actual != expected and actual != collapsed):
         raise PriceQueueError("Search words do not describe selected supplier row")
     proposed = plan_ginger_word_search(
         SupplierPosition(panel["Source"]["Supplier"], panel["Source"]["Title"]), [],

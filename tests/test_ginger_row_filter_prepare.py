@@ -73,3 +73,13 @@ def test_existing_proposal_not_replaced(tmp_path):
     path=tmp_path/"proposal.json"; path.write_text("keep")
     with pytest.raises(FileExistsError): prepare_row_filters(journal.directory, report, ctx, tmp_path/"filters", path)
     assert path.read_text() == "keep"
+
+
+def test_adjacent_duplicate_supplier_word_collapsed_by_ginger(tmp_path):
+    _, _, ctx=fixture(tmp_path)
+    for panel in ("SearchWords","Products"): ctx[panel]["Source"]["Title"]="HUGO BOSS BOSS SOUL MAN edt 90 ml"
+    template=ctx["SearchWords"]["Candidates"][0]
+    ctx["SearchWords"]["Candidates"]=[dict(template,Title=word,ObservedPosition=i) for i,word in enumerate("HUGO BOSS SOUL MAN edt 90 ml".split(),1)]
+    assert propose_filters(ctx)["steps"]
+    ctx["SearchWords"]["Candidates"][2]["Title"]="OTHER"
+    with pytest.raises(PriceQueueError): propose_filters(ctx)
