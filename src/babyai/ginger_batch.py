@@ -5,8 +5,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from .ginger_filter_plan import FilterPlan, _save
-from .ginger_row_journal import RowNavigationJournal
+from .ginger_filter_plan import FilterPlan, _save, _read
+from .ginger_row_journal import RowNavigationJournal, snapshot
 from .ginger_review_queue import ReviewQueue
 from .ginger_price_queue import PriceQueueError
 
@@ -39,13 +39,54 @@ def reserve_batch(row_directory, run_directory):
         if path.name != f"{index:04d}-intent.json" or not (history/f"{index:04d}-complete.json").is_file():
             raise PriceQueueError("Earlier batch unresolved; reconcile it before a new run")
         # Incomplete JSON also blocks a new run.
-        from .ginger_filter_plan import _read
         _read(path)
-        if _read(history/f"{index:04d}-complete.json").get("status") != "bounded_pass_complete":
+        if _read(history/f"{index:04d}-complete.json").get("status") not in ("bounded_pass_complete", "stopped_reconciled"):
             raise PriceQueueError("Earlier batch completion is invalid")
     index = len(intents)
     _save(history/f"{index:04d}-intent.json", {"run_directory": str(Path(run_directory).resolve())})
     return history/f"{index:04d}-complete.json"
+
+
+def reconcile_stopped_prepare(row_directory, run_directory, fresh_report):
+    """Close only a failed read-only PrepareFilters after its row was separately reviewed."""
+    directory = Path(run_directory).resolve()
+    history = Path(str(Path(row_directory).resolve()) + ".batches")
+    reservations = sorted(history.glob("*-intent.json"))
+    if not reservations or _read(reservations[-1]).get("run_directory") != str(directory):
+        raise PriceQueueError("Only the latest reserved batch can be reconciled")
+    _read(directory/"stopped.json")
+    intents = sorted(directory.glob("action-*-intent.json"))
+    if len(intents) < 2:
+        raise PriceQueueError("No confirmed navigation before failed preparation")
+    for index, path in enumerate(intents):
+        if path.name != f"action-{index:03d}-intent.json":
+            raise PriceQueueError("Missing batch action")
+        if index < len(intents)-1: _read(directory/f"action-{index:03d}-observed.json")
+    last = len(intents)-1
+    if (_read(intents[-1]).get("operation") != "PrepareFilters"
+            or (directory/f"action-{last:03d}-observed.json").exists()
+            or _read(intents[-2]).get("operation") != "NextReviewed"):
+        raise PriceQueueError("Only an uncompleted read-only preparation is supported")
+    previous = _read(directory/f"action-{last-1:03d}-observed.json")["status"]
+    position = previous["selected_position"]
+    if type(position) is not int or previous.get("pending_attempt") is not None:
+        raise PriceQueueError("Prior navigation was not confirmed")
+    journal = RowNavigationJournal(row_directory)
+    digest, selected, count, pending, _, sampled, _, _ = journal._state()
+    if (pending is not None or not sampled or selected != position
+            or snapshot(fresh_report) != (digest, selected, count)):
+        raise PriceQueueError("Fresh row table does not match reviewed checkpoint")
+    _, _, queued = ReviewQueue(row_directory)._validated()
+    if selected not in queued: raise PriceQueueError("Current review is not queued")
+    result = {"status": "stopped_reconciled", "failed_operation": "PrepareFilters",
+              "source_position": selected, "row_snapshot_digest": digest,
+              "sample_sha": queued[selected]["sample_sha"], "can_write": False,
+              "original_batch_completed": False, "input_replayed": False}
+    for path in (directory/"reconciliation.json", history/(reservations[-1].name.replace("-intent", "-complete"))):
+        if path.exists():
+            if _read(path) != result: raise PriceQueueError("Existing reconciliation differs")
+        else: _save(path, result)
+    return result
 
 
 class ControllerBackend:

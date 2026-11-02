@@ -82,3 +82,48 @@ def test_batch_lock_excludes_second_owner(tmp_path):
     with batch_lock(row):
         with pytest.raises(OSError):
             with batch_lock(row): pass
+
+
+from test_ginger_review_queue import reviewed
+from babyai.ginger_batch import reconcile_stopped_prepare
+
+
+def stopped_prepare(tmp_path):
+    journal, report, saved, queue = reviewed(tmp_path)
+    queue.add(saved)
+    run = tmp_path/"stopped"; run.mkdir()
+    completion = reserve_batch(journal.directory, run)
+    _save(run/"stopped.json", {"automatic_retry_allowed": False})
+    _save(run/"action-000-intent.json", {"operation":"NextReviewed"})
+    _save(run/"action-000-observed.json", {"status":journal.status()})
+    _save(run/"action-001-intent.json", {"operation":"PrepareFilters"})
+    return journal, report["rows_report"], run, completion
+
+
+def test_reconcile_reviewed_prepare_unlocks_new_run_without_replay(tmp_path):
+    journal, report, run, completion = stopped_prepare(tmp_path)
+    result = reconcile_stopped_prepare(journal.directory, run, report)
+    assert result["status"] == "stopped_reconciled"
+    assert not result["original_batch_completed"] and not result["input_replayed"]
+    assert reconcile_stopped_prepare(journal.directory, run, report) == result
+    assert completion.exists() and (run/"stopped.json").exists()
+    assert reserve_batch(journal.directory, tmp_path/"next").name == "0001-complete.json"
+
+
+@pytest.mark.parametrize("defect", ["input_action", "missing_observation", "pending", "price", "process", "unqueue"])
+def test_reconciliation_rejects_uncertain_state(tmp_path, defect):
+    import json
+    journal, report, run, completion = stopped_prepare(tmp_path)
+    if defect == "input_action":
+        (run/"action-001-intent.json").write_text(json.dumps({"operation":"FilterStep"}))
+    elif defect == "missing_observation": (run/"action-000-observed.json").unlink()
+    elif defect == "pending": journal.begin(report)
+    elif defect == "price": report["rows"][0]["Observation"]["PriceText"]="999"
+    elif defect == "process": report["process_id"]=999
+    else:
+        from babyai.ginger_review_queue import ReviewQueue
+        (ReviewQueue(journal.directory).directory/"row-0001.json").unlink()
+    with pytest.raises((PriceQueueError, OSError)):
+        reconcile_stopped_prepare(journal.directory, run, report)
+    assert not completion.exists()
+    assert not (run/"reconciliation.json").exists()
