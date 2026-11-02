@@ -1,6 +1,7 @@
 """Immutable manual-review inbox tied to validated row sample receipts. No UI input."""
 import argparse
 import json
+import math
 import re
 from pathlib import Path
 from .ginger_filter_plan import _read, _save
@@ -80,7 +81,7 @@ class ReviewQueue:
                         raise PriceQueueError("Invalid explanation text")
                     for key in ("source","candidate"):
                         value=explanation.get(key)
-                        if value is not None and (type(value) not in (str,int,float,bool) or len(str(value))>4096):
+                        if value is not None and (type(value) not in (str,int,float,bool) or len(str(value))>4096 or (type(value) is float and not math.isfinite(value))):
                             raise PriceQueueError("Invalid explanation value")
         return position
 

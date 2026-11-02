@@ -87,3 +87,10 @@ def test_malformed_explanations_and_search_comparison_rejected(tmp_path,defect):
     else: saved["search_observation"]["preserved_verification_filters"]=["unlisted"]
     with pytest.raises(PriceQueueError): queue.add(saved)
     assert not queue.directory.exists()
+
+
+@pytest.mark.parametrize("number",[float("nan"),float("inf"),float("-inf")])
+def test_nonfinite_explanation_values_rejected_before_form_export(tmp_path,number):
+    _,_,saved,queue=reviewed(tmp_path)
+    saved["review"]["candidates"][0]["differences"]=[{"field":"volume","message":"Объём","source":number,"candidate":50}]
+    with pytest.raises(PriceQueueError): queue.add(saved)

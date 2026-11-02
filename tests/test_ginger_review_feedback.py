@@ -105,3 +105,31 @@ def test_instruction_in_reason_is_stored_as_text_not_executed_or_learned(tmp_pat
     result=validate_feedback(journal.directory,bundle,feedback)
     assert result["entries"][0]["candidates"][0]["reason"] == text
     assert not result["can_write"] and not result["rules_applied"]
+
+
+def test_cli_export_import_round_trip_from_other_directory(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+    journal,queue,_,_=feedback_fixture(tmp_path)
+    scripts=Path(__file__).resolve().parents[1]/"scripts/windows"
+    output=tmp_path/"portable-form"
+    export=subprocess.run([sys.executable,str(scripts/"ginger-review-form.py"),"--row-directory",str(journal.directory),
+                           "--output-directory",str(output)],cwd=tmp_path,capture_output=True,text=True,encoding="utf-8",timeout=15)
+    assert export.returncode == 0,export.stderr
+    bundle=json.loads((output/"bundle.json").read_text(encoding="utf-8"))
+    row=bundle["rows"][0]
+    feedback={"schema":1,"bundle_id":bundle["bundle_id"],"entries":[{"row_key":row["row_key"],"decision":"unsure",
+        "note":"ТЕСТ: сначала проверить объём", "candidates":[]}]}
+    incoming=tmp_path/"my-feedback.json"
+    incoming.write_text(json.dumps(feedback,ensure_ascii=False),encoding="utf-8-sig")
+    command=[sys.executable,str(scripts/"ginger-review-feedback.py"),"--row-directory",str(journal.directory),
+             "--bundle",str(output/"bundle.json"),"--feedback",str(incoming)]
+    first=subprocess.run(command,cwd=tmp_path,capture_output=True,text=True,encoding="utf-8",timeout=15)
+    assert first.returncode == 0,first.stderr
+    first_result=json.loads(first.stdout)
+    assert first_result["status"] == "annotation_recorded" and not first_result["can_write"]
+    second=subprocess.run(command,cwd=tmp_path,capture_output=True,text=True,encoding="utf-8",timeout=15)
+    assert second.returncode == 0,second.stderr
+    assert json.loads(second.stdout)["status"] == "already_recorded"
+    assert queue.status()["human_approved"] is False
