@@ -2,7 +2,7 @@
 const fs=require('node:fs');
 const vm=require('node:vm');
 const assert=require('node:assert/strict');
-const input=JSON.parse(fs.readFileSync(0,'utf8'));
+const input=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
 const nodes=[];
 class Element {
  constructor(tag){this.tag=tag;this.children=[];this.events={};this.textContent='';this.value='';this.disabled=false;nodes.push(this);}

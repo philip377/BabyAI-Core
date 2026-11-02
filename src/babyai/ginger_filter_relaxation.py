@@ -1,5 +1,8 @@
 """Prepare explicitly requested filter removal; never execute UI input."""
-from .ginger_filter_plan import _query
+import argparse
+import json
+from pathlib import Path
+from .ginger_filter_plan import FilterPlan, _query, _read, _save
 from .ginger_price_queue import PriceQueueError
 from .ginger_row_filter_prepare import propose_filters
 from .ginger_row_journal import RowNavigationJournal, snapshot
@@ -48,3 +51,35 @@ def propose_removal(row_directory, report, context, *, expected_source, words):
             "source": dict(expected_source), "confirmation_required": True,
             "can_write": False, "can_match": False, "absence_proven": False,
             "search_completion_verified": False}
+
+
+def prepare_removal(row_directory, report, request, output_directory):
+    from .ginger_batch import batch_lock
+    if not isinstance(request, dict) or set(request) != {"source", "words"}:
+        raise PriceQueueError("Explicit source and words required")
+    with batch_lock(row_directory):
+        proposal = propose_removal(row_directory, report["rows_report"], report["context"],
+                                   expected_source=request["source"], words=request["words"])
+        output = Path(output_directory).resolve()
+        output.mkdir(parents=True, exist_ok=False)
+        _save(output / "proposal.json", proposal)
+        plan = output / "filter-plan"
+        if proposal["steps"]:
+            FilterPlan.create(plan, report["context"], report["rows_report"]["process_id"], proposal["steps"])
+        return {"proposal": proposal, "plan_directory": str(plan) if proposal["steps"] else None,
+                "input_sent": False, "can_write": False}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--row-directory", required=True, type=Path)
+    parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--request", required=True, type=Path)
+    parser.add_argument("--output-directory", required=True, type=Path)
+    args = parser.parse_args()
+    print(json.dumps(prepare_removal(args.row_directory, _read(args.report), _read(args.request),
+                                    args.output_directory), ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

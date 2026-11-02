@@ -38,8 +38,10 @@ def test_form_script_download_matches_feedback_import_schema(tmp_path):
     if node is None: pytest.skip("Node required for offline script unit test")
     journal,_,bundle,_=feedback_fixture(tmp_path)
     harness=Path(__file__).with_name("ginger-review-form-unit.cjs")
-    result=subprocess.run([node,str(harness)],input=json.dumps({"script":SCRIPT,"bundle":bundle}),
-                          text=True,encoding="utf-8",capture_output=True,timeout=10)
+    fixture_path=tmp_path/"script-input.json"
+    fixture_path.write_text(json.dumps({"script":SCRIPT,"bundle":bundle}),encoding="utf-8")
+    result=subprocess.run([node,str(harness),str(fixture_path)],stdin=subprocess.DEVNULL,
+                          text=True,encoding="utf-8",capture_output=True,timeout=30)
     assert result.returncode == 0, result.stderr
     payload=validate_feedback(journal.directory,bundle,json.loads(result.stdout))
     assert payload["status"] == "annotation_only" and not payload["can_write"]

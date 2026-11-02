@@ -1,14 +1,16 @@
-﻿# Explicit development controller: selection receipts only, no candidate freshness claim.
+# Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
-    [ValidateSet('Initialize','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','PrepareFilters','FinishReview','NextReviewed','Status')][string]$Operation='Status',
+    [ValidateSet('Initialize','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','PrepareFilters','PrepareRemoval','FinishReview','NextReviewed','Status')][string]$Operation='Status',
     [Parameter(Mandatory=$true)][string]$QueueDirectory,
     [switch]$ConfirmNavigation,
-    [string]$PreparationDirectory
+    [string]$PreparationDirectory,
+    [string]$RemovalRequestFile
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+if($Operation -eq 'PrepareRemoval' -and (-not $RemovalRequestFile -or -not (Test-Path -LiteralPath $RemovalRequestFile -PathType Leaf))){throw 'Explicit removal request file required'}
 $python=(Get-Command python.exe -ErrorAction Stop).Source
 function Invoke-Journal([string]$Action,[string]$ReportPath='',[string]$Attempt='') {
     $arguments=@('-X','utf8',(Join-Path $PSScriptRoot 'ginger-row-cli.py'),$Action,'--directory',$QueueDirectory)
@@ -31,7 +33,7 @@ if($Operation -ne 'Initialize') {
     $state=Invoke-Journal 'status'
     if($Operation -in @('Step','Recover') -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; no input permitted'}
     if($Operation -eq 'Step' -and $state.requires_read -and -not $state.selected_sampled){throw 'Selected row must be sampled before navigation'}
-    if($Operation -in @('InspectSearch','InspectQuery','PrepareFilters','FinishReview') -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; observation blocked'}
+    if($Operation -in @('InspectSearch','InspectQuery','PrepareFilters','PrepareRemoval','FinishReview') -and $null -ne $state.pending_attempt){throw 'Unresolved row navigation; observation blocked'}
     if($Operation -eq 'Read' -and ($null -ne $state.pending_attempt -or $state.selected_sampled)){throw 'Pending navigation or already sampled row'}
     if($Operation -eq 'Step' -and $null -eq $state.next_position){$state | ConvertTo-Json; return}
     if($Operation -eq 'Observe' -and $null -eq $state.pending_attempt){throw 'No pending row observation'}
@@ -82,17 +84,25 @@ elseif($Operation -eq 'FinishReview') {
     if($LASTEXITCODE -ne 0){throw 'Row read but review queue blocked; do not advance'}
     $result | Add-Member -NotePropertyName review_queue -NotePropertyValue (($queued -join "`n") | ConvertFrom-Json)
 }
-elseif($Operation -eq 'PrepareFilters') {
+elseif($Operation -in @('PrepareFilters','PrepareRemoval')) {
     $context=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
     $afterRows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
     [GingerMenuAccess]::RequireSameProductRows($rows,$afterRows,$true)
     $reportPath=Join-Path $diagnostics 'prepare-filters.json'
     [pscustomobject]@{context=$context;rows_report=[pscustomobject]@{rows=@($afterRows);process_id=$ownerId;can_write=$false}} | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $reportPath -Encoding UTF8
+    if($Operation -eq 'PrepareRemoval') {
+        if(-not $RemovalRequestFile){throw 'Explicit removal request file required'}
+        $removalOutput=Join-Path $diagnostics 'removal'
+        $raw=& $python -X utf8 (Join-Path $PSScriptRoot 'ginger-filter-removal.py') --row-directory $QueueDirectory --report $reportPath --request $RemovalRequestFile --output-directory $removalOutput
+        if($LASTEXITCODE -ne 0){throw 'Removal preparation blocked; no input sent'}
+        $result=($raw -join "`n") | ConvertFrom-Json
+    } else {
     $planDirectory=Join-Path $diagnostics 'filter-plan'
     $proposal=Join-Path $diagnostics 'proposal.json'
     $raw=& $python -X utf8 (Join-Path $PSScriptRoot 'ginger-row-filter-prepare.py') --row-directory $QueueDirectory --report $reportPath --plan-directory $planDirectory --proposal $proposal
     if($LASTEXITCODE -ne 0){throw 'Filter preparation blocked; no input sent'}
     $result=[pscustomobject]@{proposal=(($raw -join "`n") | ConvertFrom-Json);plan_directory=if(Test-Path -LiteralPath $planDirectory){$planDirectory}else{$null};input_sent=$false}
+    }
 }
 elseif($Operation -eq 'InspectQuery') {
     $query=[GingerMenuAccess]::ReadSearchWords($window,$ownerId)
