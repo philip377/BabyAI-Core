@@ -5,7 +5,7 @@ from pathlib import Path
 from .ginger_supplier_matcher import SupplierPosition, CatalogPosition, explain_candidate
 
 
-def review_snapshot(snapshot):
+def review_snapshot(snapshot, *, include_conditions=True):
     if not isinstance(snapshot, dict):
         raise ValueError("Snapshot must be an object")
     source = snapshot.get("Source")
@@ -31,7 +31,7 @@ def review_snapshot(snapshot):
                 or len(row["Title"]) > 512):
             raise ValueError("Invalid candidate observation")
         # A row index is not a catalogue SKU; do not manufacture one.
-        review = explain_candidate(position, CatalogPosition("", row["Title"]))
+        review = explain_candidate(position, CatalogPosition("", row["Title"]), include_conditions=include_conditions)
         reviews.append({"observed_position": index, **review})
     return {"document_number": source["DocumentNumber"], "source_position": source["ObservedRowPosition"],
             "candidates": reviews, "can_write": False, "can_match": False,

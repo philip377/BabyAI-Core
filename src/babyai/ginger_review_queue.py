@@ -46,10 +46,42 @@ class ReviewQueue:
         original = _read(self.journal.directory / "plan.json")["rows"][position-1]["Observation"]
         if review.get("document_number") != original["DocumentNumber"]:
             raise PriceQueueError("Review document differs from journal")
-        for item in review["candidates"]:
+        observation = report.get("search_observation")
+        if observation is not None:
+            if (not isinstance(observation, dict) or observation.get("policy") != "additive_primary_v2"
+                    or any(type(observation.get(key)) is not int or not 0 <= observation[key] <= 256 for key in ("before_count", "after_count"))
+                    or observation["after_count"] != len(review["candidates"])
+                    or type(observation.get("possible_overfiltering")) is not bool
+                    or observation["possible_overfiltering"] != bool(observation["before_count"] and not observation["after_count"])
+                    or observation.get("automatic_broadening_allowed") is not False
+                    or observation.get("search_completion_verified") is not False):
+                raise PriceQueueError("Invalid search comparison evidence")
+            for key in ("verification_only_words", "preserved_verification_filters"):
+                values=observation.get(key)
+                if not isinstance(values,list) or len(values)>128 or any(not isinstance(word,str) or not word or len(word)>512 for word in values):
+                    raise PriceQueueError("Invalid verification word list")
+            if not set(observation["preserved_verification_filters"]) <= set(observation["verification_only_words"]):
+                raise PriceQueueError("Preserved verification filters are inconsistent")
+        for index, item in enumerate(review["candidates"],1):
             if (not isinstance(item, dict) or item.get("source_title") != original["Title"] or item.get("status") != "manual_review"
                     or any(item.get(k) is not False for k in ("can_write","can_match","identity_verified","search_completion_verified"))):
                 raise PriceQueueError("Unsupported candidate authorization")
+            if (type(item.get("observed_position")) is not int or item["observed_position"] != index
+                    or not isinstance(item.get("candidate_title"),str) or not item["candidate_title"].strip() or len(item["candidate_title"])>512):
+                raise PriceQueueError("Invalid candidate title or position")
+            for group in ("differences", "uncertainties"):
+                explanations=item.get(group)
+                if not isinstance(explanations,list) or len(explanations)>32:
+                    raise PriceQueueError("Invalid candidate explanations")
+                for explanation in explanations:
+                    if (not isinstance(explanation,dict)
+                            or not {"field","message"} <= set(explanation) <= {"field","message","source","candidate"}
+                            or any(not isinstance(explanation.get(key),str) or not explanation[key].strip() or len(explanation[key])>512 for key in ("field","message"))):
+                        raise PriceQueueError("Invalid explanation text")
+                    for key in ("source","candidate"):
+                        value=explanation.get(key)
+                        if value is not None and (type(value) not in (str,int,float,bool) or len(str(value))>4096):
+                            raise PriceQueueError("Invalid explanation value")
         return position
 
     def add(self, report):

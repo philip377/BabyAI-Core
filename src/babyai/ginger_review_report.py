@@ -34,6 +34,13 @@ def render_report(row_directory):
                   f"Прайс: {_text(source['DocumentNumber'])}. Поставщик: {_text(source['Supplier'])}.",
                   f"Цена в прайсе: {_text(source['PriceText'])}.",
                   f"Наблюдаемых кандидатов: {len(candidates)}. Требуется ручная проверка.", ""]
+        observation=report.get("search_observation")
+        if observation:
+            lines += [f"Кандидатов при подготовке: {observation['before_count']}; после фильтров: {observation['after_count']}.", ""]
+            if observation["possible_overfiltering"]:
+                lines += ["После фильтров наблюдаемые кандидаты исчезли. Нужна проверка ограничений поиска; это не доказательство отсутствия товара.", ""]
+            if observation["preserved_verification_filters"]:
+                lines += ["Сохранены ранее включённые фильтры комплектации: " + ", ".join(_text(x) for x in observation["preserved_verification_filters"]) + ".", ""]
         if not candidates:
             lines += ["Кандидаты не наблюдались; решение о создании карточки не принято.", ""]
         for index, candidate in enumerate(candidates, 1):

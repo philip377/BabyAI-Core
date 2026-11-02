@@ -10,7 +10,31 @@ from .ginger_search_plan import plan_ginger_word_search
 from .ginger_supplier_matcher import SupplierPosition
 
 
-def propose_filters(context):
+POLICY_V1 = "additive_primary_v1"
+POLICY_V2 = "additive_primary_v2"
+
+
+def verification_only_indices(words):
+    """Explicit packaging/condition phrases only; never erase arbitrary parentheses."""
+    phrases = (
+        "с крышкой", "без крышки", "не полный", "неполный", "немного помят",
+        "мятая коробка", "мятая упаковка", "поврежденная упаковка",
+        "повреждённая упаковка", "без коробки", "with cap", "without cap",
+        "no cap", "damaged box", "without box",
+    )
+    normalized = [word.casefold() for word in words]
+    excluded = set()
+    for phrase in phrases:
+        parts = phrase.split()
+        for index in range(len(words)-len(parts)+1):
+            if normalized[index:index+len(parts)] == parts:
+                excluded.update(range(index,index+len(parts)))
+    return excluded
+
+
+def propose_filters(context, *, policy=POLICY_V2):
+    if policy not in (POLICY_V1, POLICY_V2):
+        raise PriceQueueError("Unknown filter policy")
     _query(context)
     panel = context["SearchWords"]
     rows = panel["Candidates"]
@@ -27,9 +51,11 @@ def propose_filters(context):
     actual = tokens(" ".join(words))
     if not words or (actual != expected and actual != collapsed):
         raise PriceQueueError("Search words do not describe selected supplier row")
+    verification = verification_only_indices(words) if policy == POLICY_V2 else set()
     proposed = plan_ginger_word_search(
         SupplierPosition(panel["Source"]["Supplier"], panel["Source"]["Title"]), [],
-        visible_words=words, visible_search_columns=[row["DescriptionText"] for row in rows])
+        visible_words=words, visible_search_columns=[row["DescriptionText"] for row in rows],
+        excluded_indices=sorted(verification))
     # Do not interpret supplier abbreviations such as ash/l or enable their pieces.
     uncertain = set()
     for index, word in enumerate(words):
@@ -38,7 +64,9 @@ def propose_filters(context):
     eligible = [index for index in proposed.primary_indices
                 if index not in uncertain and words.count(words[index]) == 1]
     steps = [{"word": words[index], "enabled": True} for index in eligible if rows[index]["Checked"] is not True]
-    return {"policy": "additive_primary_v1", "steps": steps,
+    return {"policy": policy, "steps": steps,
+            "verification_only_words": [words[i] for i in sorted(verification)],
+            "preserved_verification_filters": [words[i] for i in sorted(verification) if rows[i]["Checked"] is True],
             "eligible_words": [words[index] for index in eligible],
             "ambiguous_words_preserved": [words[index] for index in sorted(uncertain)],
             "existing_filters_preserved": True, "catalogue_frequency_available": False,

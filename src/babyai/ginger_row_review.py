@@ -29,7 +29,10 @@ def finish_row_review(row_directory, preparation_directory, report):
     keys = ("TableHandle", "ObservedRowPosition", "DocumentNumber", "Supplier", "Title", "PriceText", "LinkedProductText")
     if any(second["Products"]["Source"][key] != expected_source[key] for key in keys):
         raise PriceQueueError("Review source does not match selected row")
-    proposed = propose_filters(original)
+    saved_proposal = _read(folder / "proposal.json")
+    proposed = propose_filters(original, policy=saved_proposal.get("policy"))
+    if proposed["steps"] != saved_proposal.get("steps"):
+        raise PriceQueueError("Prepared proposal differs from its recorded policy")
     if proposed["steps"]:
         plan, final_context, completed, plan_pending, _ = FilterPlan(folder / "filter-plan")._state()
         if (plan_pending is not None or completed != len(plan["steps"])
@@ -38,12 +41,22 @@ def finish_row_review(row_directory, preparation_directory, report):
             raise PriceQueueError("Prepared filters are pending, different or no longer observed")
     elif _query(original) != _query(second):
         raise PriceQueueError("Filters changed since no-action preparation")
-    review = review_snapshot(second["Products"])
+    review = review_snapshot(second["Products"], include_conditions=proposed["policy"] != "additive_primary_v1")
     sample = second["Products"]
     sample_sha = hashlib.sha256(json.dumps(sample, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     result = {"source_position": selected, "row_snapshot_digest": digest, "sample_sha": sample_sha,
               "status": "needs_manual_review", "review": review, "can_write": False,
               "products_processed": False, "search_completion_verified": False}
+    if proposed["policy"] != "additive_primary_v1":
+        before = original["Products"]["Candidates"]
+        after = second["Products"]["Candidates"]
+        result["search_observation"] = {
+            "policy": proposed["policy"], "before_count": len(before), "after_count": len(after),
+            "possible_overfiltering": bool(before and not after),
+            "verification_only_words": proposed["verification_only_words"],
+            "preserved_verification_filters": proposed["preserved_verification_filters"],
+            "search_completion_verified": False, "automatic_broadening_allowed": False,
+        }
     output = folder / "row-review.json"
     # An interrupted publication can resume only with exactly the same evidence.
     if output.exists():

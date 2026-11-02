@@ -300,7 +300,7 @@ class GingerSupplierMatcher:
         return MatchResult("review", selected)
 
 
-def explain_candidate(position: SupplierPosition, candidate: CatalogPosition) -> dict:
+def explain_candidate(position: SupplierPosition, candidate: CatalogPosition, *, include_conditions: bool = True) -> dict:
     """Explain title evidence only. This never grants matching permission or an SKU identity."""
     if not position.supplier_id.strip() or not position.title.strip() or not candidate.title.strip():
         raise ValueError("Supplier and both titles are required")
@@ -326,6 +326,11 @@ def explain_candidate(position: SupplierPosition, candidate: CatalogPosition) ->
     if source.is_set != target.is_set:
         differences.append({"field": "set", "source": source.is_set, "candidate": target.is_set,
                             "message": "Признаки набора различаются"})
+    if include_conditions:
+        from .ginger_product_condition import explain_conditions
+        condition_differences, condition_uncertainties = explain_conditions(position.title, candidate.title)
+        differences.extend(condition_differences)
+        uncertainties.extend(condition_uncertainties)
     # Supplier abbreviations must be confirmed, never silently translated into perfume types.
     if re.search(r"\bash\s*/\s*l\b", position.title, re.I):
         uncertainties.append({"field": "supplier_abbreviation", "message":

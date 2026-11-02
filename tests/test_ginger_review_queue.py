@@ -72,3 +72,18 @@ def test_windows_next_reviewed_stops_before_ui_without_queue(tmp_path):
     assert b"Current review not queued" in result.stderr
     assert journal.status()["pending_attempt"] is None
     assert journal.status()["selected_position"] == 1
+
+
+@pytest.mark.parametrize("defect",["candidate_position","candidate_title","explanation","search_count","search_authority","search_flag","preserved_words"])
+def test_malformed_explanations_and_search_comparison_rejected(tmp_path,defect):
+    _,_,saved,queue=reviewed(tmp_path)
+    candidate=saved["review"]["candidates"][0]
+    if defect=="candidate_position": candidate["observed_position"]=True
+    elif defect=="candidate_title": candidate["candidate_title"]=""
+    elif defect=="explanation": candidate["differences"]=[{"field":"x","message":{"script":"bad"}}]
+    elif defect=="search_count": saved["search_observation"]["after_count"]=0
+    elif defect=="search_authority": saved["search_observation"]["automatic_broadening_allowed"]=True
+    elif defect=="search_flag": saved["search_observation"]["possible_overfiltering"]=True
+    else: saved["search_observation"]["preserved_verification_filters"]=["unlisted"]
+    with pytest.raises(PriceQueueError): queue.add(saved)
+    assert not queue.directory.exists()

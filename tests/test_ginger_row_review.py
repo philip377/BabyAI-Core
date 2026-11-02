@@ -82,3 +82,35 @@ def test_empty_result_never_proves_absence(tmp_path):
     saved=json.loads((folder/"row-review.json").read_text(encoding="utf-8"))
     assert not saved["review"]["absence_proven"]
     assert result["status"] == "needs_manual_review"
+
+
+def test_saved_policy_is_used_for_review(tmp_path):
+    import json
+    journal, folder, report = setup(tmp_path)
+    path=folder/"proposal.json"
+    proposal=json.loads(path.read_text());proposal["policy"]="additive_primary_v1"
+    path.write_text(json.dumps(proposal))
+    assert finish_row_review(journal.directory,folder,report)["status"] == "needs_manual_review"
+
+
+def test_unknown_saved_policy_cannot_finish_review(tmp_path):
+    import json
+    journal, folder, report = setup(tmp_path)
+    path=folder/"proposal.json"
+    proposal=json.loads(path.read_text());proposal["policy"]="unknown"
+    path.write_text(json.dumps(proposal))
+    with pytest.raises(PriceQueueError): finish_row_review(journal.directory,folder,report)
+    assert not journal.status()["selected_sampled"]
+
+
+def test_disappearing_candidates_flagged_without_automatic_broadening(tmp_path):
+    import json
+    journal,folder,report=setup(tmp_path)
+    for name in ("first","second"): report[name]["Products"]["Candidates"]=[]
+    finish_row_review(journal.directory,folder,report)
+    saved=json.loads((folder/"row-review.json").read_text(encoding="utf-8"))
+    observation=saved["search_observation"]
+    assert observation["before_count"] > 0 and observation["after_count"] == 0
+    assert observation["possible_overfiltering"]
+    assert not observation["automatic_broadening_allowed"]
+    assert not saved["review"]["absence_proven"]

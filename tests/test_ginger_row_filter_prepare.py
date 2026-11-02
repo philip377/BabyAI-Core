@@ -102,3 +102,36 @@ def test_nonadjacent_duplicate_preserves_variants_order_numbers_punctuation(tmp_
     if allowed: assert propose_filters(ctx)["can_match"] is False
     else:
         with pytest.raises(PriceQueueError): propose_filters(ctx)
+
+
+@pytest.mark.parametrize("suffix", ["с крышкой", "без крышки", "не полный", "немного помят", "without cap", "damaged box"])
+def test_packaging_is_verification_evidence_not_new_filter(tmp_path, suffix):
+    _, _, ctx=fixture(tmp_path)
+    words=("ROJA PARFUMS ELYSIUM edp 100 ml tester " + suffix).split()
+    for panel in ("SearchWords","Products"): ctx[panel]["Source"]["Title"]=" ".join(words)
+    template=ctx["SearchWords"]["Candidates"][0]
+    ctx["SearchWords"]["Candidates"]=[dict(template,Title=word,ObservedPosition=i) for i,word in enumerate(words,1)]
+    result=propose_filters(ctx)
+    assert result["verification_only_words"] == suffix.split()
+    assert not ({step["word"] for step in result["steps"]} & set(suffix.split()))
+    assert "ROJA" in result["eligible_words"]
+    for row in ctx["SearchWords"]["Candidates"]:
+        if row["Title"] in suffix.split(): row.update(Checked=True, StateImage=2)
+    result=propose_filters(ctx)
+    assert result["preserved_verification_filters"] == suffix.split()
+    assert all(step["enabled"] for step in result["steps"])
+
+
+def test_v1_replay_and_unknown_policy(tmp_path):
+    _, _, ctx=fixture(tmp_path)
+    words="ROJA PARFUMS ELYSIUM edp 100 ml tester с крышкой".split()
+    for panel in ("SearchWords","Products"): ctx[panel]["Source"]["Title"]=" ".join(words)
+    template=ctx["SearchWords"]["Candidates"][0]
+    ctx["SearchWords"]["Candidates"]=[dict(template,Title=word,ObservedPosition=i) for i,word in enumerate(words,1)]
+    assert "крышкой" in propose_filters(ctx,policy="additive_primary_v1")["eligible_words"]
+    with pytest.raises(PriceQueueError): propose_filters(ctx,policy="unknown")
+
+
+def test_unknown_parenthetical_variant_not_discarded(tmp_path):
+    from babyai.ginger_row_filter_prepare import verification_only_indices
+    assert verification_only_indices(["(", "INTENSE", ")"]) == set()
