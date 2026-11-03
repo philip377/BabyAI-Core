@@ -160,7 +160,7 @@ public sealed partial class MainWindow
                 {
                     var readiness = await GingerDiagnostics.CollectAsync(Log, _gingerCancellation.Token);
                     if (readiness.CanRunOcr)
-                        await AnalyzeGingerInUnixAsync(Log, _gingerCancellation.Token);
+                        await AnalyzeGingerInUnixAsync(Log, UpdateAgentStatus, _gingerCancellation.Token);
                 }
                 Log("Проверка завершена. Никаких изменений в Ginger не внесено.");
                 UpdateAgentStatus(GingerCompanionPhase.Completed);
@@ -215,7 +215,7 @@ public sealed partial class MainWindow
         }
     }
 
-    private async Task AnalyzeGingerInUnixAsync(Action<string> log, CancellationToken token)
+    private async Task AnalyzeGingerInUnixAsync(Action<string> log, Action<GingerCompanionPhase> updateStatus, CancellationToken token)
     {
         var script = Path.Combine(
             AppContext.BaseDirectory, "Ginger", "test-ginger-cpu-ocr.ps1");
@@ -319,7 +319,7 @@ public sealed partial class MainWindow
         token.ThrowIfCancellationRequested();
         // Focus returns only AFTER screen capture has finished.
         Activate();
-        SetGingerPhase(GingerCompanionPhase.Reviewing);
+        updateStatus(GingerCompanionPhase.Reviewing);
         log("Проверяю распознанные названия и возможные совпадения.");
         var review = await _bridge.ReviewGingerAsync(reportPath, token);
         token.ThrowIfCancellationRequested();
