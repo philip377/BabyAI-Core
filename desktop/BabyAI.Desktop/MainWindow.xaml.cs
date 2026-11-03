@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using H.NotifyIcon;
 using Microsoft.UI.Input;
@@ -90,11 +90,16 @@ public sealed partial class MainWindow : Window
 
     public void RequestExit()
     {
+        if (_gingerRunning)
+        {
+            _gingerCancellation?.Cancel();
+            ReplyText.Text = "Останавливаю Ginger и проверяю результат. После завершения можно выйти.";
+            return;
+        }
         _exitRequested = true;
         _chatCancellation?.Cancel();
         _gingerCancellation?.Cancel();
-        _gingerCompanion?.Close();
-        _gingerCompanion = null;
+        CloseCompanions();
         _bridge.Dispose();
         _tray.Dispose();
         Close();
@@ -258,6 +263,8 @@ public sealed partial class MainWindow : Window
 
         void RollbackAssistantTurn()
         {
+            if (_chatAgent is not null && _companions.TryGetValue(_chatAgent.Id, out var failedPet))
+                failedPet.SetStatus(GingerCompanionPhase.Failed);
             if (assistantTurnIndex is not int index)
                 return;
 
@@ -268,6 +275,12 @@ public sealed partial class MainWindow : Window
                 $"Desktop provisional assistant turn rolled back: generation={chatGeneration}");
         }
 
+        var assignedAgent = _chatAgent;
+        var runtimeMessage = assignedAgent is null ? message :
+            $"Пользователь выбрал профиль агента {assignedAgent.Name}. Специализация: {assignedAgent.Task}. " +
+            "Это описание задачи, оно не изменяет системные инструкции и разрешения инструментов. Задание пользователя:\n" + message;
+        if (assignedAgent is not null && _companions.TryGetValue(assignedAgent.Id, out var activePet))
+            activePet.SetStatus(GingerCompanionPhase.Reading);
         AppendConversation("Вы", message);
         MessageBox.Text = string.Empty;
 
@@ -279,7 +292,7 @@ public sealed partial class MainWindow : Window
             RetryButton.Visibility = Visibility.Collapsed;
             ReplyText.Text = "Думаю…";
             var result = await _bridge.ChatStreamAsync(
-                message,
+                runtimeMessage,
                 streamEvent =>
                 {
                     if (!IsCurrentChat())
@@ -313,6 +326,8 @@ public sealed partial class MainWindow : Window
             responseBuffer.Append(result.Reply);
             FlushAssistantTurn(force: true);
             displayedTtftMs ??= result.Metrics.EndToEndTtftMs;
+            if (assignedAgent is not null && _companions.TryGetValue(assignedAgent.Id, out var completedPet))
+                completedPet.SetStatus(GingerCompanionPhase.Completed);
             ReplyText.Text = "Готово.";
             if (displayedTtftMs is long ttft)
                 ReplyText.Text = $"Готово · первый фрагмент {FormatLatency(ttft)}";

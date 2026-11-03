@@ -1,4 +1,4 @@
-using Microsoft.UI.Windowing;
+﻿using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -10,10 +10,16 @@ public sealed partial class MainWindow
 {
     private readonly DesktopUiSettingsStore _uiSettings = new();
 
-    private void Root_Loaded(object sender, RoutedEventArgs e)
+    private async void Root_Loaded(object sender, RoutedEventArgs e)
     {
         ApplyStoredUiSettings();
         _ = CheckForUpdatesOnStartupAsync();
+        if (Environment.GetCommandLineArgs().Contains("--agents", StringComparer.Ordinal))
+        {
+            _expanded = true;
+            await ExpandPanelAsync();
+            AgentsNavigationButton_Click(sender, e);
+        }
     }
 
     private void ApplyStoredUiSettings()
@@ -75,6 +81,7 @@ public sealed partial class MainWindow
         AddSection("Производительность", BuildPerformanceSettings);
         AddSection("История и проекты", BuildHistorySettings);
         AddSection("Интерфейс", BuildInterfaceSettings);
+        AddSection("Агенты и питомцы", BuildAgentSettings);
         AddSection("Диагностика", BuildDiagnosticsSettings);
 
         var layout = new Grid

@@ -94,7 +94,11 @@ def test_native_ui_has_explicit_button_and_human_readable_local_logs():
     agents = (root / "desktop/BabyAI.Desktop/MainWindow.Agents.cs").read_text(encoding="utf-8")
     assert "GingerNavigationButton_Click(sender, e)" in agents
     assert 'GingerNavigationLabel.Visibility = labelVisibility' in adaptive
-    assert "private async void GingerNavigationButton_Click" in cs
+    assert "private async void GingerDiagnosticsNavigationButton_Click" in cs
+    matching = (root / "desktop/BabyAI.Desktop/MainWindow.GingerMatching.cs").read_text(encoding="utf-8")
+    assert "private async void GingerNavigationButton_Click" in matching
+    assert "permit.IsChecked != true" in matching
+    assert "approve.IsChecked != true" in matching
     assert "Проверить выделенный товар" in cs
     assert "Журнал действий" in cs or "журнал действий" in cs
     assert "ginger-actions.log" in cs

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -16,7 +16,7 @@ public sealed partial class MainWindow
     // Visible, timestamped event journal. Stored in the user's profile only.
     // This journal is separate from the model's chain-of-thought and contains
     // only observed actions and the structured outcomes of the OCR reviewer.
-    private async void GingerNavigationButton_Click(object sender, RoutedEventArgs e)
+    private async void GingerDiagnosticsNavigationButton_Click(object sender, RoutedEventArgs e)
     {
         if (_gingerDialogOpen || _busy)
             return;

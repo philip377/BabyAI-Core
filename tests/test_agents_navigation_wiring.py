@@ -29,8 +29,8 @@ def test_agents_sidebar_opens_agents_dialog():
 def test_agents_dialog_exposes_companion():
     agents_source = AGENTS_CS.read_text(encoding="utf-8")
     assert "void AgentsNavigationButton_Click(" in agents_source
-    assert "new GingerCompanionWindow()" in agents_source
-    assert "Показать питомца на рабочем столе" in agents_source
+    assert "new GingerCompanionWindow(profile," in agents_source
+    assert "На рабочий стол" in agents_source
 
 
 def test_ginger_agent_workspace_is_not_just_a_log():

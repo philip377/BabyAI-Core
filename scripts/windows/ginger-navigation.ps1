@@ -1,4 +1,4 @@
-# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
+﻿# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
 [CmdletBinding()]
 param(
     [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice', 'ReadSelectedProduct', 'ReadMatchingCandidates', 'SelectNextIncluded', 'SelectNextProduct')][string]$Mode = 'Inspect',
@@ -843,11 +843,11 @@ public static class GingerMenuAccess {
                 if(searchWords && SendMessageTimeoutW(hwnd,0x102C,new IntPtr(candidates.Count),new IntPtr(0xF000),2,100,out imageState)==IntPtr.Zero)
                     throw new InvalidOperationException("Search state image unavailable");
                 int bx=0,by=0,bw=0,bh=0;
-                if(searchWords)owner.accLocation(out bx,out by,out bw,out bh,id);
+                owner.accLocation(out bx,out by,out bw,out bh,id);
                 candidates.Add(new GingerCatalogueCandidate {
                     ObservedPosition=candidates.Count+1,Title=title,DescriptionText=description,
-                    DefaultAction=searchWords ? owner.get_accDefaultAction(id) : null,
-                    StateImage=(int)((imageState.ToInt64() & 0xF000)>>12),Bounds=searchWords ? new int[]{bx,by,bw,bh} : null,ActionOwner=owner,ActionChild=id,
+                    DefaultAction=owner.get_accDefaultAction(id),
+                    StateImage=(int)((imageState.ToInt64() & 0xF000)>>12),Bounds=new int[]{bx,by,bw,bh},ActionOwner=owner,ActionChild=id,
                     Selected=(itemState & 2)!=0, Checked=searchWords && role==44 ? (bool?)((itemState & 16)!=0) : null
                 });
             }
@@ -882,6 +882,100 @@ public static class GingerMenuAccess {
         GingerCandidateSnapshot first=ReadCandidatesOnce(root,process), second=ReadCandidatesOnce(root,process);
         RequireSameCandidates(first,second);
         return second;
+    }
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hwnd,IntPtr dc);
+    [DllImport("gdi32.dll")] private static extern uint GetPixel(IntPtr dc,int x,int y);
+    public static bool IsActiveSelectionRgb(int r,int g,int b) {
+        return r>=0 && r<=90 && g>=35 && g<=180 && b>=110 && b<=255 && b>=g+25;
+    }
+    public static void RequireActiveBlueSource(IntPtr root,uint process,GingerProductRow[] expected,int position) {
+        RequireForeground(root,process);
+        RequireInputScale(root);
+        GingerProductRow[] rows=ReadProductRows(root,process);
+        RequireSameProductRows(expected,rows,true);
+        if(position<1 || position>rows.Length || !rows[position-1].Selected || Array.FindAll(rows,r=>r.Selected).Length!=1)
+            throw new InvalidOperationException("Exact selected source required for blue verification");
+        GingerProductRow row=rows[position-1];
+        int x,y,w,h;row.Target.accLocation(out x,out y,out w,out h,0);
+        if(w<24 || h<8 || w>10000 || h>1000)throw new InvalidOperationException("Source geometry unavailable");
+        IntPtr table=new IntPtr(row.Observation.TableHandle),dc=GetDC(IntPtr.Zero);
+        if(dc==IntPtr.Zero)throw new InvalidOperationException("Selection pixels unavailable");
+        int blue=0,total=0;
+        try {
+            for(int band=0;band<2;band++)for(int n=1;n<=16;n++) {
+                Point point=new Point {X=x+(w*n/17),Y=band==0?y+2:y+h-3};
+                if(WindowFromPoint(point)!=table)throw new InvalidOperationException("Source is covered; color unverified");
+                uint pixel=GetPixel(dc,point.X,point.Y);
+                if(pixel==0xffffffff)throw new InvalidOperationException("Selection pixel read failed");
+                if(IsActiveSelectionRgb((int)(pixel&255),(int)((pixel>>8)&255),(int)((pixel>>16)&255)))blue++;
+                total++;
+            }
+        } finally {ReleaseDC(IntPtr.Zero,dc);}
+        RequireForeground(root,process);
+        RequireSameProductRows(rows,ReadProductRows(root,process),true);
+        if(blue*100<total*70)throw new InvalidOperationException("Source must be actively blue, not light blue; matching blocked");
+    }
+    private static Point CandidatePoint(IntPtr root,uint process,GingerCandidateSnapshot snapshot,GingerCatalogueCandidate target) {
+        RequireForeground(root,process);
+        RequireInputScale(root);
+        IntPtr panel=new IntPtr(snapshot.PanelHandle); uint owner;
+        if(GetWindowThreadProcessId(panel,out owner)==0 || owner!=process || !IsWindowVisible(panel))
+            throw new InvalidOperationException("Candidate panel owner changed");
+        int x,y,w,h;
+        target.ActionOwner.accLocation(out x,out y,out w,out h,target.ActionChild);
+        if(!SameBounds(target.Bounds,new int[]{x,y,w,h}) || w<4 || h<4)
+            throw new InvalidOperationException("Candidate geometry changed");
+        Point point=new Point {X=checked(x+Math.Min(12,w/2)),Y=checked(y+h/2)};
+        if(WindowFromPoint(point)!=panel)throw new InvalidOperationException("Candidate covered by another window");
+        IAccessible list=Client(panel);
+        object hit=list.accHitTest(point.X,point.Y);
+        IAccessible hitOwner=hit as IAccessible ?? list;
+        object child=hit is IAccessible ? (object)0 : hit;
+        if(!(child is int) || (hit is int && (int)hit<=0) ||
+           hitOwner.get_accName(child)!=target.Title)
+            throw new InvalidOperationException("Candidate hit-test identity mismatch");
+        int hx,hy,hw,hh;hitOwner.accLocation(out hx,out hy,out hw,out hh,child);
+        if(!SameBounds(target.Bounds,new int[]{hx,hy,hw,hh}))
+            throw new InvalidOperationException("Candidate hit-test geometry mismatch");
+        return point;
+    }
+    // One explicitly authorized dispatch. Caller must durably record intent before invocation
+    // and reconcile the resulting product table; exceptions never authorize a retry.
+    public static void InvokeMatchingCandidate(IntPtr root,uint process,GingerProductRow[] expectedRows,
+            GingerCandidateSnapshot expected,int position,string exactTitle,bool confirmed) {
+        if(!confirmed)throw new InvalidOperationException("Explicit matching confirmation required");
+        if(expected==null || expected.Candidates==null || position<1 || position>expected.Candidates.Length ||
+           String.IsNullOrWhiteSpace(exactTitle))throw new InvalidOperationException("Explicit candidate required");
+        GingerProductRow[] rows=ReadProductRows(root,process);
+        RequireSameProductRows(expectedRows,rows,true);
+        GingerCandidateSnapshot fresh=ReadMatchingCandidates(root,process);
+        RequireSameCandidates(expected,fresh);
+        GingerCatalogueCandidate target=fresh.Candidates[position-1];
+        if(target.Title!=exactTitle || Array.FindAll(fresh.Candidates,c=>c.Title==exactTitle).Length!=1)
+            throw new InvalidOperationException("Candidate identity ambiguous or changed");
+        if(fresh.Source.LinkedProductText!="<не указано" && fresh.Source.LinkedProductText!="<не указано>")
+            throw new InvalidOperationException("Source already linked; replacement is not permitted");
+        int state=Convert.ToInt32(target.ActionOwner.get_accState(target.ActionChild));
+        if((state & (1|0x8000|0x10000))!=0 || target.Bounds==null || target.Bounds.Length!=4 ||
+           target.Bounds[2]<4 || target.Bounds[3]<4 || Normalize(target.DefaultAction)!="двойной щелчок")
+            throw new InvalidOperationException("Candidate is not visibly actionable");
+        RequireForeground(root,process);
+        RequireSameProductRows(rows,ReadProductRows(root,process),true);
+        RequireSameCandidates(fresh,ReadMatchingCandidates(root,process));
+        RequireForeground(root,process);
+        Point point=CandidatePoint(root,process,fresh,target);
+        int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
+        if(width<2 || height<2 || point.X<left || point.Y<top || point.X>=left+width || point.Y>=top+height)
+            throw new InvalidOperationException("Candidate outside desktop");
+        int x=(int)(((long)(point.X-left)*65536+32768)/width),y=(int)(((long)(point.Y-top)*65536+32768)/height);
+        Input[] input=new Input[4];
+        for(int i=0;i<4;i++)input[i]=new Input {Type=0,Mouse=new MouseInput {X=x,Y=y,Flags=(uint)(0xC001|(i%2==0?2:4))}};
+        RequireActiveBlueSource(root,process,rows,fresh.Source.ObservedRowPosition);
+        Point last=CandidatePoint(root,process,fresh,target);
+        if(last.X!=point.X || last.Y!=point.Y)throw new InvalidOperationException("Candidate moved before input");
+        if(SendInput(4,input,Marshal.SizeOf(typeof(Input)))!=4)
+            throw new InvalidOperationException("Incomplete matching double click; outcome unknown, no retry");
     }
     public static GingerCandidateSnapshot ReadSearchWords(IntPtr root,uint process) {
         GingerCandidateSnapshot first=ReadCandidatesOnce(root,process,true),second=ReadCandidatesOnce(root,process,true);

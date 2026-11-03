@@ -16,6 +16,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+      - name: Test agent profiles and scoped matching decisions
+        shell: pwsh
+        run: dotnet run --project tests/AgentProfiles.Smoke/AgentProfiles.Smoke.csproj
       - name: Test Ginger diagnostics subprocess safety
         # Runs only fixed synthetic subprocesses, not a live Ginger session.
         shell: pwsh

@@ -1,4 +1,4 @@
-# Explicit development controller: selection receipts only, no candidate freshness claim.
+﻿# Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
     [ValidateSet('Initialize','Compare','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','PrepareFilters','PrepareRemoval','FinishReview','NextReviewed','Status')][string]$Operation='Status',

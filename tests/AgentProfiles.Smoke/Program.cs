@@ -1,0 +1,25 @@
+using BabyAI.Desktop;
+using System.Text.Json;
+var root = Path.Combine(Path.GetTempPath(), "babyai-agent-tests-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(root);
+void Check(bool ok, string label) { if (!ok) throw new Exception(label); Console.WriteLine("PASS: " + label); }
+var store = new AgentProfileStore(Path.Combine(root, "agents.json"));
+var catalog = store.Load();
+catalog.Agents.Add(new("custom", "Analyst", "Check reports", "mint", -100, 20));
+store.Save(catalog);
+Check(store.Load().Agents.Single(a => a.Id == "custom").X == -100, "profiles and multi-monitor position round trip");
+var original = File.ReadAllText(Path.Combine(root,"agents.json"));
+try { store.Save(catalog with { Agents = [AgentProfileStore.Ginger, AgentProfileStore.Ginger] }); throw new Exception("invalid accepted"); } catch (InvalidDataException) { }
+Check(File.ReadAllText(Path.Combine(root,"agents.json")) == original, "invalid profile preserves persisted data");
+var learning = new GingerLearning(Path.Combine(root, "learning"));
+Check(learning.AutomaticCandidate("supplier", "Acme Bloom edt 100 ml tester", ["Acme Bloom тв 100ml (тестер)"]) is not null, "exact semantics accepts concentration and unit aliases");
+foreach(var title in new[] { "Acme Bloom edt 50ml tester", "Acme Bloom Intense edt 100ml tester", "Acme Bloom edt 100ml", "Acme Bloom edp 100ml tester" })
+ Check(learning.AutomaticCandidate("supplier", "Acme Bloom edt 100 ml tester", [title]) is null, "different variant rejected: " + title);
+Check(learning.AutomaticCandidate("supplier", "Acme Bloom edt 100 ml tester", ["Acme Bloom edt 100 ml tester", "Acme Bloom edt 100 ml tester"]) is null, "duplicate candidates rejected");
+learning.Teach(new("supplier", "Supplier special title", "Exact product", "user explanation", true, DateTimeOffset.UtcNow));
+Check(learning.AutomaticCandidate("supplier", "Supplier special title", ["Exact product"]) == "Exact product", "explicit scoped teaching used");
+Check(learning.AutomaticCandidate("other supplier", "Supplier special title", ["Exact product"]) is null, "learning never crosses supplier");
+Check(learning.AutomaticCandidate("supplier", "Changed special title", ["Exact product"]) is null, "renamed source requires review");
+learning.Teach(new("supplier", "Supplier special title", "Exact product", "revoke auto", false, DateTimeOffset.UtcNow));
+Check(learning.AutomaticCandidate("supplier", "Supplier special title", ["Exact product"]) is null, "later user correction revokes automatic pairing");
+Directory.Delete(root, true);
