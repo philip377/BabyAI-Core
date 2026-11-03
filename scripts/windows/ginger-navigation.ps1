@@ -10,7 +10,11 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName Accessibility
 Add-Type -AssemblyName Microsoft.VisualBasic
-Add-Type -TypeDefinition @'
+# PowerShell 7 requires the full runtime reference set when Add-Type is given
+# an explicit COM interop assembly; a short list hides core types like List<T>.
+$runtimeReferences = @([string][AppContext]::GetData('TRUSTED_PLATFORM_ASSEMBLIES') -split [IO.Path]::PathSeparator)
+$compileReferences = @($runtimeReferences) + @([Accessibility.IAccessible].Assembly.Location, [Microsoft.VisualBasic.Interaction].Assembly.Location)
+Add-Type -ReferencedAssemblies $compileReferences -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
