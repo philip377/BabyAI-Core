@@ -31,3 +31,16 @@ def test_agents_dialog_exposes_companion():
     assert "void AgentsNavigationButton_Click(" in agents_source
     assert "new GingerCompanionWindow()" in agents_source
     assert "Показать питомца на рабочем столе" in agents_source
+
+
+def test_ginger_agent_workspace_is_not_just_a_log():
+    source = (
+        ROOT / "desktop" / "BabyAI.Desktop" / "MainWindow.Ginger.cs"
+    ).read_text(encoding="utf-8")
+    assert 'Title = "UNIX · Ginger Agent"' in source
+    assert 'Text = "Ginger Agent"' in source
+    assert "void UpdateAgentStatus(GingerCompanionPhase phase)" in source
+    assert 'Content = "Показать журнал действий"' in source
+    assert "journal.Visibility = expand ? Visibility.Visible : Visibility.Collapsed;" in source
+    assert "SetGingerCaptureMode(true)" in source
+    assert "SetGingerCaptureMode(false)" in source
