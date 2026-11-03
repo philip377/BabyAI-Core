@@ -8,6 +8,7 @@ namespace BabyAI.Desktop;
 public sealed partial class MainWindow
 {
     private bool _agentsDialogOpen;
+    private GingerCompanionWindow? _gingerCompanion;
 
     private async void AgentsNavigationButton_Click(object sender, RoutedEventArgs e)
     {
@@ -73,6 +74,17 @@ public sealed partial class MainWindow
                 thoughtText.Text = thoughts[thoughtIndex];
             };
             gingerCard.Children.Add(thoughtButton);
+            var companionButton = new Button { Content = "Показать питомца на рабочем столе" };
+            companionButton.Click += (_, _) =>
+            {
+                if (_gingerCompanion is null)
+                {
+                    _gingerCompanion = new GingerCompanionWindow();
+                    _gingerCompanion.Closed += (_, _) => _gingerCompanion = null;
+                }
+                _gingerCompanion.Activate();
+            };
+            gingerCard.Children.Add(companionButton);
             gingerCard.Children.Add(new TextBlock
             {
                 Text = "Ginger Agent",
@@ -100,7 +112,7 @@ public sealed partial class MainWindow
 
             content.Children.Add(new TextBlock
             {
-                Text = "Реплики пока демонстрационные. Настоящие события агента и питомцы на рабочем столе появятся позже.",
+                Text = "Питомец на рабочем столе — отдельное перемещаемое окно-превью. Прозрачность, анимации и реальные события агента пока не подключены.",
                 TextWrapping = TextWrapping.Wrap,
                 FontSize = 11,
                 Opacity = 0.7
