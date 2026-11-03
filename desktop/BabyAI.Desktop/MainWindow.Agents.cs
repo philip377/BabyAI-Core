@@ -9,6 +9,15 @@ public sealed partial class MainWindow
 {
     private bool _agentsDialogOpen;
     private GingerCompanionWindow? _gingerCompanion;
+    private GingerCompanionPhase _gingerPhase = GingerCompanionPhase.Idle;
+
+    private void SetGingerPhase(GingerCompanionPhase phase)
+    {
+        _gingerPhase = phase;
+        _gingerCompanion?.SetStatus(phase);
+    }
+
+    private void SetGingerCaptureMode(bool capturing) => _gingerCompanion?.SetCaptureMode(capturing);
 
     private async void AgentsNavigationButton_Click(object sender, RoutedEventArgs e)
     {
@@ -48,7 +57,7 @@ public sealed partial class MainWindow
 
             var thoughtText = new TextBlock
             {
-                Text = "Отдыхаю. Поручишь мне проверку товаров?",
+                Text = GingerCompanionWindow.DescribePhase(_gingerPhase),
                 TextWrapping = TextWrapping.Wrap,
                 FontSize = 12
             };
@@ -59,30 +68,34 @@ public sealed partial class MainWindow
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(35, 255, 255, 255)),
                 Child = thoughtText
             });
-            var thoughts = new[]
+            var companionButton = new Button
             {
-                "Отдыхаю. Поручишь мне проверку товаров?",
-                "Если варианты ароматов различаются, я попрошу ручную проверку.",
-                "Без разрешения я не меняю данные Ginger.",
-                "Когда подключим события агента, здесь будет настоящий статус задачи."
+                Content = _gingerCompanion is null
+                    ? "Показать питомца на рабочем столе"
+                    : "Закрыть питомца"
             };
-            var thoughtIndex = 0;
-            var thoughtButton = new Button { Content = "Что думает питомец?" };
-            thoughtButton.Click += (_, _) =>
-            {
-                thoughtIndex = (thoughtIndex + 1) % thoughts.Length;
-                thoughtText.Text = thoughts[thoughtIndex];
-            };
-            gingerCard.Children.Add(thoughtButton);
-            var companionButton = new Button { Content = "Показать питомца на рабочем столе" };
             companionButton.Click += (_, _) =>
             {
-                if (_gingerCompanion is null)
+                if (_gingerCompanion is not null)
                 {
-                    _gingerCompanion = new GingerCompanionWindow();
-                    _gingerCompanion.Closed += (_, _) => _gingerCompanion = null;
+                    _gingerCompanion.Close();
+                    companionButton.Content = "Показать питомца на рабочем столе";
+                    return;
                 }
-                _gingerCompanion.Activate();
+
+                var companion = new GingerCompanionWindow();
+                companion.SetStatus(_gingerPhase);
+                _gingerCompanion = companion;
+                companion.Closed += (_, _) =>
+                {
+                    if (ReferenceEquals(_gingerCompanion, companion))
+                    {
+                        _gingerCompanion = null;
+                        companionButton.Content = "Показать питомца на рабочем столе";
+                    }
+                };
+                companion.Activate();
+                companionButton.Content = "Закрыть питомца";
             };
             gingerCard.Children.Add(companionButton);
             gingerCard.Children.Add(new TextBlock
@@ -98,7 +111,7 @@ public sealed partial class MainWindow
             });
             gingerCard.Children.Add(new TextBlock
             {
-                Text = "Питомец: прототип · Агент: доступен для локальной проверки",
+                Text = "Питомец: локальное окно · Статус: реальная проверка, без доступа к базе",
                 FontSize = 12,
                 Opacity = 0.7
             });
@@ -112,7 +125,7 @@ public sealed partial class MainWindow
 
             content.Children.Add(new TextBlock
             {
-                Text = "Питомец на рабочем столе — отдельное перемещаемое окно-превью. Прозрачность, анимации и реальные события агента пока не подключены.",
+                Text = "Пузырь показывает фактический этап проверки Ginger, а не скрытые мысли ИИ. Окно пока непрозрачное.",
                 TextWrapping = TextWrapping.Wrap,
                 FontSize = 11,
                 Opacity = 0.7
