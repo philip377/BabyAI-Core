@@ -34,9 +34,53 @@ public sealed partial class MainWindow
             PlaceholderText = "Здесь появятся понятные записи о проверке Ginger.",
         };
         ScrollViewer.SetVerticalScrollBarVisibility(logBox, ScrollBarVisibility.Auto);
+        var agentStatus = new TextBlock
+        {
+            Text = GingerCompanionWindow.DescribePhase(_gingerPhase),
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 13,
+        };
+        var agentAvatar = new Border
+        {
+            Width = 66, Height = 66,
+            CornerRadius = new CornerRadius(33),
+            Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                Windows.UI.Color.FromArgb(255, 126, 112, 221)),
+            Child = new TextBlock
+            {
+                Text = "• ᴗ •",
+                FontSize = 22,
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Windows.UI.Color.FromArgb(255, 255, 255, 255)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            }
+        };
+        var agentDetails = new StackPanel { Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
+        agentDetails.Children.Add(new TextBlock
+        {
+            Text = "Ginger Agent",
+            FontSize = 20,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
+        });
+        agentDetails.Children.Add(agentStatus);
+        agentDetails.Children.Add(new TextBlock
+        {
+            Text = "Режим: чтение и подготовка кандидатов · Без записи в Ginger",
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.72,
+        });
+        var agentHeader = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 14,
+        };
+        agentHeader.Children.Add(agentAvatar);
+        agentHeader.Children.Add(agentDetails);
         var hint = new TextBlock
         {
-            Text = "Только чтение · CPU OCR · без сопоставления и изменений базы",
+            Text = "Выдели товар в Ginger и запусти проверку. Агент прочитает доступные данные, затем покажет наблюдения в журнале. Самостоятельное сопоставление и создание SKU отключены.",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 12,
             Opacity = 0.72,
@@ -50,19 +94,40 @@ public sealed partial class MainWindow
         };
         controls.Children.Add(start);
         controls.Children.Add(stop);
-        var layout = new StackPanel { Spacing = 12, MinWidth = 550 };
+        var layout = new StackPanel { Spacing = 14, MinWidth = 550 };
+        layout.Children.Add(agentHeader);
         layout.Children.Add(hint);
         layout.Children.Add(controls);
-        layout.Children.Add(logBox);
+        var journal = new StackPanel
+        {
+            Spacing = 7,
+            Visibility = Visibility.Collapsed
+        };
+        journal.Children.Add(logBox);
+        var journalToggle = new Button { Content = "Показать журнал действий" };
+        journalToggle.Click += (_, _) =>
+        {
+            var expand = journal.Visibility != Visibility.Visible;
+            journal.Visibility = expand ? Visibility.Visible : Visibility.Collapsed;
+            journalToggle.Content = expand ? "Скрыть журнал действий" : "Показать журнал действий";
+        };
+        layout.Children.Add(journalToggle);
+        layout.Children.Add(journal);
 
         var dialog = new ContentDialog
         {
             XamlRoot = Root.XamlRoot,
-            Title = "UNIX · Ginger — журнал действий",
+            Title = "UNIX · Ginger Agent",
             Content = layout,
             CloseButtonText = "Закрыть",
             DefaultButton = ContentDialogButton.Close,
         };
+
+        void UpdateAgentStatus(GingerCompanionPhase phase)
+        {
+            SetGingerPhase(phase);
+            agentStatus.Text = GingerCompanionWindow.DescribePhase(phase);
+        }
 
         void Log(string description)
         {
@@ -82,7 +147,7 @@ public sealed partial class MainWindow
             if (_gingerRunning)
                 return;
             _gingerRunning = true;
-            SetGingerPhase(GingerCompanionPhase.Checking);
+            UpdateAgentStatus(GingerCompanionPhase.Checking);
             SetGingerCaptureMode(true);
             start.IsEnabled = false;
             stop.IsEnabled = true;
@@ -90,7 +155,7 @@ public sealed partial class MainWindow
             try
             {
                 Log("Начинаю проверку. Данные останутся на этом компьютере.");
-                SetGingerPhase(GingerCompanionPhase.Reading);
+                UpdateAgentStatus(GingerCompanionPhase.Reading);
                 if (!await GingerCandidateReader.TryReadAsync(Log, _gingerCancellation.Token))
                 {
                     var readiness = await GingerDiagnostics.CollectAsync(Log, _gingerCancellation.Token);
@@ -98,18 +163,18 @@ public sealed partial class MainWindow
                         await AnalyzeGingerInUnixAsync(Log, _gingerCancellation.Token);
                 }
                 Log("Проверка завершена. Никаких изменений в Ginger не внесено.");
-                SetGingerPhase(GingerCompanionPhase.Completed);
+                UpdateAgentStatus(GingerCompanionPhase.Completed);
             }
             catch (OperationCanceledException)
             {
-                SetGingerPhase(GingerCompanionPhase.Cancelled);
+                UpdateAgentStatus(GingerCompanionPhase.Cancelled);
                 Log("Проверка остановлена по твоему запросу. Товары не менялись.");
             }
             catch (Exception ex)
             {
                 // Keep raw technical exceptions out of the user-facing log.
                 StartupDiagnostics.Log("Ginger UI preview failed", ex);
-                SetGingerPhase(GingerCompanionPhase.Failed);
+                UpdateAgentStatus(GingerCompanionPhase.Failed);
                 Log("Проверка остановилась: " + FriendlyGingerError(ex));
             }
             finally
