@@ -92,6 +92,9 @@ public sealed partial class MainWindow : Window
     {
         _exitRequested = true;
         _chatCancellation?.Cancel();
+        _gingerCancellation?.Cancel();
+        _gingerCompanion?.Close();
+        _gingerCompanion = null;
         _bridge.Dispose();
         _tray.Dispose();
         Close();
