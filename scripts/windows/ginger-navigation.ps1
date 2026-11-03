@@ -10,11 +10,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName Accessibility
 Add-Type -AssemblyName Microsoft.VisualBasic
-# PowerShell 7 requires the full runtime reference set when Add-Type is given
-# an explicit COM interop assembly; a short list hides core types like List<T>.
-$runtimeReferences = @([string][AppContext]::GetData('TRUSTED_PLATFORM_ASSEMBLIES') -split [IO.Path]::PathSeparator)
-$compileReferences = @($runtimeReferences) + @([Accessibility.IAccessible].Assembly.Location, [Microsoft.VisualBasic.Interaction].Assembly.Location)
-Add-Type -ReferencedAssemblies $compileReferences -TypeDefinition @'
+Add-Type -ReferencedAssemblies @([Accessibility.IAccessible].Assembly.Location, [Microsoft.VisualBasic.Interaction].Assembly.Location) -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -159,9 +155,9 @@ public static class GingerMenuAccess {
         if (popup != root && popup != IntPtr.Zero && IsWindowVisible(popup))
             throw new InvalidOperationException("A modal or owned window requires attention");
     }
-    private static System.Collections.Generic.List<IntPtr> Windows(IntPtr root, uint process) {
+    private static List<IntPtr> Windows(IntPtr root, uint process) {
         RequireWindow(root, process);
-        System.Collections.Generic.List<IntPtr> windows = new System.Collections.Generic.List<IntPtr>();
+        List<IntPtr> windows = new List<IntPtr>();
         windows.Add(root);
         bool limited = false;
         EnumProc callback = delegate(IntPtr hwnd, IntPtr unused) {
@@ -177,7 +173,7 @@ public static class GingerMenuAccess {
         IAccessible value;
         return AccessibleObjectFromWindow(hwnd, unchecked((uint)-4), ref iid, out value) >= 0 ? value : null;
     }
-    private static void Walk(IAccessible owner, object child, string ancestors, int depth, System.Collections.Generic.List<GingerMenuNode> nodes) {
+    private static void Walk(IAccessible owner, object child, string ancestors, int depth, List<GingerMenuNode> nodes) {
         if (depth > 20 || nodes.Count >= 2000) throw new InvalidOperationException("Accessibility enumeration truncated");
         string name = owner.get_accName(child) ?? "";
         int role = Convert.ToInt32(owner.get_accRole(child));
@@ -199,14 +195,14 @@ public static class GingerMenuAccess {
             else throw new InvalidOperationException("Unknown accessibility child");
         }
     }
-    public static System.Collections.Generic.List<GingerMenuNode> Menu(IntPtr root, uint process) {
-        System.Collections.Generic.List<IAccessible> roots = new System.Collections.Generic.List<IAccessible>();
+    public static List<GingerMenuNode> Menu(IntPtr root, uint process) {
+        List<IAccessible> roots = new List<IAccessible>();
         foreach (IntPtr hwnd in Windows(root, process)) {
             IAccessible value = Client(hwnd);
             if (value != null && Normalize(value.get_accName(0)) == "menustrip1") roots.Add(value);
         }
         if (roots.Count != 1) throw new InvalidOperationException("Expected one menuStrip1");
-        System.Collections.Generic.List<GingerMenuNode> nodes = new System.Collections.Generic.List<GingerMenuNode>();
+        List<GingerMenuNode> nodes = new List<GingerMenuNode>();
         Walk(roots[0], 0, "", 0, nodes);
         RequireWindow(root, process);
         return nodes;
@@ -217,7 +213,7 @@ public static class GingerMenuAccess {
         InvokeResolved(root,process,path);
     }
     private static void InvokeResolved(IntPtr root, uint process, string path) {
-        System.Collections.Generic.List<GingerMenuNode> matches = Menu(root, process).FindAll(n => n.Role == 12 && n.Path == path && Normalize(n.Name) == path.Substring(path.LastIndexOf('/') + 1));
+        List<GingerMenuNode> matches = Menu(root, process).FindAll(n => n.Role == 12 && n.Path == path && Normalize(n.Name) == path.Substring(path.LastIndexOf('/') + 1));
         if (matches.Count != 1) throw new InvalidOperationException("Menu item is missing or ambiguous");
         GingerMenuNode item = matches[0];
         IntPtr hwnd; uint owner;
@@ -232,8 +228,8 @@ public static class GingerMenuAccess {
             throw new InvalidOperationException("Menu exposes no default action");
         item.Owner.accDoDefaultAction(item.Child);
     }
-    public static System.Collections.Generic.List<string[]> Headers(IntPtr root, uint process) {
-        System.Collections.Generic.List<string[]> result = new System.Collections.Generic.List<string[]>();
+    public static List<string[]> Headers(IntPtr root, uint process) {
+        List<string[]> result = new List<string[]>();
         foreach (IntPtr hwnd in Windows(root, process)) {
             StringBuilder name = new StringBuilder(256);
             GetClassNameW(hwnd, name, name.Capacity);
@@ -246,7 +242,7 @@ public static class GingerMenuAccess {
                 continue;
             }
             if (!name.ToString().Contains("SysHeader32")) continue;
-            System.Collections.Generic.List<GingerMenuNode> nodes = new System.Collections.Generic.List<GingerMenuNode>();
+            List<GingerMenuNode> nodes = new List<GingerMenuNode>();
             Walk(value, 0, "", 0, nodes);
             result.Add(nodes.ConvertAll(n => n.Name).ToArray());
         }
@@ -270,7 +266,7 @@ public static class GingerMenuAccess {
             IAccessible row = child as IAccessible;
             if (row == null || Convert.ToInt32(row.get_accRole(0)) != 28) continue;
             if (row.accChildCount > 64) continue;
-            System.Collections.Generic.List<string> names = new System.Collections.Generic.List<string>();
+            List<string> names = new List<string>();
             bool headerOnly = true;
             foreach (object cell in FirstChildren(row, 64)) {
                 IAccessible nested = cell as IAccessible;
@@ -359,7 +355,7 @@ public static class GingerMenuAccess {
             if (result != null) throw new InvalidOperationException("Ambiguous price tables");
             int count=table.accChildCount;
             if (count<1 || count>503) throw new InvalidOperationException("Price table exceeds read limit");
-            System.Collections.Generic.List<GingerPriceRow> rows=new System.Collections.Generic.List<GingerPriceRow>();
+            List<GingerPriceRow> rows=new List<GingerPriceRow>();
             HashSet<string> numbers=new HashSet<string>(StringComparer.Ordinal);
             bool seenHeader=false;
             foreach(object item in FirstChildren(table,503)) {
@@ -589,7 +585,7 @@ public static class GingerMenuAccess {
         InvokeResolved(root,process,"дополнительно/сопоставление снизу");
     }
     public static GingerTabCandidate[] TabCandidates(IntPtr root,uint process) {
-        System.Collections.Generic.List<GingerTabCandidate> candidates=new System.Collections.Generic.List<GingerTabCandidate>(), result=new System.Collections.Generic.List<GingerTabCandidate>();
+        List<GingerTabCandidate> candidates=new List<GingerTabCandidate>(), result=new List<GingerTabCandidate>();
         foreach(IntPtr hwnd in Windows(root,process)) {
             if(!IsWindowVisible(hwnd)) continue;
             Rectangle r; StringBuilder cls=new StringBuilder(256); GetClassNameW(hwnd,cls,cls.Capacity);
@@ -598,7 +594,7 @@ public static class GingerMenuAccess {
             candidates.Add(new GingerTabCandidate { Handle=hwnd.ToInt64(),Parent=GetParent(hwnd).ToInt64(),X=r.Left,Y=r.Top,Width=r.Right-r.Left,Height=r.Bottom-r.Top });
         }
         foreach(GingerTabCandidate c in candidates) {
-            System.Collections.Generic.List<GingerTabCandidate> group=candidates.FindAll(x=>x.Parent==c.Parent && x.Y==c.Y && x.Height==c.Height && Math.Abs(x.Width-c.Width)<=4);
+            List<GingerTabCandidate> group=candidates.FindAll(x=>x.Parent==c.Parent && x.Y==c.Y && x.Height==c.Height && Math.Abs(x.Width-c.Width)<=4);
             if(group.Count!=3) continue;
             group.Sort((a,b)=>a.X.CompareTo(b.X));
             if(group[1].X-group[0].X-group[0].Width<0 || group[1].X-group[0].X-group[0].Width>4 ||
@@ -625,7 +621,7 @@ public static class GingerMenuAccess {
         if(SendInput(2,input,Marshal.SizeOf(typeof(Input)))!=2) throw new InvalidOperationException("Tab click outcome unknown; no retry");
     }
     // These are UI observations only. Position and displayed names are never product IDs.
-    private static GingerSelectedProduct ReadSelectedProductOnce(IntPtr root,uint process, System.Collections.Generic.List<GingerProductRow> all=null,System.Collections.Generic.List<GingerSelectionEvidence> evidence=null,bool allowAmbiguous=false) {
+    private static GingerSelectedProduct ReadSelectedProductOnce(IntPtr root,uint process, List<GingerProductRow> all=null,List<GingerSelectionEvidence> evidence=null,bool allowAmbiguous=false) {
         GingerPriceDocument document=ReadPriceDocument(root,process);
         GingerSelectedProduct result=null;
         int tables=0;
@@ -658,7 +654,7 @@ public static class GingerMenuAccess {
                 if(!headerSeen) throw new InvalidOperationException("Product header missing");
                 position++;
                 int rowState=Convert.ToInt32(row.get_accState(0));
-                System.Collections.Generic.List<int> cellStates=new System.Collections.Generic.List<int>();
+                List<int> cellStates=new List<int>();
                 bool selected=(rowState & 2)!=0;
                 foreach(object cell in cells) {
                     IAccessible accessible=cell as IAccessible;
@@ -700,7 +696,7 @@ public static class GingerMenuAccess {
         return result;
     }
     public static GingerSelectionEvidence[] InspectProductSelection(IntPtr root,uint process) {
-        System.Collections.Generic.List<GingerSelectionEvidence> first=new System.Collections.Generic.List<GingerSelectionEvidence>(),second=new System.Collections.Generic.List<GingerSelectionEvidence>();
+        List<GingerSelectionEvidence> first=new List<GingerSelectionEvidence>(),second=new List<GingerSelectionEvidence>();
         ReadSelectedProductOnce(root,process,null,first);
         ReadSelectedProductOnce(root,process,null,second);
         if(first.Count!=second.Count) throw new InvalidOperationException("Selection evidence changed");
@@ -727,7 +723,7 @@ public static class GingerMenuAccess {
             throw new InvalidOperationException("Selected product changed between observations");
     }
     private static GingerProductRow[] ReadProductRowsOnce(IntPtr root,uint process,bool allowAmbiguous=false) {
-        System.Collections.Generic.List<GingerProductRow> rows=new System.Collections.Generic.List<GingerProductRow>();
+        List<GingerProductRow> rows=new List<GingerProductRow>();
         ReadSelectedProductOnce(root,process,rows,null,allowAmbiguous);
         return rows.ToArray();
     }
@@ -827,7 +823,7 @@ public static class GingerMenuAccess {
             if(list==null || Convert.ToInt32(list.get_accRole(0))!=33 || list.accChildCount>260)
                 throw new InvalidOperationException("Unsupported candidate list");
             int childCount=list.accChildCount;
-            System.Collections.Generic.List<GingerCatalogueCandidate> candidates=new System.Collections.Generic.List<GingerCatalogueCandidate>();
+            List<GingerCatalogueCandidate> candidates=new List<GingerCatalogueCandidate>();
             foreach(object child in FirstChildren(list,260)) {
                 IAccessible nested=child as IAccessible;
                 IAccessible owner=nested??list;
@@ -900,7 +896,7 @@ public static class GingerMenuAccess {
         string pattern=@"\p{L}+|\p{N}+|[^\s]";
         var expected=System.Text.RegularExpressions.Regex.Matches(source.ToLowerInvariant(),pattern);
         var actual=System.Text.RegularExpressions.Regex.Matches(String.Join(" ",words).ToLowerInvariant(),pattern);
-        System.Collections.Generic.List<string> collapsed=new System.Collections.Generic.List<string>();
+        List<string> collapsed=new List<string>();
         HashSet<string> seenLetters=new HashSet<string>();
         foreach(System.Text.RegularExpressions.Match token in expected) {
             bool letters=System.Text.RegularExpressions.Regex.IsMatch(token.Value,@"^\p{L}+$");
