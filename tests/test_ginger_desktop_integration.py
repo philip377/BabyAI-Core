@@ -90,7 +90,9 @@ def test_native_ui_has_explicit_button_and_human_readable_local_logs():
     csproj = (root / "desktop/BabyAI.Desktop/BabyAI.Desktop.csproj").read_text(encoding="utf-8")
     adaptive = (root / "desktop/BabyAI.Desktop/MainWindow.AdaptiveUi.cs").read_text(encoding="utf-8")
     assert 'x:Name="GingerNavigationButton"' in xaml
-    assert 'Click="GingerNavigationButton_Click"' in xaml
+    assert 'Click="AgentsNavigationButton_Click"' in xaml
+    agents = (root / "desktop/BabyAI.Desktop/MainWindow.Agents.cs").read_text(encoding="utf-8")
+    assert "GingerNavigationButton_Click(sender, e)" in agents
     assert 'GingerNavigationLabel.Visibility = labelVisibility' in adaptive
     assert "private async void GingerNavigationButton_Click" in cs
     assert "Проверить выделенный товар" in cs
