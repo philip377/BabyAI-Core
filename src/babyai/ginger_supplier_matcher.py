@@ -271,6 +271,9 @@ class GingerSupplierMatcher:
             if not _compatible(incoming_features, candidate_features):
                 continue
             score = _similarity(incoming_features, candidate_features)
+            from .ginger_variant_evidence import unresolved_variant
+            if unresolved_variant(position.title, item.title):
+                score = min(score, 0.79)
             if score >= 0.45:
                 ranked.append(Candidate(item.sku, item.title, round(score, 4)))
         ranked.sort(key=lambda c: (-c.score, c.sku))
@@ -331,6 +334,10 @@ def explain_candidate(position: SupplierPosition, candidate: CatalogPosition, *,
         condition_differences, condition_uncertainties = explain_conditions(position.title, candidate.title)
         differences.extend(condition_differences)
         uncertainties.extend(condition_uncertainties)
+        from .ginger_variant_evidence import explain_variants
+        variant_differences, variant_uncertainties = explain_variants(position.title, candidate.title)
+        differences.extend(variant_differences)
+        uncertainties.extend(variant_uncertainties)
     # Supplier abbreviations must be confirmed, never silently translated into perfume types.
     if re.search(r"\bash\s*/\s*l\b", position.title, re.I):
         uncertainties.append({"field": "supplier_abbreviation", "message":

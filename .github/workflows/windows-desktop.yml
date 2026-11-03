@@ -32,7 +32,7 @@ jobs:
       - name: Test persistent Ginger queue controller guards
         # Uses synthetic files and rejects before live UI access.
         shell: pwsh
-        run: python -m pytest tests/test_ginger_price_queue.py tests/test_ginger_row_journal.py tests/test_ginger_filter_preflight.py tests/test_ginger_filter_plan.py tests/test_ginger_filter_relaxation.py tests/test_ginger_filter_controller.py tests/test_ginger_row_filter_prepare.py tests/test_ginger_row_review.py tests/test_ginger_review_queue.py tests/test_ginger_batch.py tests/test_ginger_search_session.py tests/test_ginger_candidate_review.py tests/test_ginger_review_report.py tests/test_ginger_review_feedback.py tests/test_ginger_review_form.py tests/test_ginger_product_condition.py tests/test_ginger_batch_report.py -q
+        run: python -m pytest tests/test_ginger_price_queue.py tests/test_ginger_row_journal.py tests/test_ginger_filter_preflight.py tests/test_ginger_filter_plan.py tests/test_ginger_filter_relaxation.py tests/test_ginger_filter_controller.py tests/test_ginger_row_filter_prepare.py tests/test_ginger_row_review.py tests/test_ginger_review_queue.py tests/test_ginger_batch.py tests/test_ginger_search_session.py tests/test_ginger_candidate_review.py tests/test_ginger_review_report.py tests/test_ginger_review_feedback.py tests/test_ginger_review_form.py tests/test_ginger_product_condition.py tests/test_ginger_variant_evidence.py tests/test_ginger_batch_report.py -q
       - name: Verify desktop bridge
         shell: pwsh
         env:
