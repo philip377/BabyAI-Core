@@ -82,12 +82,15 @@ public sealed partial class MainWindow
             if (_gingerRunning)
                 return;
             _gingerRunning = true;
+            SetGingerPhase(GingerCompanionPhase.Checking);
+            SetGingerCaptureMode(true);
             start.IsEnabled = false;
             stop.IsEnabled = true;
             _gingerCancellation = new CancellationTokenSource();
             try
             {
                 Log("Начинаю проверку. Данные останутся на этом компьютере.");
+                SetGingerPhase(GingerCompanionPhase.Reading);
                 if (!await GingerCandidateReader.TryReadAsync(Log, _gingerCancellation.Token))
                 {
                     var readiness = await GingerDiagnostics.CollectAsync(Log, _gingerCancellation.Token);
@@ -95,19 +98,23 @@ public sealed partial class MainWindow
                         await AnalyzeGingerInUnixAsync(Log, _gingerCancellation.Token);
                 }
                 Log("Проверка завершена. Никаких изменений в Ginger не внесено.");
+                SetGingerPhase(GingerCompanionPhase.Completed);
             }
             catch (OperationCanceledException)
             {
+                SetGingerPhase(GingerCompanionPhase.Cancelled);
                 Log("Проверка остановлена по твоему запросу. Товары не менялись.");
             }
             catch (Exception ex)
             {
                 // Keep raw technical exceptions out of the user-facing log.
                 StartupDiagnostics.Log("Ginger UI preview failed", ex);
+                SetGingerPhase(GingerCompanionPhase.Failed);
                 Log("Проверка остановилась: " + FriendlyGingerError(ex));
             }
             finally
             {
+                SetGingerCaptureMode(false);
                 _gingerCancellation?.Dispose();
                 _gingerCancellation = null;
                 _gingerRunning = false;
@@ -247,6 +254,7 @@ public sealed partial class MainWindow
         token.ThrowIfCancellationRequested();
         // Focus returns only AFTER screen capture has finished.
         Activate();
+        SetGingerPhase(GingerCompanionPhase.Reviewing);
         log("Проверяю распознанные названия и возможные совпадения.");
         var review = await _bridge.ReviewGingerAsync(reportPath, token);
         token.ThrowIfCancellationRequested();
