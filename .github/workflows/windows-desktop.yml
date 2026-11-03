@@ -21,10 +21,10 @@ jobs:
         shell: pwsh
         run: dotnet run --project tests/GingerDiagnostics.Smoke/GingerDiagnostics.Smoke.csproj
       - name: Test Ginger semantic navigation on an isolated fixture
-        shell: pwsh
+        shell: powershell
         run: ./tests/ginger-navigation-smoke.ps1
       - name: Test tab OCR preprocessing on synthetic images
-        shell: pwsh
+        shell: powershell
         run: ./tests/ginger-tab-image-smoke.ps1
       - name: Install BabyAI Core package
         shell: pwsh
