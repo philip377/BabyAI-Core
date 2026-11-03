@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName Accessibility
 Add-Type -AssemblyName Microsoft.VisualBasic
-Add-Type -ReferencedAssemblies @([Accessibility.IAccessible].Assembly.Location, [Microsoft.VisualBasic.Interaction].Assembly.Location, [System.Collections.Generic.List[int]].Assembly.Location, [System.Linq.Enumerable].Assembly.Location) -TypeDefinition @'
+Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
