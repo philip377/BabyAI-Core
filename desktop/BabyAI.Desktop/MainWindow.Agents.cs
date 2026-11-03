@@ -39,7 +39,7 @@ public sealed partial class MainWindow
             {
                 Text = "• ᴗ •",
                 FontSize = 23,
-                Foreground = new SolidColorBrush(Windows.UI.Colors.White),
+                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255)),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             });
