@@ -61,6 +61,7 @@ def plan_ginger_word_search(
     visible_words: Sequence[str] | None = None,
     visible_search_columns: Sequence[str] | None = None,
     max_stars: int = 4,
+    excluded_indices: Sequence[int] = (),
 ) -> GingerWordSearchPlan:
     """Prioritize distinctive search words without assuming star click behavior.
 
@@ -75,6 +76,9 @@ def plan_ginger_word_search(
         raise ValueError("max_stars must be positive")
 
     raw = split_supplier_words(position.title) if visible_words is None else list(visible_words)
+    excluded = set(excluded_indices)
+    if any(type(index) is not int or not 0 <= index < len(raw) for index in excluded):
+        raise ValueError("Excluded indices must refer to visible words")
     if len(raw) > 128:
         raise ValueError("Too many visible Ginger search words")
     if visible_search_columns is not None and len(visible_search_columns) != len(raw):
@@ -94,7 +98,7 @@ def plan_ginger_word_search(
         if not isinstance(word, str):
             raise ValueError("Ginger word rows must contain text")
         norm = normalize_text(word)
-        if (not norm or norm in seen or norm in _SEARCH_NOISE
+        if (index in excluded or not norm or norm in seen or norm in _SEARCH_NOISE
                 or (norm.isdigit() and len(norm) <= 4) or len(norm) < 2):
             continue
         seen.add(norm)
