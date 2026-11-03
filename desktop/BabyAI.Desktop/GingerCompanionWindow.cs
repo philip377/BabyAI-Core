@@ -49,7 +49,9 @@ internal sealed class GingerCompanionWindow : Window
     public GingerCompanionWindow()
     {
         Title = "UNIX · Ginger";
-        AppWindow.Resize(new SizeInt32(260, 190));
+        // Keep the pet out of the taskbar and Alt+Tab; it is controlled from UNIX.
+        AppWindow.IsShownInSwitchers = false;
+        AppWindow.Resize(new SizeInt32(260, 215));
         if (AppWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.SetBorderAndTitleBar(false, false);
@@ -114,8 +116,15 @@ internal sealed class GingerCompanionWindow : Window
             TextAlignment = TextAlignment.Center,
             FontSize = 12
         };
-        Grid.SetRow(_status, 2);
-        root.Children.Add(_status);
+        var bubble = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(255, 59, 53, 88)),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(10, 8, 10, 8),
+            Child = _status
+        };
+        Grid.SetRow(bubble, 2);
+        root.Children.Add(bubble);
         Content = root;
         SetStatus(GingerCompanionPhase.Idle);
 
