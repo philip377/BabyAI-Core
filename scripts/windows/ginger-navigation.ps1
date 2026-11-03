@@ -1,4 +1,4 @@
-﻿# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
+# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
 [CmdletBinding()]
 param(
     [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice', 'ReadSelectedProduct', 'ReadMatchingCandidates', 'SelectNextIncluded', 'SelectNextProduct')][string]$Mode = 'Inspect',
@@ -1000,7 +1000,7 @@ public static class GingerMenuAccess {
         if(words.PanelHandle==products.PanelHandle)
             throw new InvalidOperationException("Search and product panels must be distinct");
         string[] queryWords=Array.ConvertAll(words.Candidates,row=>row.Title);
-        bool lexical=words.Candidates.Length>0 && Normalize(String.Join(" ",queryWords))==Normalize(products.Source.Title);
+        bool lexical=SearchWordsDescribeSource(queryWords,products.Source.Title);
         return new GingerSearchContext {SearchWords=words,Products=products,QueryWordsMatchSource=lexical};
     }
     public static void RequireSameSearchContext(GingerSearchContext first,GingerSearchContext second) {

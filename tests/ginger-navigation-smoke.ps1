@@ -1,4 +1,4 @@
-﻿# Run with Windows PowerShell 5.1 -STA. All actions target this test's own form.
+# Run with Windows PowerShell 5.1 -STA. All actions target this test's own form.
 param([switch]$InteractiveInput)
 $ErrorActionPreference = 'Stop'
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/windows/ginger-navigation.ps1'))
@@ -312,6 +312,13 @@ try {
     $word.Text='Synthetic perfume 100 ml'
     $lexical=[GingerMenuAccess]::ReadSearchContext($root,$ownerId)
     if(-not $lexical.QueryWordsMatchSource -or $lexical.SearchCompletionVerified -or $lexical.CanMatch){throw 'Lexical query evidence lost or overclaimed'}
+    $grid.Rows[0].Cells[0].Value='Synthetic perfume 100ml (with cap)'
+    $word.Text='Synthetic perfume 100 ml ( with cap )'
+    $tokenized=[GingerMenuAccess]::ReadSearchContext($root,$ownerId)
+    if(-not $tokenized.QueryWordsMatchSource -or $tokenized.SearchCompletionVerified -or $tokenized.CanMatch){throw 'Tokenized source mismatch or authority overclaim'}
+    $word.Text='Synthetic perfume 10 ml ( with cap )'
+    if(([GingerMenuAccess]::ReadSearchContext($root,$ownerId)).QueryWordsMatchSource){throw 'Changed quantity accepted'}
+    $grid.Rows[0].Cells[0].Value='Synthetic perfume 100 ml'
     $word.Text='Synthetic'
     if($context.SearchWords.Candidates[0].Checked -ne $false){throw 'Unchecked search word not observed'}
     $word.Checked=$true
