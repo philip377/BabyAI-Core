@@ -249,7 +249,7 @@
                             </Button>
                             <Button x:Name="GingerNavigationButton"
                                     Style="{StaticResource NavigationButtonStyle}"
-                                    Click="GingerNavigationButton_Click"
+                                    Click="AgentsNavigationButton_Click"
                                     AutomationProperties.Name="Агенты"
                                     ToolTipService.ToolTip="Агенты UNIX">
                                 <StackPanel Orientation="Horizontal" Spacing="11">
