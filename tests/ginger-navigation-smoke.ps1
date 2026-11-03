@@ -1,4 +1,4 @@
-# Run with Windows PowerShell 5.1 -STA. All actions target this test's own form.
+﻿# Run with Windows PowerShell 5.1 -STA. All actions target this test's own form.
 param([switch]$InteractiveInput)
 $ErrorActionPreference = 'Stop'
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/windows/ginger-navigation.ps1'))
