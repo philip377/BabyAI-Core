@@ -38,7 +38,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Title = "BabyAI";
+        Title = "UNIX";
         SystemBackdrop = new DesktopAcrylicBackdrop();
         RuntimeText.Text = BuildRuntimeLabel();
         ConfigureWindow();

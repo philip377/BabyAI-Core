@@ -32,6 +32,21 @@ public sealed partial class MainWindow
             var resetChat = new Button { Content = "Вернуть общий чат UNIX" };
             resetChat.Click += (_, _) => { _chatAgent = null; MessageBox.PlaceholderText = "Напиши сообщение…"; status.Text = "Общий чат UNIX выбран."; };
             panel.Children.Add(resetChat);
+            var learning = new GingerLearning();
+            var learned = learning.Read().GroupBy(p => (p.Supplier, p.Source)).Select(g => g.Last()).Where(p => p.AllowAutomatic).ToArray();
+            var pairs = new ComboBox { Header = "Разрешённые пары Ginger", ItemsSource = learned.Select(p => p.Supplier + " · " + p.Source + " → " + p.Candidate).ToArray(), HorizontalAlignment = HorizontalAlignment.Stretch };
+            var revoke = new Button { Content = "Вернуть выбранную пару на ручную проверку" };
+            revoke.Click += (_, _) =>
+            {
+                if (pairs.SelectedIndex < 0) return;
+                try
+                {
+                    learning.Teach(learned[pairs.SelectedIndex] with { AllowAutomatic = false, Reason = "Автоматическое применение отключено в настройках", RecordedAt = DateTimeOffset.UtcNow });
+                    status.Text = "Автоматическое применение этой пары отключено. История сохранена.";
+                }
+                catch (Exception ex) { status.Text = ex.Message; }
+            };
+            panel.Children.Add(pairs); panel.Children.Add(revoke);
         }
         catch (Exception ex) { status.Text = ex.Message; }
         panel.Children.Add(status);

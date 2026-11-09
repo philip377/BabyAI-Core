@@ -11,6 +11,7 @@ public sealed partial class MainWindow
     private readonly AgentProfileStore _agentStore = new();
     private readonly Dictionary<string, GingerCompanionWindow> _companions = new();
     private AgentProfile? _chatAgent;
+    private bool? _gingerPreviousTopmost;
     private GingerCompanionPhase _gingerPhase = GingerCompanionPhase.Idle;
 
     private void SetGingerPhase(GingerCompanionPhase phase)
@@ -20,6 +21,19 @@ public sealed partial class MainWindow
     }
     private void SetGingerCaptureMode(bool capturing)
     {
+        if (AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+        {
+            if (capturing)
+            {
+                _gingerPreviousTopmost ??= presenter.IsAlwaysOnTop;
+                presenter.IsAlwaysOnTop = false;
+            }
+            else if (_gingerPreviousTopmost is bool previous)
+            {
+                presenter.IsAlwaysOnTop = previous;
+                _gingerPreviousTopmost = null;
+            }
+        }
         foreach (var pet in _companions.Values) pet.SetCaptureMode(capturing);
     }
     private void CloseCompanions()
