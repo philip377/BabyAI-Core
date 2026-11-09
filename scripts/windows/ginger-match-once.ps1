@@ -10,7 +10,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'ginger-navigation.ps1'))
-Invoke-Expression $source.Substring(0,$source.IndexOf('$processes = @('))
+& ([scriptblock]::Create($source.Substring(0,$source.IndexOf('$processes = @('))))
 $expectedRows=Get-Content (Join-Path $ObservationDirectory 'before.json') -Raw | ConvertFrom-Json
 $expectedContext=Get-Content (Join-Path $ObservationDirectory 'search-context.json') -Raw | ConvertFrom-Json
 $targets=@(Get-Process Ginger4 -ErrorAction Stop | Where-Object MainWindowHandle -ne 0)

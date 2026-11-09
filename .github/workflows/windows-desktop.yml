@@ -23,6 +23,9 @@ jobs:
         # Runs only fixed synthetic subprocesses, not a live Ginger session.
         shell: pwsh
         run: dotnet run --project tests/GingerDiagnostics.Smoke/GingerDiagnostics.Smoke.csproj
+      - name: Test Ginger driver import preserves explicit confirmation
+        shell: powershell
+        run: ./tests/ginger-driver-import-smoke.ps1
       - name: Test Ginger semantic navigation on an isolated fixture
         shell: powershell
         run: ./tests/ginger-navigation-smoke.ps1
