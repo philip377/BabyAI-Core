@@ -77,7 +77,7 @@ internal static class GingerDiagnostics
         return readiness;
     }
 
-    internal static async Task<string> RunAsync(ProcessStartInfo info, TimeSpan timeout, CancellationToken token)
+    internal static async Task<string> RunAsync(ProcessStartInfo info, TimeSpan timeout, CancellationToken token, string? failureDirectory = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(timeout);
@@ -90,7 +90,25 @@ internal static class GingerDiagnostics
         {
             await Task.WhenAll(stdout, stderr, process.WaitForExitAsync(deadline.Token));
             if (process.ExitCode != 0)
-                throw new InvalidOperationException("Probe failed");
+            {
+                var error = await stderr;
+                if (failureDirectory is not null)
+                {
+                    Directory.CreateDirectory(failureDirectory);
+                    var report = new { exit_code = process.ExitCode, stderr = error.Length > 16000 ? error[..16000] : error,
+                        stdout = (await stdout) is var output && output.Length > 16000 ? output[..16000] : output };
+                    await File.WriteAllTextAsync(Path.Combine(failureDirectory, "subprocess-failure-" + Guid.NewGuid().ToString("N") + ".json"),
+                        JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8, CancellationToken.None);
+                }
+                var reason = error.Contains("Exactly one Ginger", StringComparison.OrdinalIgnoreCase)
+                    ? "Не найдено единственное доступное окно Ginger. Открой Ginger и проверь, нет ли второго экземпляра."
+                    : error.Contains("Query", StringComparison.OrdinalIgnoreCase) && error.Contains("source", StringComparison.OrdinalIgnoreCase)
+                    ? "Панель поиска ещё не соответствует выбранному товару. Дождись загрузки строки."
+                    : error.Contains("selected", StringComparison.OrdinalIgnoreCase)
+                    ? "Не удалось подтвердить выделение одной исходной строки Ginger."
+                    : $"Драйвер Ginger завершился с кодом {process.ExitCode}. Подробности сохранены в журнале сессии.";
+                throw new InvalidOperationException(reason);
+            }
             return await stdout;
         }
         finally

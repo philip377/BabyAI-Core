@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 namespace BabyAI.Desktop;
@@ -50,7 +50,7 @@ internal sealed class GingerDesktopSession : IDisposable
             if (position.HasValue) args.AddRange(["-Operation", "Select", "-Position", position.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
             else if (word is not null) args.AddRange(["-Operation", "Filter", "-Word", word, "-Enabled"]);
         }
-        var json = await GingerDiagnostics.RunAsync(Command("ginger-desktop-step.ps1", args.ToArray()), TimeSpan.FromSeconds(60), token);
+        var json = await GingerDiagnostics.RunAsync(Command("ginger-desktop-step.ps1", args.ToArray()), TimeSpan.FromSeconds(60), token, DirectoryPath);
         using var document = JsonDocument.Parse(json);
         var observed = new GingerDesktopObservation(folder, document.RootElement.Clone());
         if (observed.Position < 1 || observed.Position > observed.Count || observed.Count > 500 || observed.Candidates.Length > 256)
@@ -67,7 +67,7 @@ internal sealed class GingerDesktopSession : IDisposable
         var info = new ProcessStartInfo { FileName = python, UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
         foreach (var arg in new[] { "-X", "utf8", Path.Combine(AppContext.BaseDirectory, "Ginger", "ginger-desktop-plan.py"), Path.Combine(observed.Directory, "search-context.json") }) info.ArgumentList.Add(arg);
-        var json = await GingerDiagnostics.RunAsync(info, TimeSpan.FromSeconds(20), token);
+        var json = await GingerDiagnostics.RunAsync(info, TimeSpan.FromSeconds(20), token, DirectoryPath);
         using var plan = JsonDocument.Parse(json);
         foreach (var step in plan.RootElement.GetProperty("steps").EnumerateArray())
         {
@@ -86,7 +86,7 @@ internal sealed class GingerDesktopSession : IDisposable
         Record($"Подтверждено сопоставление строки {before.Position}: {candidate}. Проверяю синее выделение.");
         // Once dispatch may have happened, Stop waits for reconciliation. It never kills the writer mid-flight.
         var json = await GingerDiagnostics.RunAsync(Command("ginger-match-once.ps1", "-ObservationDirectory", before.Directory,
-            "-ReceiptDirectory", receipt, "-CandidateTitle", candidate, "-ConfirmMatch"), TimeSpan.FromSeconds(90), CancellationToken.None);
+            "-ReceiptDirectory", receipt, "-CandidateTitle", candidate, "-ConfirmMatch"), TimeSpan.FromSeconds(90), CancellationToken.None, DirectoryPath);
         using var result = JsonDocument.Parse(json);
         if (result.RootElement.GetProperty("status").GetString() != "matched_verified") throw new InvalidDataException("Результат не подтверждён. Повтор запрещён.");
         Record("Сопоставление подтверждено повторным чтением всей таблицы. Документ не закрывался.");

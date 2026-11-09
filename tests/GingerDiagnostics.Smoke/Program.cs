@@ -162,6 +162,28 @@ async Task MustFail(string command, TimeSpan timeout, CancellationToken token)
 }
 
 await MustFail("exit 7", TimeSpan.FromSeconds(10), CancellationToken.None);
+var failureFolder = Path.Combine(Path.GetTempPath(), "ginger-error-test-" + Guid.NewGuid().ToString("N"));
+try
+{
+    try
+    {
+        await GingerDiagnostics.RunAsync(Command("[Console]::Error.Write('synthetic-driver-reason'); exit 7"),
+            TimeSpan.FromSeconds(10), CancellationToken.None, failureFolder);
+        throw new Exception("Failed subprocess accepted");
+    }
+    catch (InvalidOperationException)
+    {
+        var reports = Directory.GetFiles(failureFolder, "subprocess-failure-*.json");
+        if (reports.Length != 1) throw new Exception("Missing failure report");
+        using var report = JsonDocument.Parse(File.ReadAllText(reports[0]));
+        if (report.RootElement.GetProperty("exit_code").GetInt32() != 7 ||
+            report.RootElement.GetProperty("stderr").GetString() != "synthetic-driver-reason")
+            throw new Exception("Original diagnostic lost");
+    }
+}
+finally { if (Directory.Exists(failureFolder)) Directory.Delete(failureFolder, true); }
+Console.WriteLine("PASS: original subprocess error and exit code retained locally");
+
 await MustFail("Start-Sleep -Seconds 60", TimeSpan.FromMilliseconds(500), CancellationToken.None);
 using var cancel = new CancellationTokenSource(500);
 await MustFail("Start-Sleep -Seconds 60", TimeSpan.FromSeconds(30), cancel.Token);
