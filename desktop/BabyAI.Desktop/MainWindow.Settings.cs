@@ -14,7 +14,13 @@ public sealed partial class MainWindow
     {
         ApplyStoredUiSettings();
         _ = CheckForUpdatesOnStartupAsync();
-        if (Environment.GetCommandLineArgs().Contains("--agents", StringComparer.Ordinal))
+        if (Environment.GetCommandLineArgs().Contains("--ginger-read-check", StringComparer.Ordinal))
+        {
+            _expanded = true;
+            await ExpandPanelAsync();
+            GingerNavigationButton_Click(sender, e);
+        }
+        else if (Environment.GetCommandLineArgs().Contains("--agents", StringComparer.Ordinal))
         {
             _expanded = true;
             await ExpandPanelAsync();

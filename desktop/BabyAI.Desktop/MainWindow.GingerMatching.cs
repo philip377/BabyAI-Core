@@ -5,6 +5,7 @@ namespace BabyAI.Desktop;
 
 public sealed partial class MainWindow
 {
+    private bool _gingerStartupReadConsumed;
     private async void GingerNavigationButton_Click(object sender, RoutedEventArgs e)
     {
         if (_gingerDialogOpen || _busy || _gingerRunning) return;
@@ -15,6 +16,8 @@ public sealed partial class MainWindow
         var pending = new List<GingerDesktopObservation>();
         var fatal = false;
         var diagnosticsRequested = false;
+        var startupReadCheck = !_gingerStartupReadConsumed && Environment.GetCommandLineArgs().Contains("--ginger-read-check", StringComparer.Ordinal);
+        _gingerStartupReadConsumed = true;
         var source = new TextBlock { Text = "Открой прайс Ginger на вкладке «Сопоставление — новые». Агент прочитает полные названия товаров.", TextWrapping = TextWrapping.Wrap, FontSize = 15 };
         var candidates = new ComboBox { Header = "Кандидат из каталога Ginger", HorizontalAlignment = HorizontalAlignment.Stretch };
         var candidateFull = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
@@ -119,7 +122,22 @@ public sealed partial class MainWindow
             try { return await session!.MatchAsync(before, candidate, token); }
             finally { presenter.Restore(false); }
         }
-        read.Click += async (_, _) => { permit.IsChecked = false; await Execute(async token => { observation = await session!.ObserveAsync(token); Log("Прайс прочитан. Полные названия доступны выше. " + session.DirectoryPath); }); };
+        async Task ReadCurrentPrice()
+        {
+            permit.IsChecked = false;
+            await Execute(async token => { observation = await session!.ObserveAsync(token); Log("Прайс прочитан. Полные названия доступны выше. " + session.DirectoryPath); });
+        }
+        read.Click += async (_, _) => await ReadCurrentPrice();
+        dialog.Opened += async (_, _) =>
+        {
+            read.Focus(FocusState.Programmatic);
+            if (startupReadCheck)
+            {
+                startupReadCheck = false;
+                Log("Диагностический запуск: только чтение текущего прайса. Разрешение сопоставления не выдано.");
+                await ReadCurrentPrice();
+            }
+        };
         saveRule.Click += (_, _) =>
         {
             if (_gingerRunning || fatal || observation is null) return;
