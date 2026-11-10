@@ -1,7 +1,7 @@
 ﻿# Bundled desktop controller. Every transition consumes an explicit, fresh observation.
 [CmdletBinding()]
 param(
- [ValidateSet('Observe','Select','Filter')][string]$Operation='Observe',
+ [ValidateSet('Observe','Prepare','Select','Filter')][string]$Operation='Observe',
  [Parameter(Mandatory=$true)][string]$OutputDirectory,
  [string]$ExpectedDirectory,
  [int]$Position=0,
@@ -22,7 +22,23 @@ if(Test-Path -LiteralPath $OutputDirectory){throw 'Output exists; input retry pr
 [void][IO.Directory]::CreateDirectory($OutputDirectory)
 [GingerMenuAccess]::ActivateForRead($window,$ownerId)
 $rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
-if($Operation -ne 'Observe') {
+if($Operation -eq 'Prepare') {
+ if(-not $ConfirmNavigation){throw 'Navigation confirmation required'}
+ $document=[GingerMenuAccess]::ReadPriceDocument($window,$ownerId)
+ [pscustomobject]@{operation='Prepare';document=$document;rows=$rows;time_utc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'navigation-intent.json') -Encoding UTF8
+ [GingerMenuAccess]::OpenDocumentMatching($window,$ownerId,$document,$true)
+ $deadline=[Diagnostics.Stopwatch]::StartNew()
+ do {
+  $view=[GingerMenuAccess]::InspectMatching($window,$ownerId)
+  if($view.Status -ne 'panels_not_verified'){break}
+  if($deadline.Elapsed.TotalSeconds -ge 10){throw 'Matching panels not verified after navigation; no retry'}
+  Start-Sleep -Milliseconds 200
+ } while($true)
+ $afterDocument=[GingerMenuAccess]::ReadPriceDocument($window,$ownerId)
+ if($afterDocument.Number -ne $document.Number -or $afterDocument.Supplier -ne $document.Supplier){throw 'Document changed during preparation'}
+ [GingerMenuAccess]::RequireSameProductRows($rows,[GingerMenuAccess]::ReadProductRows($window,$ownerId),$true)
+}
+if($Operation -in @('Select','Filter')) {
  if(-not $ConfirmNavigation -or -not $ExpectedDirectory){throw 'Confirmed observation required'}
  $before=Get-Content -LiteralPath (Join-Path $ExpectedDirectory 'before.json') -Raw -Encoding UTF8 | ConvertFrom-Json
  if($before.process_id -ne $ownerId){throw 'Process changed'}

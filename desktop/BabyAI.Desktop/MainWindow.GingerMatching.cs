@@ -122,10 +122,10 @@ public sealed partial class MainWindow
             try { return await session!.MatchAsync(before, candidate, token); }
             finally { presenter.Restore(false); }
         }
-        async Task ReadCurrentPrice()
+        async Task ReadCurrentPrice(bool prepare = true)
         {
             permit.IsChecked = false;
-            await Execute(async token => { observation = await session!.ObserveAsync(token); Log("Прайс прочитан. Полные названия доступны выше. " + session.DirectoryPath); });
+            await Execute(async token => { observation = await session!.ObserveAsync(token, prepare: prepare); Log("Прайс прочитан. Полные названия доступны выше. " + session.DirectoryPath); });
         }
         read.Click += async (_, _) => await ReadCurrentPrice();
         dialog.Opened += async (_, _) =>
@@ -135,7 +135,7 @@ public sealed partial class MainWindow
             {
                 startupReadCheck = false;
                 Log("Диагностический запуск: только чтение текущего прайса. Разрешение сопоставления не выдано.");
-                await ReadCurrentPrice();
+                await ReadCurrentPrice(prepare: false);
             }
         };
         saveRule.Click += (_, _) =>

@@ -44,10 +44,17 @@ internal sealed class GingerDesktopSession : IDisposable
         return info;
     }
     public async Task<GingerDesktopObservation> ObserveAsync(CancellationToken token,
-        GingerDesktopObservation? previous = null, int? position = null, string? word = null)
+        GingerDesktopObservation? previous = null, int? position = null, string? word = null, bool prepare = false)
     {
         var folder = Path.Combine(DirectoryPath, Guid.NewGuid().ToString("N"));
         var args = new List<string> { "-OutputDirectory", folder };
+        if (prepare)
+        {
+            if (previous is not null || position.HasValue || word is not null)
+                throw new InvalidOperationException("Подготовка экрана не совмещается с изменением строки или фильтра.");
+            args.AddRange(["-Operation", "Prepare", "-ConfirmNavigation"]);
+            Record("Подготавливаю панель сопоставления открытого прайса. Уже открытую панель не переключаю.");
+        }
         if (previous is not null)
         {
             args.AddRange(["-ExpectedDirectory", previous.Directory, "-ConfirmNavigation"]);
