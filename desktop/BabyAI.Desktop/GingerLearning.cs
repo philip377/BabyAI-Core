@@ -7,6 +7,7 @@ public sealed record GingerLearnedPair(string Supplier, string Source, string Ca
 
 public sealed class GingerLearning
 {
+    public sealed record AutomaticDecision(string Candidate, string Basis, string Explanation);
     public sealed record ConditionRule(string Supplier, bool Enabled, DateTimeOffset RecordedAt);
     public void TeachDentedTesterRule(string supplier, bool enabled)
     {
@@ -47,25 +48,32 @@ public sealed class GingerLearning
         JsonSerializer.Serialize(stream, pair); stream.Flush(true);
     }
     public string? AutomaticCandidate(string supplier, string source, IEnumerable<string> candidates)
+        => DecideAutomatic(supplier, source, candidates)?.Candidate;
+    public AutomaticDecision? DecideAutomatic(string supplier, string source, IEnumerable<string> candidates)
     {
         var list = candidates.ToArray();
         var learned = Read().Where(p => p.Supplier == supplier && p.Source == source).ToArray();
         if (learned.Length > 0)
         {
             var latest = learned[^1];
-            return latest.AllowAutomatic && list.Count(c => c == latest.Candidate) == 1 ? latest.Candidate : null;
+            return latest.AllowAutomatic && list.Count(c => c == latest.Candidate) == 1
+                ? new(latest.Candidate, "learned_pair", "Подтверждённая точная пара этого поставщика. Объяснение пользователя: " + latest.Reason) : null;
         }
         // Exact token identity only. Similarity scores, variant research and guessed aliases never authorize input.
         var key = Canonical(source);
+        var conditionApplied = false;
         if (HasDentedTesterRule(supplier) && Regex.IsMatch(key, @"\bнемного подмят\b"))
         {
+            conditionApplied = true;
             key = Regex.Replace(key, @"\bнемного подмят\b", "");
             key = Regex.Replace(key, @"\s+", " ").Trim();
             if (!Regex.IsMatch(key, @"\btester\b")) key += " tester";
         }
         if (!Regex.IsMatch(key, @"\b\d+(?:[.,]\d+)? ml\b") || !Regex.IsMatch(key, @"\b(edp|edt|edc|extrait)\b")) return null;
         var equal = list.Where(c => Canonical(c) == key).ToArray();
-        return equal.Length == 1 ? equal[0] : null;
+        return equal.Length == 1 ? new(equal[0], conditionApplied ? "dented_tester_rule" : "exact_identity",
+            conditionApplied ? "Включённое правило этого поставщика: немного подмят → тестер. Остальные признаки совпали; кандидат единственный."
+                : "Все признаки названия совпали с учётом обозначений концентрации и объёма; кандидат единственный.") : null;
     }
     private static string Canonical(string title)
     {

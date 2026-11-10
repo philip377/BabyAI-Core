@@ -188,12 +188,17 @@ public sealed partial class MainWindow
                     if (!observation.Linked)
                     {
                         observation = await session!.PrepareFiltersAsync(observation, token);
-                        var target = learning.AutomaticCandidate(observation.Supplier, observation.Title, observation.Candidates);
-                        if (target is null) QueueCurrent();
+                        var decision = learning.DecideAutomatic(observation.Supplier, observation.Title, observation.Candidates);
+                        if (decision is null) QueueCurrent();
                         else
                         {
                             session!.Record("Режим: автоматический выбор точной или обученной пары в разрешённом прайсе.");
-                            observation = await MatchWithoutOverlay(observation, target, token);
+                            File.WriteAllText(Path.Combine(session.DirectoryPath, "decision-" + Guid.NewGuid().ToString("N") + ".json"),
+                                JsonSerializer.Serialize(new { supplier = observation.Supplier, document = observation.Document,
+                                    position = observation.Position, source = observation.Title, observation_directory = observation.Directory, decision }));
+                            session.Record("Основание выбора: " + decision.Explanation);
+                            Log("Основание выбора: " + decision.Explanation);
+                            observation = await MatchWithoutOverlay(observation, decision.Candidate, token);
                             Log($"Строка {currentPosition}: автоматическое сопоставление проверено.");
                         }
                     }
