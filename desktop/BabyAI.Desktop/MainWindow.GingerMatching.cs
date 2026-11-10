@@ -103,6 +103,17 @@ public sealed partial class MainWindow
             if (observation!.Position >= observation.Count) { Log("Достигнут конец прайса."); return; }
             observation = await session!.ObserveAsync(token, observation, observation.Position + 1);
         }
+        async Task<GingerDesktopObservation> MatchWithoutOverlay(GingerDesktopObservation before, string candidate, CancellationToken token)
+        {
+            // A modal UNIX dialog must not cover or reclaim focus from Ginger while
+            // the driver verifies selection and sends its single guarded double click.
+            var presenter = AppWindow.Presenter as Microsoft.UI.Windowing.OverlappedPresenter
+                ?? throw new InvalidOperationException("Не удалось убрать окно UNIX перед сопоставлением.");
+            Log("На время сопоставления сворачиваю UNIX. Дождись проверки результата, не переключая окна.");
+            presenter.Minimize();
+            try { return await session!.MatchAsync(before, candidate, token); }
+            finally { presenter.Restore(false); }
+        }
         read.Click += async (_, _) => { permit.IsChecked = false; await Execute(async token => { observation = await session!.ObserveAsync(token); Log("Прайс прочитан. Полные названия доступны выше. " + session.DirectoryPath); }); };
         candidates.SelectionChanged += (_, _) => { approve.IsChecked = false; candidateFull.Text = candidates.SelectedItem as string ?? ""; };
         match.Click += async (_, _) =>
@@ -112,7 +123,8 @@ public sealed partial class MainWindow
             var before = observation; var explanation = reason.Text; var allow = remember.IsChecked == true;
             await Execute(async token =>
             {
-                observation = await session!.MatchAsync(before, chosen, token);
+                session!.Record("Режим: ручное подтверждение выбранной пары пользователем.");
+                observation = await MatchWithoutOverlay(before, chosen, token);
                 learning.Teach(new(before.Supplier, before.Title, chosen, explanation, allow, DateTimeOffset.UtcNow));
                 pending.RemoveAll(p => p.Position == before.Position);
                 Log("Сопоставление проверено в Ginger. Решение сохранено" + (allow ? " для повторного применения." : " без разрешения автоматического повторения."));
@@ -145,7 +157,8 @@ public sealed partial class MainWindow
                         if (target is null) QueueCurrent();
                         else
                         {
-                            observation = await session!.MatchAsync(observation, target, token);
+                            session!.Record("Режим: автоматический выбор точной или обученной пары в разрешённом прайсе.");
+                            observation = await MatchWithoutOverlay(observation, target, token);
                             Log($"Строка {currentPosition}: автоматическое сопоставление проверено.");
                         }
                     }

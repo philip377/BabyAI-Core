@@ -100,7 +100,9 @@ internal static class GingerDiagnostics
                     await File.WriteAllTextAsync(Path.Combine(failureDirectory, "subprocess-failure-" + Guid.NewGuid().ToString("N") + ".json"),
                         JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8, CancellationToken.None);
                 }
-                var reason = error.Contains("Exactly one Ginger", StringComparison.OrdinalIgnoreCase)
+                var reason = error.Contains("Foreground changed", StringComparison.OrdinalIgnoreCase)
+                    ? "Активное окно сменилось во время проверки Ginger. Проход остановлен; автоматический повтор запрещён. Подробности — в журнале сессии."
+                    : error.Contains("Exactly one Ginger", StringComparison.OrdinalIgnoreCase)
                     ? "Не найдено единственное доступное окно Ginger. Открой Ginger и проверь, нет ли второго экземпляра."
                     : error.Contains("Query", StringComparison.OrdinalIgnoreCase) && error.Contains("source", StringComparison.OrdinalIgnoreCase)
                     ? "Панель поиска ещё не соответствует выбранному товару. Дождись загрузки строки."
