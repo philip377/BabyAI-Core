@@ -12,6 +12,13 @@ var original = File.ReadAllText(Path.Combine(root,"agents.json"));
 try { store.Save(catalog with { Agents = [AgentProfileStore.Ginger, AgentProfileStore.Ginger] }); throw new Exception("invalid accepted"); } catch (InvalidDataException) { }
 Check(File.ReadAllText(Path.Combine(root,"agents.json")) == original, "invalid profile preserves persisted data");
 var learning = new GingerLearning(Path.Combine(root, "learning"));
+var moschino = "MOSCHINO CHEAPANDCHIC LIGHT CLOUDS edt 50 ml";
+var moschinoExpanded = "Moschino CHEAP AND CHIC LIGHT CLOUDS тв 50ml";
+Check(learning.AutomaticCandidate("supplier", moschino, [moschinoExpanded]) == moschinoExpanded, "Moschino joined line spelling accepted");
+foreach (var variant in new[] { moschinoExpanded + " tester", moschinoExpanded + " vintage", moschinoExpanded + " lux", moschinoExpanded.Replace("50ml", "100ml"), moschinoExpanded.Replace("тв", "пв"), moschinoExpanded.Replace("CLOUDS", "CLOUDS Intense"), moschinoExpanded.Replace("тв", "(жен) тв") })
+    Check(learning.AutomaticCandidate("supplier", moschino, [variant]) is null, "Moschino spelling preserves distinguishing tokens: " + variant);
+Check(learning.AutomaticCandidate("supplier", moschino, [moschinoExpanded, moschinoExpanded]) is null, "Moschino spelling rejects duplicate matches");
+Check(learning.AutomaticCandidate("supplier", moschino.Replace("MOSCHINO", "Other"), [moschinoExpanded.Replace("Moschino", "Other")]) is null, "Joined spelling does not generalize to other brands");
 Check(learning.AutomaticCandidate("supplier", "Acme Bloom edt 100 ml tester", ["Acme Bloom тв 100ml (тестер)"]) is not null, "exact semantics accepts concentration and unit aliases");
 foreach(var title in new[] { "Acme Bloom edt 50ml tester", "Acme Bloom Intense edt 100ml tester", "Acme Bloom edt 100ml", "Acme Bloom edp 100ml tester" })
  Check(learning.AutomaticCandidate("supplier", "Acme Bloom edt 100 ml tester", [title]) is null, "different variant rejected: " + title);

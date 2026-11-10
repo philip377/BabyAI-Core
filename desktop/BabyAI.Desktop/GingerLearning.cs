@@ -73,11 +73,13 @@ public sealed class GingerLearning
         var equal = list.Where(c => Canonical(c) == key).ToArray();
         return equal.Length == 1 ? new(equal[0], conditionApplied ? "dented_tester_rule" : "exact_identity",
             conditionApplied ? "Включённое правило этого поставщика: немного подмят → тестер. Остальные признаки совпали; кандидат единственный."
-                : "Все признаки названия совпали с учётом обозначений концентрации и объёма; кандидат единственный.") : null;
+                : "Все признаки названия совпали с учётом обозначений концентрации, объёма и написания линейки Moschino Cheap And Chic; кандидат единственный.") : null;
     }
     private static string Canonical(string title)
     {
         var text = title.Normalize(System.Text.NormalizationForm.FormKC).ToLowerInvariant();
+        // A spelling alias scoped to the exact brand, not general word joining.
+        text = Regex.Replace(text, @"\bmoschino\s+cheapandchic\b", "moschino cheap and chic");
         text = Regex.Replace(text, @"\bтестер\b", "tester");
         text = Regex.Replace(text, @"\bтв\b", "edt");
         text = Regex.Replace(text, @"\bпв\b", "edp");
