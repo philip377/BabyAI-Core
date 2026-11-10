@@ -22,4 +22,14 @@ Check(learning.AutomaticCandidate("other supplier", "Supplier special title", ["
 Check(learning.AutomaticCandidate("supplier", "Changed special title", ["Exact product"]) is null, "renamed source requires review");
 learning.Teach(new("supplier", "Supplier special title", "Exact product", "revoke auto", false, DateTimeOffset.UtcNow));
 Check(learning.AutomaticCandidate("supplier", "Supplier special title", ["Exact product"]) is null, "later user correction revokes automatic pairing");
+learning.TeachDentedTesterRule("supplier", true);
+var reloaded = new GingerLearning(Path.Combine(root, "learning"));
+var dented = "Acme Bloom edt 100 ml (немного подмят)";
+var tester = "Acme Bloom edt 100 ml tester";
+Check(reloaded.AutomaticCandidate("supplier", dented, [tester]) == tester, "condition rule persists and applies to a new source title");
+Check(reloaded.AutomaticCandidate("other supplier", dented, [tester]) is null, "condition rule cannot cross supplier");
+Check(reloaded.AutomaticCandidate("supplier", dented, ["Acme Bloom edt 50 ml tester"]) is null, "condition rule preserves volume");
+Check(reloaded.AutomaticCandidate("supplier", "Acme Bloom edt 100 ml (недолив)", [tester]) is null, "condition rule does not generalize damage descriptions");
+reloaded.TeachDentedTesterRule("supplier", false);
+Check(reloaded.AutomaticCandidate("supplier", dented, [tester]) is null, "revoked condition rule no longer authorizes matching");
 Directory.Delete(root, true);

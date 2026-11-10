@@ -20,6 +20,8 @@ public sealed partial class MainWindow
         var candidateFull = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
         var reason = new TextBox { Header = "Твоё объяснение для обучения", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxLength = 4000, PlaceholderText = "Например: у этого поставщика «немного подмят» означает тестер" };
         var remember = new CheckBox { Content = "Разрешить эту точную пару в следующих проходах у этого поставщика" };
+        var conditionRule = new CheckBox { Content = "Правило поставщика: «немного подмят» означает тестер" };
+        var saveRule = new Button { Content = "Сохранить или отозвать правило поставщика", IsEnabled = false };
         var permit = new CheckBox { Content = "Разрешаю сопоставлять однозначные и обученные пары в этом открытом прайсе" };
         var approve = new CheckBox { Content = "Проверил исходный товар и выбранного кандидата — подтверждаю сопоставление" };
         var read = new Button { Content = "Прочитать прайс" };
@@ -37,6 +39,7 @@ public sealed partial class MainWindow
         row.Children.Add(read); row.Children.Add(run); row.Children.Add(stop); panel.Children.Add(row);
         panel.Children.Add(permit); panel.Children.Add(candidates); panel.Children.Add(candidateFull); panel.Children.Add(approve);
         panel.Children.Add(reason); panel.Children.Add(remember); panel.Children.Add(match); panel.Children.Add(skip);
+        panel.Children.Add(conditionRule); panel.Children.Add(saveRule);
         panel.Children.Add(queue); panel.Children.Add(review); panel.Children.Add(log); panel.Children.Add(diagnostics);
         var dialog = new ContentDialog { Title = "Ginger · Сопоставление и обучение", XamlRoot = Root.XamlRoot,
             Content = new ScrollViewer { Content = panel, MaxHeight = 630 }, CloseButtonText = "Закрыть" };
@@ -61,6 +64,8 @@ public sealed partial class MainWindow
             match.IsEnabled = observation is { Linked: false } && !_gingerRunning && !fatal;
             stop.IsEnabled = _gingerRunning;
             diagnostics.IsEnabled = !_gingerRunning;
+            saveRule.IsEnabled = conditionRule.IsEnabled = observation is not null && !_gingerRunning && !fatal;
+            if (observation is not null) conditionRule.IsChecked = learning.HasDentedTesterRule(observation.Supplier);
             permit.IsEnabled = approve.IsEnabled = candidates.IsEnabled = reason.IsEnabled = remember.IsEnabled = !_gingerRunning;
         }
         void QueueCurrent()
@@ -115,6 +120,18 @@ public sealed partial class MainWindow
             finally { presenter.Restore(false); }
         }
         read.Click += async (_, _) => { permit.IsChecked = false; await Execute(async token => { observation = await session!.ObserveAsync(token); Log("Прайс прочитан. Полные названия доступны выше. " + session.DirectoryPath); }); };
+        saveRule.Click += (_, _) =>
+        {
+            if (_gingerRunning || fatal || observation is null) return;
+            try
+            {
+                var enabled = conditionRule.IsChecked == true;
+                learning.TeachDentedTesterRule(observation.Supplier, enabled);
+                permit.IsChecked = false;
+                Log($"{observation.Supplier}: правило «немного подмят → тестер» " + (enabled ? "сохранено. Остальные признаки товара должны совпадать." : "отозвано."));
+            }
+            catch (Exception ex) { Log("Не удалось сохранить правило: " + ex.Message); }
+        };
         candidates.SelectionChanged += (_, _) => { approve.IsChecked = false; candidateFull.Text = candidates.SelectedItem as string ?? ""; };
         match.Click += async (_, _) =>
         {

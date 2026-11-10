@@ -7,6 +7,25 @@ public sealed record GingerLearnedPair(string Supplier, string Source, string Ca
 
 public sealed class GingerLearning
 {
+    public sealed record ConditionRule(string Supplier, bool Enabled, DateTimeOffset RecordedAt);
+    public void TeachDentedTesterRule(string supplier, bool enabled)
+    {
+        if (string.IsNullOrWhiteSpace(supplier)) throw new InvalidDataException("Нужен поставщик правила.");
+        var folder = Path.Combine(_directory, "condition-rules");
+        Directory.CreateDirectory(folder);
+        using var stream = new FileStream(Path.Combine(folder, DateTime.UtcNow.ToString("yyyyMMddHHmmssfffffff") + "-" + Guid.NewGuid().ToString("N") + ".json"), FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        JsonSerializer.Serialize(stream, new ConditionRule(supplier, enabled, DateTimeOffset.UtcNow));
+        stream.Flush(true);
+    }
+    public bool HasDentedTesterRule(string supplier)
+    {
+        var folder = Path.Combine(_directory, "condition-rules");
+        if (!Directory.Exists(folder)) return false;
+        return Directory.GetFiles(folder, "*.json").Order(StringComparer.Ordinal)
+            .Select(path => JsonSerializer.Deserialize<ConditionRule>(File.ReadAllText(path))
+                ?? throw new InvalidDataException("Повреждено правило обучения."))
+            .LastOrDefault(rule => rule.Supplier == supplier)?.Enabled == true;
+    }
     private readonly string _directory;
     public GingerLearning(string? directory = null) => _directory = directory ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BabyAI", "ginger-learning");
@@ -38,6 +57,12 @@ public sealed class GingerLearning
         }
         // Exact token identity only. Similarity scores, variant research and guessed aliases never authorize input.
         var key = Canonical(source);
+        if (HasDentedTesterRule(supplier) && Regex.IsMatch(key, @"\bнемного подмят\b"))
+        {
+            key = Regex.Replace(key, @"\bнемного подмят\b", "");
+            key = Regex.Replace(key, @"\s+", " ").Trim();
+            if (!Regex.IsMatch(key, @"\btester\b")) key += " tester";
+        }
         if (!Regex.IsMatch(key, @"\b\d+(?:[.,]\d+)? ml\b") || !Regex.IsMatch(key, @"\b(edp|edt|edc|extrait)\b")) return null;
         var equal = list.Where(c => Canonical(c) == key).ToArray();
         return equal.Length == 1 ? equal[0] : null;
