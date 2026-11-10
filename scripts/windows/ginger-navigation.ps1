@@ -10,7 +10,10 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName Accessibility
 Add-Type -AssemblyName Microsoft.VisualBasic
-Add-Type -ReferencedAssemblies @([Accessibility.IAccessible].Assembly.Location, [Microsoft.VisualBasic.Interaction].Assembly.Location) -TypeDefinition @'
+# Resolve framework references absolutely: the installed self-contained .NET app
+# contains System*.dll facades incompatible with the Windows PowerShell compiler.
+$frameworkDirectory = [Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
+Add-Type -ReferencedAssemblies @((Join-Path $frameworkDirectory 'System.dll'), (Join-Path $frameworkDirectory 'System.Core.dll'), [Accessibility.IAccessible].Assembly.Location, [Microsoft.VisualBasic.Interaction].Assembly.Location) -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;

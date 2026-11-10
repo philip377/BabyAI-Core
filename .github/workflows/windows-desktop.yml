@@ -55,6 +55,17 @@ jobs:
           $exe = Get-ChildItem desktop/BabyAI.Desktop/bin/x64/Release -Filter BabyAI.Desktop.exe -File -Recurse | Select-Object -First 1
           if (-not $exe) { throw "BabyAI.Desktop.exe was not produced." }
           Write-Host "Runnable desktop executable: $($exe.FullName)"
+      - name: Compile Ginger driver from packaged application directory
+        shell: powershell
+        run: |
+          $testScript = (Resolve-Path tests/ginger-driver-import-smoke.ps1).Path
+          $exe = Get-ChildItem desktop/BabyAI.Desktop/bin/x64/Release -Filter BabyAI.Desktop.exe -File -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'Desktop executable missing' }
+          Push-Location $exe.DirectoryName
+          try {
+            & "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -STA -File $testScript
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged-directory Ginger compilation failed' }
+          } finally { Pop-Location }
       - name: Smoke-test Desktop startup
         shell: pwsh
         env:
