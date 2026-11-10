@@ -27,6 +27,10 @@ internal sealed class GingerDesktopSession : IDisposable
         Directory.CreateDirectory(DirectoryPath);
     }
     public void Dispose() => _lock.Dispose();
+    public bool HasPriorAttempt(GingerDesktopObservation observation) => GingerClaims.HasReservation(
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BabyAI", "ginger-matching-claims"),
+        observation.Data.GetProperty("process_id").GetInt64(), observation.Source.GetProperty("TableHandle").GetInt64(),
+        observation.Document, observation.Supplier, observation.Position, observation.Title);
     public void Record(string message) => File.AppendAllText(Path.Combine(DirectoryPath, "journal-ru.txt"), $"[{DateTimeOffset.Now:O}] {message}\n", Encoding.UTF8);
     private static ProcessStartInfo Command(string script, params string[] args)
     {

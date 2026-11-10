@@ -185,7 +185,14 @@ public sealed partial class MainWindow
                         throw new InvalidDataException("Открыт другой прайс; разрешение не распространяется на него.");
                     if (!visited.Add(observation.Position)) throw new InvalidDataException("Повтор строки запрещён.");
                     var currentPosition = observation.Position;
-                    if (!observation.Linked)
+                    if (!observation.Linked && session!.HasPriorAttempt(observation))
+                    {
+                        QueueCurrent();
+                        var message = $"Строка {currentPosition}: есть защитная запись прежней попытки. Повтор запрещён; оставлена для разбора.";
+                        session.Record(message);
+                        Log(message);
+                    }
+                    else if (!observation.Linked)
                     {
                         observation = await session!.PrepareFiltersAsync(observation, token);
                         var decision = learning.DecideAutomatic(observation.Supplier, observation.Title, observation.Candidates);

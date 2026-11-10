@@ -52,4 +52,17 @@ var rejectedDamagedHistory = false;
 try { reloaded.AutomaticCandidate("supplier", dented, [tester]); }
 catch (JsonException) { rejectedDamagedHistory = true; }
 Check(rejectedDamagedHistory, "damaged rule history blocks automatic matching");
+var claims = Path.Combine(root, "claims");
+Directory.CreateDirectory(claims);
+var claimPath = Path.Combine(claims, "reserved.json");
+File.WriteAllText(claimPath, JsonSerializer.Serialize(new { identity = JsonSerializer.Serialize(new object[] { 10, 20, "doc", "supplier", 4, "source" }), status = "reserved_no_retry" }));
+Check(GingerClaims.HasReservation(claims, 10, 20, "doc", "supplier", 4, "source"), "previous attempted source identified without retry");
+Check(!GingerClaims.HasReservation(claims, 10, 20, "doc", "supplier", 5, "next source"), "unrelated next row may proceed");
+Check(!GingerClaims.HasReservation(claims, 10, 20, "other doc", "supplier", 4, "source"), "reservation stays scoped to document");
+Check(File.Exists(claimPath), "preflight preserves reservation");
+File.WriteAllText(claimPath, "{invalid");
+var malformedClaimBlocked = false;
+try { GingerClaims.HasReservation(claims, 10, 20, "doc", "supplier", 4, "source"); }
+catch (JsonException) { malformedClaimBlocked = true; }
+Check(malformedClaimBlocked, "corrupt reservation blocks processing");
 Directory.Delete(root, true);
