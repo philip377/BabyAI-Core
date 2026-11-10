@@ -30,6 +30,21 @@ Check(reloaded.AutomaticCandidate("supplier", dented, [tester]) == tester, "cond
 Check(reloaded.AutomaticCandidate("other supplier", dented, [tester]) is null, "condition rule cannot cross supplier");
 Check(reloaded.AutomaticCandidate("supplier", dented, ["Acme Bloom edt 50 ml tester"]) is null, "condition rule preserves volume");
 Check(reloaded.AutomaticCandidate("supplier", "Acme Bloom edt 100 ml (недолив)", [tester]) is null, "condition rule does not generalize damage descriptions");
+foreach (var variant in new[] { "Acme Bloom edp 100 ml tester", "Acme Bloom edt 100 ml tester vintage", "Acme Bloom edt 100 ml tester lux", "Acme Bloom Intense edt 100 ml tester", "Acme Bloom edt 100 ml tester women" })
+    Check(reloaded.AutomaticCandidate("supplier", dented, [variant]) is null, "learned condition preserves product identity: " + variant);
+Check(reloaded.AutomaticCandidate("supplier", dented, [tester, tester]) is null, "condition rule rejects duplicate candidates");
+var correctedSource = "Acme Other edt 100 ml (немного подмят)";
+reloaded.Teach(new("supplier", correctedSource, "Acme Other edt 100 ml tester", "User revoked this specific exception", false, DateTimeOffset.UtcNow));
+Check(reloaded.AutomaticCandidate("supplier", correctedSource, ["Acme Other edt 100 ml tester"]) is null, "exact user correction overrides enabled general condition");
+var ruleFolder = Path.Combine(root, "learning", "condition-rules");
+var historyBeforeRevoke = Directory.GetFiles(ruleFolder, "*.json").Length;
 reloaded.TeachDentedTesterRule("supplier", false);
 Check(reloaded.AutomaticCandidate("supplier", dented, [tester]) is null, "revoked condition rule no longer authorizes matching");
+Check(Directory.GetFiles(ruleFolder, "*.json").Length == historyBeforeRevoke + 1, "revocation preserves learning history");
+var damagedRule = Path.Combine(ruleFolder, "zz-invalid.json");
+File.WriteAllText(damagedRule, "{invalid");
+var rejectedDamagedHistory = false;
+try { reloaded.AutomaticCandidate("supplier", dented, [tester]); }
+catch (JsonException) { rejectedDamagedHistory = true; }
+Check(rejectedDamagedHistory, "damaged rule history blocks automatic matching");
 Directory.Delete(root, true);
