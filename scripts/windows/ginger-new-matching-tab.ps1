@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 if (-not $ConfirmNavigation) { throw 'Navigation and local screen observation confirmation required' }
 $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'ginger-navigation.ps1'))
-Invoke-Expression $source.Substring(0,$source.IndexOf('$processes = @('))
+& ([scriptblock]::Create($source.Substring(0,$source.IndexOf('$processes = @('))))
 Add-Type -AssemblyName System.Drawing
 Add-Type -ReferencedAssemblies @([Drawing.Bitmap].Assembly.Location) -TypeDefinition @'
 using System.Drawing;

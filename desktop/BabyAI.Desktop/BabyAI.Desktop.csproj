@@ -19,13 +19,14 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
     <PackageReference Include="H.NotifyIcon.WinUI" Version="2.4.1" />
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />
   </ItemGroup>
 
   <!-- Bundle the previously validated read-only CPU OCR probe with the
        desktop application. It is launched only by the explicit Ginger UI
        button, never on startup or from untrusted model-generated commands. -->
   <ItemGroup>
-    <Content Include="..\..\scripts\windows\ginger-navigation.ps1;..\..\scripts\windows\ginger-uia-probe.ps1;..\..\scripts\windows\ginger-msaa-probe.ps1;..\..\scripts\windows\ginger-listview-probe.ps1"
+    <Content Include="..\..\scripts\windows\ginger-navigation.ps1;..\..\scripts\windows\ginger-desktop-step.ps1;..\..\scripts\windows\ginger-desktop-plan.py;..\..\scripts\windows\ginger-match-once.ps1;..\..\scripts\windows\ginger-uia-probe.ps1;..\..\scripts\windows\ginger-msaa-probe.ps1;..\..\scripts\windows\ginger-listview-probe.ps1"
              Link="Ginger\%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />

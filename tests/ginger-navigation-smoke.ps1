@@ -7,6 +7,10 @@ $source = $source.Replace('public static class GingerMenuAccess {', 'public stat
 $boundary = $source.IndexOf('$processes = @(')
 if ($boundary -lt 0) { throw 'Missing driver boundary' }
 Invoke-Expression $source.Substring(0, $boundary)
+if(-not [GingerMenuAccess]::IsActiveSelectionRgb(0,120,212)){throw 'Active blue rejected'}
+foreach($color in @(@(173,216,230),@(255,255,225),@(255,255,255),@(0,0,0))){
+ if([GingerMenuAccess]::IsActiveSelectionRgb($color[0],$color[1],$color[2])){throw 'Inactive color accepted'}
+}
 Add-Type -AssemblyName System.Windows.Forms
 $form = New-Object Windows.Forms.Form
 $menu = New-Object Windows.Forms.MenuStrip
@@ -139,6 +143,14 @@ try {
     try { [GingerMenuAccess]::OpenSelectedPrice($root,$ownerId,$selected,'1',$false) } catch { $denied = $true }
     if (-not $denied -or $script:priceOpens -ne 0) { throw 'Unconfirmed price open accepted' }
     if ($InteractiveInput) {
+        $activation=[GingerMenuAccess]::ActivateFixtureAsync($root,$ownerId)
+        $deadline=[Diagnostics.Stopwatch]::StartNew()
+        while(-not $activation.IsCompleted -and $deadline.Elapsed.TotalSeconds -lt 5){
+            [Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 10
+        }
+        if(-not $activation.IsCompleted){throw 'Fixture activation timed out'}
+        $activation.GetAwaiter().GetResult()
         [GingerMenuAccess]::OpenSelectedPrice($root,$ownerId,$selected,'1',$true)
         Start-Sleep -Milliseconds 100
         [Windows.Forms.Application]::DoEvents()
@@ -295,6 +307,52 @@ try {
     if($snapshot.Candidates.Length -ne 2 -or $snapshot.CanMatch -or $snapshot.IdentityVerified -or
        $snapshot.Candidates[0].IdentityVerified -or $snapshot.Candidates[1].Title -notlike '*(тестер)' -or
        -not $snapshot.Candidates[0].DescriptionText.Contains('123.45')){throw 'Candidate text lost or identity invented'}
+    if($snapshot.Candidates[1].Bounds.Length -ne 4 -or $snapshot.Candidates[1].Bounds[2] -le 0){throw 'Candidate bounds missing'}
+    $denied=$false
+    try{[GingerMenuAccess]::InvokeMatchingCandidate($root,$ownerId,$null,$snapshot,2,$snapshot.Candidates[1].Title,$false)}catch{$denied=$true}
+    if(-not $denied){throw 'Unconfirmed candidate invocation accepted'}
+    $boundsCheck=[GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)
+    $boundsCheck.Candidates[1].Bounds[0]+=1
+    $denied=$false
+    try{[GingerMenuAccess]::RequireSameCandidates($snapshot,$boundsCheck)}catch{$denied=$true}
+    if(-not $denied){throw 'Changed candidate geometry accepted'}
+    if($InteractiveInput) {
+        $form.ClientSize=[Drawing.Size]::new(900,600)
+        $candidatesPanel.Location=[Drawing.Point]::new(600,300)
+        $candidatesPanel.Size=[Drawing.Size]::new(260,150)
+        [Windows.Forms.Application]::DoEvents()
+        $focusRows=[GingerMenuAccess]::ReadProductRows($root,$ownerId)
+        [void][GingerMenuAccess]::RestoreProductSelection($root,$ownerId,$focusRows,1,$true)
+        [Windows.Forms.Application]::DoEvents()
+        $script:matchClicks=0
+        $candidatesPanel.Add_MouseDoubleClick({
+            if($candidatesPanel.SelectedItems.Count -ne 1 -or $candidatesPanel.SelectedItems[0].Text -ne 'Synthetic perfume 100 ml (тестер)'){throw 'Wrong matching double-click target'}
+            $script:matchClicks++
+        })
+        [GingerMenuAccess]::ActivateForRead($root,$ownerId)
+        $matchRows=[GingerMenuAccess]::ReadProductRows($root,$ownerId)
+        $activeColor=$grid.DefaultCellStyle.SelectionBackColor
+        $grid.DefaultCellStyle.SelectionBackColor=[Drawing.Color]::LightBlue
+        $grid.Refresh()
+        [Windows.Forms.Application]::DoEvents()
+        $denied=$false
+        try{[GingerMenuAccess]::RequireActiveBlueSource($root,$ownerId,$matchRows,1)}catch{$denied=$true}
+        if(-not $denied){throw 'Light blue source allowed matching'}
+        $grid.DefaultCellStyle.SelectionBackColor=$activeColor
+        $grid.Refresh()
+        [Windows.Forms.Application]::DoEvents()
+        [GingerMenuAccess]::RequireActiveBlueSource($root,$ownerId,$matchRows,1)
+        Write-Output 'PASS: actual light-blue source rejected; active blue accepted'
+        $matchCandidates=[GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)
+        [GingerMenuAccess]::InvokeMatchingCandidate($root,$ownerId,$matchRows,$matchCandidates,2,'Synthetic perfume 100 ml (тестер)',$true)
+        Start-Sleep -Milliseconds 100
+        [Windows.Forms.Application]::DoEvents()
+        if($script:matchClicks -ne 1){throw 'Expected exactly one candidate double click'}
+        Write-Output 'PASS: exactly one physical matching double click on verified fixture candidate'
+        $candidatesPanel.SelectedItems.Clear()
+        [Windows.Forms.Application]::DoEvents()
+        $snapshot=[GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)
+    }
     $searchPanel=New-Object Windows.Forms.ListView
     $searchPanel.View='Details'
     $searchPanel.CheckBoxes=$true
@@ -406,6 +464,8 @@ try {
     try{[void][GingerMenuAccess]::ReadMatchingCandidates($root,$ownerId)}catch{$denied=$true}
     if(-not $denied){throw 'Missing candidate panel accepted'}
     Write-Output 'PASS: candidate texts and variants read; changed source, price, title, duplicate panels and excess rows rejected'
+    # Isolate recovery fixture from the focus established by the physical-click test.
+    $grid.CurrentCell=$null
     $grid.ClearSelection()
     $denied=$false
     try{[void][GingerMenuAccess]::ReadSelectedProduct($root,$ownerId)}catch{$denied=$true}

@@ -16,10 +16,16 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+      - name: Test agent profiles and scoped matching decisions
+        shell: pwsh
+        run: dotnet run --project tests/AgentProfiles.Smoke/AgentProfiles.Smoke.csproj
       - name: Test Ginger diagnostics subprocess safety
         # Runs only fixed synthetic subprocesses, not a live Ginger session.
         shell: pwsh
         run: dotnet run --project tests/GingerDiagnostics.Smoke/GingerDiagnostics.Smoke.csproj
+      - name: Test Ginger driver import preserves explicit confirmation
+        shell: powershell
+        run: ./tests/ginger-driver-import-smoke.ps1
       - name: Test Ginger semantic navigation on an isolated fixture
         shell: powershell
         run: ./tests/ginger-navigation-smoke.ps1
@@ -32,7 +38,7 @@ jobs:
       - name: Test persistent Ginger queue controller guards
         # Uses synthetic files and rejects before live UI access.
         shell: pwsh
-        run: python -m pytest tests/test_ginger_price_queue.py tests/test_ginger_row_journal.py tests/test_ginger_filter_preflight.py tests/test_ginger_filter_plan.py tests/test_ginger_filter_relaxation.py tests/test_ginger_filter_controller.py tests/test_ginger_row_filter_prepare.py tests/test_ginger_row_review.py tests/test_ginger_review_queue.py tests/test_ginger_batch.py tests/test_ginger_search_session.py tests/test_ginger_candidate_review.py tests/test_ginger_review_report.py tests/test_ginger_review_feedback.py tests/test_ginger_review_form.py tests/test_ginger_product_condition.py tests/test_ginger_variant_evidence.py tests/test_ginger_batch_report.py -q
+        run: python -m pytest tests/test_agents_navigation_wiring.py tests/test_ginger_price_queue.py tests/test_ginger_row_journal.py tests/test_ginger_filter_preflight.py tests/test_ginger_filter_plan.py tests/test_ginger_filter_relaxation.py tests/test_ginger_filter_controller.py tests/test_ginger_row_filter_prepare.py tests/test_ginger_row_review.py tests/test_ginger_review_queue.py tests/test_ginger_batch.py tests/test_ginger_search_session.py tests/test_ginger_candidate_review.py tests/test_ginger_review_report.py tests/test_ginger_review_feedback.py tests/test_ginger_review_form.py tests/test_ginger_product_condition.py tests/test_ginger_variant_evidence.py tests/test_ginger_batch_report.py -q
       - name: Verify desktop bridge
         shell: pwsh
         env:
@@ -49,6 +55,17 @@ jobs:
           $exe = Get-ChildItem desktop/BabyAI.Desktop/bin/x64/Release -Filter BabyAI.Desktop.exe -File -Recurse | Select-Object -First 1
           if (-not $exe) { throw "BabyAI.Desktop.exe was not produced." }
           Write-Host "Runnable desktop executable: $($exe.FullName)"
+      - name: Compile Ginger driver from packaged application directory
+        shell: powershell
+        run: |
+          $testScript = (Resolve-Path tests/ginger-driver-import-smoke.ps1).Path
+          $exe = Get-ChildItem desktop/BabyAI.Desktop/bin/x64/Release -Filter BabyAI.Desktop.exe -File -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'Desktop executable missing' }
+          Push-Location $exe.DirectoryName
+          try {
+            & "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -STA -File $testScript
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged-directory Ginger compilation failed' }
+          } finally { Pop-Location }
       - name: Smoke-test Desktop startup
         shell: pwsh
         env:
