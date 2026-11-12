@@ -53,12 +53,20 @@ if($Operation -in @('Select','Filter')) {
  Start-Sleep -Milliseconds 600
 }
 $rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
-$first=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
-Start-Sleep -Milliseconds 700
-$second=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
-[GingerMenuAccess]::RequireSameSearchContext($first,$second)
-[GingerMenuAccess]::RequireSameProductRows($rows,[GingerMenuAccess]::ReadProductRows($window,$ownerId),$true)
-if(-not $second.QueryWordsMatchSource){throw 'Search query differs from source'}
+$searchDeadline=[Diagnostics.Stopwatch]::StartNew()
+do {
+ $first=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
+ Start-Sleep -Milliseconds 700
+ $second=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
+ [GingerMenuAccess]::RequireSameProductRows($rows,[GingerMenuAccess]::ReadProductRows($window,$ownerId),$true)
+ if($first.QueryWordsMatchSource -and $second.QueryWordsMatchSource) {
+  [GingerMenuAccess]::RequireSameSearchContext($first,$second)
+  break
+ }
+ # A stable but stale panel is not completion. Only repeat observation;
+ # never replay Select/Filter or accept candidates belonging to another source.
+ if($searchDeadline.Elapsed.TotalSeconds -ge 10){throw 'Search query differs from source after bounded observation; no input retry'}
+} while($true)
 [pscustomobject]@{process_id=$ownerId;rows=$rows} | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'before.json') -Encoding UTF8
 $second | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'search-context.json') -Encoding UTF8
 [pscustomobject]@{status='observed';directory=$OutputDirectory;source=$second.Products.Source;candidates=@($second.Products.Candidates);words=@($second.SearchWords.Candidates);row_count=$rows.Length;process_id=$ownerId;search_completion_verified=$false} | ConvertTo-Json -Depth 8
