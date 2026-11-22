@@ -32,6 +32,9 @@ jobs:
       - name: Test bounded Ginger search observation without input
         shell: powershell
         run: ./tests/ginger-search-wait-smoke.ps1
+      - name: Test Ginger panel loading without repeating navigation
+        shell: powershell
+        run: ./tests/ginger-panel-wait-smoke.ps1
       - name: Test tab OCR preprocessing on synthetic images
         shell: powershell
         run: ./tests/ginger-tab-image-smoke.ps1

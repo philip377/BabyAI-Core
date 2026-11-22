@@ -29,7 +29,14 @@ if($Operation -eq 'Prepare') {
  [GingerMenuAccess]::OpenDocumentMatching($window,$ownerId,$document,$true)
  $deadline=[Diagnostics.Stopwatch]::StartNew()
  do {
-  $view=[GingerMenuAccess]::InspectMatching($window,$ownerId)
+  try {
+   $view=[GingerMenuAccess]::InspectMatching($window,$ownerId)
+  } catch {
+   if($_.Exception.GetBaseException() -isnot [GingerUiBusyException]){throw}
+   if($deadline.Elapsed.TotalSeconds -ge 10){throw}
+   Start-Sleep -Milliseconds 200
+   continue # Loading is observation-only; do not repeat navigation.
+  }
   if($view.Status -ne 'panels_not_verified'){break}
   if($deadline.Elapsed.TotalSeconds -ge 10){throw 'Matching panels not verified after navigation; no retry'}
   Start-Sleep -Milliseconds 200

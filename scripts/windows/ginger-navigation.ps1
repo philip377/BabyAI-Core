@@ -1191,7 +1191,14 @@ if ($Mode -eq 'OpenMatching') {
     $actions.Add('Ensure bottom matching view for verified supplier document')
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
-        $matchingView = [GingerMenuAccess]::InspectMatching($window, $processId)
+        try {
+            $matchingView = [GingerMenuAccess]::InspectMatching($window, $processId)
+        } catch {
+            if ($_.Exception.GetBaseException() -isnot [GingerUiBusyException]) { throw }
+            if ($timer.Elapsed.TotalSeconds -ge 10) { throw }
+            Start-Sleep -Milliseconds 200
+            continue # Observe loading only; never invoke the menu again.
+        }
         if ($matchingView.Status -ne 'panels_not_verified') { break }
         Start-Sleep -Milliseconds 200
     } while ($timer.Elapsed.TotalSeconds -lt 10)
