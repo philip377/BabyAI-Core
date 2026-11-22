@@ -29,6 +29,9 @@ jobs:
       - name: Test Ginger semantic navigation on an isolated fixture
         shell: powershell
         run: ./tests/ginger-navigation-smoke.ps1
+      - name: Test bounded Ginger search observation without input
+        shell: powershell
+        run: ./tests/ginger-search-wait-smoke.ps1
       - name: Test tab OCR preprocessing on synthetic images
         shell: powershell
         run: ./tests/ginger-tab-image-smoke.ps1

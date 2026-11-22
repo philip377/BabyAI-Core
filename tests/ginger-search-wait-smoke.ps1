@@ -13,18 +13,28 @@ public static class GingerMenuAccess {
 "@
 $source=Get-Content (Join-Path $PSScriptRoot '../scripts/windows/ginger-desktop-step.ps1') -Raw
 $start=$source.IndexOf('$searchDeadline=')
+if($start -lt 0){throw 'Production search loop start not found'}
 $end=$source.IndexOf('[pscustomobject]@{process_id=', $start)
+if($end -le $start){throw 'Production search loop end not found'}
 $loop=[scriptblock]::Create($source.Substring($start,$end-$start))
 $window=[IntPtr]::Zero; $ownerId=[uint32]0; $rows=$null
 & $loop
 if([GingerMenuAccess]::Reads -ne 4){throw 'Expected stale then fresh pair'}
 [GingerMenuAccess]::ChangeRows=$true
 $failed=$false
-try { & $loop } catch { $failed=$true }
+try { & $loop } catch {
+ if($_.Exception.ToString() -notmatch 'Rows changed'){throw}
+ $failed=$true
+}
 if(-not $failed){throw 'Changed rows accepted'}
 [GingerMenuAccess]::ChangeRows=$false
 [GingerMenuAccess]::NeverReady=$true
 $failed=$false
-try { & $loop } catch { $failed=$true }
+$elapsed=[Diagnostics.Stopwatch]::StartNew()
+try { & $loop } catch {
+ if($_.Exception.ToString() -notmatch 'Search query differs from source after bounded observation; no input retry'){throw}
+ $failed=$true
+}
 if(-not $failed){throw 'Permanently stale context accepted'}
+if($elapsed.Elapsed.TotalSeconds -lt 10){throw 'Stale observation stopped before its observation window'}
 'PASS: delayed context, changed source rejection, bounded stale rejection; no input'
