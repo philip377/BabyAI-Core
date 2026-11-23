@@ -65,6 +65,8 @@ class ResidentNativeBrainProvider(LLMProvider):
         self,
         prompt: str,
         on_candidate: Callable[[str], None] | None,
+        *,
+        max_tokens: int | None = None,
     ) -> ResidentNativeStreamResult:
         """Generate one canonical reply while exposing untrusted raw text candidates.
 
@@ -78,6 +80,9 @@ class ResidentNativeBrainProvider(LLMProvider):
         the marker nor the streaming contract that named it.
         """
 
+        token_limit = self.max_tokens if max_tokens is None else max_tokens
+        if type(token_limit) is not int or not 1 <= token_limit <= 1024:
+            raise ValueError("Native response token limit must be between 1 and 1024.")
         visible_marker = self._visible_marker(prompt, on_candidate)
         if visible_marker is not None:
             assert on_candidate is not None
@@ -91,7 +96,7 @@ class ResidentNativeBrainProvider(LLMProvider):
             "native.generate.start",
             prompt_chars=len(prompt),
             model_resident=self.model_is_resident,
-            max_tokens=self.max_tokens,
+            max_tokens=token_limit,
             n_ctx=self.n_ctx,
             n_batch=self.n_batch,
             n_gpu_layers=self.n_gpu_layers,
@@ -115,7 +120,7 @@ class ResidentNativeBrainProvider(LLMProvider):
             result = generate_greedy(
                 model,
                 native_prompt,
-                max_tokens=self.max_tokens,
+                max_tokens=token_limit,
                 max_output_bytes=self.max_output_bytes,
                 n_ctx=self.n_ctx,
                 n_batch=self.n_batch,

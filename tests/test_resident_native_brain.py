@@ -232,3 +232,18 @@ def test_native_error_drops_resident_state_and_allows_clean_reload(tmp_path, mon
     assert provider.model_is_resident is False
     assert provider.generate("second") == "recovered"
     assert sum(call == "open_runtime" for call in calls) == 2
+
+def test_per_request_token_budget_does_not_change_chat_default(tmp_path, monkeypatch):
+    calls = []
+    budgets = []
+    monkeypatch.setattr("babyai.resident_native_brain.NativeRuntimeLoader", lambda path: Loader(path, calls))
+    def generate(model, prompt, **kwargs):
+        budgets.append(kwargs["max_tokens"])
+        return NativeGenerationResult(text="OK", generated_tokens=1, output_bytes=2, stop_reason="eog")
+    monkeypatch.setattr("babyai.resident_native_brain.generate_greedy", generate)
+    provider = ResidentNativeBrainProvider(model_path=tmp_path / "brain.gguf", runtime_path=tmp_path / "runtime.dll")
+    provider.generate_stream("lesson", None, max_tokens=512)
+    provider.generate("chat")
+    assert budgets == [512, 128]
+    assert provider.max_tokens == 128
+    provider.close()

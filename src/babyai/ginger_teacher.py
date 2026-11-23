@@ -27,7 +27,12 @@ def consult(provider, payload):
         + json.dumps(dict(supplier=supplier, source=source, lesson=lesson,
                           candidates=candidates), ensure_ascii=False)
     )
-    raw = provider.generate(prompt)
+    from .resident_native_brain import ResidentNativeBrainProvider
+
+    # A structured lesson needs more than the short-chat default of 128 tokens.
+    # Keep this budget local to the request; do not change later chat turns.
+    raw = (provider.generate_stream(prompt, None, max_tokens=512).text
+           if isinstance(provider, ResidentNativeBrainProvider) else provider.generate(prompt))
     if not isinstance(raw, str) or len(raw) > 16000:
         raise ValueError("Слишком длинный ответ модели.")
     result = json.loads(raw)

@@ -64,3 +64,15 @@ def test_desktop_command_uses_provider_without_chat_or_tools(tmp_path, monkeypat
     assert result["ok"] is True
     assert result["candidate"] == "A"
     assert list(tmp_path.iterdir()) == []
+
+def test_teacher_requests_bounded_native_budget(tmp_path, monkeypatch):
+    from babyai.resident_native_brain import ResidentNativeBrainProvider, ResidentNativeStreamResult
+    observed = []
+    def generate(self, prompt, callback, *, max_tokens=None):
+        observed.append(max_tokens)
+        return ResidentNativeStreamResult(text=json.dumps(dict(understanding="rule", candidate="A", explanation="example")), generated_tokens=4, output_bytes=80, stop_reason="eog")
+    monkeypatch.setattr(ResidentNativeBrainProvider, "generate_stream", generate)
+    provider = ResidentNativeBrainProvider(model_path=tmp_path / "model", runtime_path=tmp_path / "runtime")
+    assert consult(provider, payload())["candidate"] == "A"
+    assert observed == [512]
+    assert provider.max_tokens == 128
