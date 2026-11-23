@@ -9,6 +9,27 @@ public sealed class GingerLearning
 {
     public sealed record AutomaticDecision(string Candidate, string Basis, string Explanation);
     public sealed record AutomaticAssessment(AutomaticDecision? Decision, string Reason);
+    public sealed record LanguageLesson(string Supplier, string Text, string Understanding, bool Enabled, DateTimeOffset RecordedAt);
+    public LanguageLesson? ReadLanguageLesson(string supplier)
+    {
+        var folder = Path.Combine(_directory, "language-lessons");
+        if (!Directory.Exists(folder)) return null;
+        return Directory.GetFiles(folder, "*.json").Order(StringComparer.Ordinal)
+            .Select(path => JsonSerializer.Deserialize<LanguageLesson>(File.ReadAllText(path))
+                ?? throw new InvalidDataException("Повреждён урок поставщика."))
+            .LastOrDefault(item => item.Supplier == supplier);
+    }
+    public void SaveLanguageLesson(LanguageLesson lesson)
+    {
+        if (string.IsNullOrWhiteSpace(lesson.Supplier) || string.IsNullOrWhiteSpace(lesson.Text)
+            || lesson.Text.Length > 4000 || string.IsNullOrWhiteSpace(lesson.Understanding) || lesson.Understanding.Length > 4000)
+            throw new InvalidDataException("Нужны объяснение и проверенное понимание урока.");
+        var folder = Path.Combine(_directory, "language-lessons");
+        Directory.CreateDirectory(folder);
+        using var stream = new FileStream(Path.Combine(folder, DateTime.UtcNow.ToString("yyyyMMddHHmmssfffffff")
+            + "-" + Guid.NewGuid().ToString("N") + ".json"), FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        JsonSerializer.Serialize(stream, lesson); stream.Flush(true);
+    }
     public sealed record ConditionRule(string Supplier, bool Enabled, DateTimeOffset RecordedAt);
     public void TeachDentedTesterRule(string supplier, bool enabled)
     {

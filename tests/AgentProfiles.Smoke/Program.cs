@@ -12,6 +12,13 @@ var original = File.ReadAllText(Path.Combine(root,"agents.json"));
 try { store.Save(catalog with { Agents = [AgentProfileStore.Ginger, AgentProfileStore.Ginger] }); throw new Exception("invalid accepted"); } catch (InvalidDataException) { }
 Check(File.ReadAllText(Path.Combine(root,"agents.json")) == original, "invalid profile preserves persisted data");
 var learning = new GingerLearning(Path.Combine(root, "learning"));
+learning.SaveLanguageLesson(new("supplier", "Моё объяснение", "Понял объяснение", true, DateTimeOffset.UtcNow));
+var lessonReloaded = new GingerLearning(Path.Combine(root, "learning"));
+Check(lessonReloaded.ReadLanguageLesson("supplier")?.Enabled == true, "language lesson survives restart");
+Check(lessonReloaded.ReadLanguageLesson("other") is null, "language lesson supplier scope");
+Check(lessonReloaded.AutomaticCandidate("supplier", "different source", ["candidate"]) is null, "language lesson alone cannot authorize matching");
+learning.SaveLanguageLesson(lessonReloaded.ReadLanguageLesson("supplier")! with { Enabled = false });
+Check(lessonReloaded.ReadLanguageLesson("supplier")?.Enabled == false, "language lesson revocation survives restart");
 var volumeFirst = "Acme Bloom (муж) 30ml EDP";
 var concentrationFirst = "Acme Bloom (муж) edp 30 мл";
 Check(learning.AutomaticCandidate("supplier", volumeFirst, [concentrationFirst]) == concentrationFirst,

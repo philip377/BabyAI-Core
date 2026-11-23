@@ -262,6 +262,10 @@ class DesktopCommands:
                 "review": review,
             }
 
+        if command == "ginger.teach.preview":
+            from .ginger_teacher import consult
+            return {"ok": True, "command": command, **consult(self._provider(), payload)}
+
         if command == "chat":
             message = str(payload.get("message", "")).strip()
             if not message:

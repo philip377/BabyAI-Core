@@ -103,6 +103,15 @@ public sealed class BabyAIBridgeClient : IDisposable
         return await ExecuteStreamingAsync("chat", payload, onEvent, cancellationToken);
     }
 
+    public async Task<JsonElement> PreviewGingerLessonAsync(string supplier, string source,
+        string lesson, IEnumerable<string> candidates, CancellationToken cancellationToken)
+    {
+        var json = await ExecuteAsync("ginger.teach.preview",
+            JsonSerializer.Serialize(new { supplier, source, lesson, candidates }), cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
     public Task ApproveLessonAsync() => ExecuteAsync("lesson.approve", "{}");
 
     public Task RejectLessonAsync() => ExecuteAsync("lesson.reject", "{}");
