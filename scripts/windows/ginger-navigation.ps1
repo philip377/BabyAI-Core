@@ -809,8 +809,9 @@ public static class GingerMenuAccess {
             throw new InvalidOperationException("Candidate count unavailable");
         return count.ToInt64();
     }
-    private static GingerCandidateSnapshot ReadCandidatesOnce(IntPtr root,uint process,bool searchWords=false) {
-        GingerSelectedProduct source=ReadSelectedProductOnce(root,process);
+    private static GingerCandidateSnapshot ReadCandidatesOnce(IntPtr root,uint process,bool searchWords=false,GingerSelectedProduct adjacentSource=null) {
+        // Only the immediately preceding panel read may supply its verified end observation.
+        GingerSelectedProduct source=adjacentSource??ReadSelectedProductOnce(root,process);
         GingerCandidateSnapshot result=null;
         foreach(IntPtr hwnd in Windows(root,process)) {
             StringBuilder cls=new StringBuilder(256); GetClassNameW(hwnd,cls,cls.Capacity);
@@ -859,7 +860,9 @@ public static class GingerMenuAccess {
             result=new GingerCandidateSnapshot {Source=source,PanelHandle=hwnd.ToInt64(),Candidates=candidates.ToArray()};
         }
         if(result==null) throw new InvalidOperationException("Candidate panel missing");
-        RequireSameSelectedProduct(source,ReadSelectedProductOnce(root,process));
+        GingerSelectedProduct afterSource=ReadSelectedProductOnce(root,process);
+        RequireSameSelectedProduct(source,afterSource);
+        result.Source=afterSource;
         RequireWindow(root,process);
         return result;
     }
@@ -1092,7 +1095,7 @@ public static class GingerMenuAccess {
     }
     private static GingerSearchContext ReadSearchContextOnce(IntPtr root,uint process) {
         GingerCandidateSnapshot words=ReadCandidatesOnce(root,process,true);
-        GingerCandidateSnapshot products=ReadCandidatesOnce(root,process);
+        GingerCandidateSnapshot products=ReadCandidatesOnce(root,process,false,words.Source);
         RequireSameSelectedProduct(words.Source,products.Source);
         if(words.PanelHandle==products.PanelHandle)
             throw new InvalidOperationException("Search and product panels must be distinct");

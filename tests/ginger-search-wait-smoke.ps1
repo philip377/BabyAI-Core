@@ -18,6 +18,9 @@ $end=$source.IndexOf('[pscustomobject]@{process_id=', $start)
 if($end -le $start){throw 'Production search loop end not found'}
 $loop=[scriptblock]::Create($source.Substring($start,$end-$start))
 $window=[IntPtr]::Zero; $ownerId=[uint32]0; $rows=$null
+function Write-ReadStage([string]$Stage) {
+ if($Stage -notin @('search_first','search_second','table_recheck','verified')){throw 'Unexpected read stage'}
+}
 & $loop
 if([GingerMenuAccess]::Reads -ne 4){throw 'Expected stale then fresh pair'}
 [GingerMenuAccess]::ChangeRows=$true
