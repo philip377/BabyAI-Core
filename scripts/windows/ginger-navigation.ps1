@@ -542,6 +542,11 @@ public static class GingerMenuAccess {
             RequireWindow(root,process);
             System.Threading.Thread.Sleep(50);
         }
+        IntPtr active=GetForegroundWindow();
+        if(active!=root) {
+            uint activeProcess; GetWindowThreadProcessId(active,out activeProcess);
+            throw new InvalidOperationException("Ginger activation blocked before observation; expected="+root.ToInt64()+", observed="+active.ToInt64()+", owner="+activeProcess);
+        }
         RequireForeground(root,process);
     }
     public static void RequireForeground(IntPtr root,uint process) {
