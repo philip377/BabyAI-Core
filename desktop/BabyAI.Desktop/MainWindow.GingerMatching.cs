@@ -195,8 +195,14 @@ public sealed partial class MainWindow
                     else if (!observation.Linked)
                     {
                         observation = await session!.PrepareFiltersAsync(observation, token);
-                        var decision = learning.DecideAutomatic(observation.Supplier, observation.Title, observation.Candidates);
-                        if (decision is null) QueueCurrent();
+                        var assessment = learning.AssessAutomatic(observation.Supplier, observation.Title, observation.Candidates);
+                        var decision = assessment.Decision;
+                        if (decision is null) {
+                            QueueCurrent();
+                            var explanation = $"Строка {currentPosition}: {assessment.Reason}";
+                            session.Record(explanation);
+                            Log(explanation);
+                        }
                         else
                         {
                             session!.Record("Режим: автоматический выбор точной или обученной пары в разрешённом прайсе.");

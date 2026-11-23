@@ -8,6 +8,7 @@ public sealed record GingerLearnedPair(string Supplier, string Source, string Ca
 public sealed class GingerLearning
 {
     public sealed record AutomaticDecision(string Candidate, string Basis, string Explanation);
+    public sealed record AutomaticAssessment(AutomaticDecision? Decision, string Reason);
     public sealed record ConditionRule(string Supplier, bool Enabled, DateTimeOffset RecordedAt);
     public void TeachDentedTesterRule(string supplier, bool enabled)
     {
@@ -50,14 +51,18 @@ public sealed class GingerLearning
     public string? AutomaticCandidate(string supplier, string source, IEnumerable<string> candidates)
         => DecideAutomatic(supplier, source, candidates)?.Candidate;
     public AutomaticDecision? DecideAutomatic(string supplier, string source, IEnumerable<string> candidates)
+        => AssessAutomatic(supplier, source, candidates).Decision;
+    public AutomaticAssessment AssessAutomatic(string supplier, string source, IEnumerable<string> candidates)
     {
         var list = candidates.ToArray();
         var learned = Read().Where(p => p.Supplier == supplier && p.Source == source).ToArray();
         if (learned.Length > 0)
         {
             var latest = learned[^1];
-            return latest.AllowAutomatic && list.Count(c => c == latest.Candidate) == 1
-                ? new(latest.Candidate, "learned_pair", "Подтверждённая точная пара этого поставщика. Объяснение пользователя: " + latest.Reason) : null;
+            if (!latest.AllowAutomatic) return new(null, "Последнее решение пользователя запрещает автоматическое применение этой пары.");
+            var count = list.Count(c => c == latest.Candidate);
+            if (count != 1) return new(null, count == 0 ? "Обученный кандидат отсутствует в текущем списке." : "Обученный кандидат повторяется в текущем списке.");
+            return new(new(latest.Candidate, "learned_pair", "Подтверждённая точная пара этого поставщика. Объяснение пользователя: " + latest.Reason), "Применена обученная пара.");
         }
         // Exact token identity only. Similarity scores, variant research and guessed aliases never authorize input.
         var key = Canonical(source);
@@ -69,11 +74,16 @@ public sealed class GingerLearning
             key = Regex.Replace(key, @"\s+", " ").Trim();
             if (!Regex.IsMatch(key, @"\btester\b")) key += " tester";
         }
-        if (!Regex.IsMatch(key, @"\b\d+(?:[.,]\d+)? ml\b") || !Regex.IsMatch(key, @"\b(edp|edt|edc|extrait)\b")) return null;
+        if (!Regex.IsMatch(key, @"\b\d+(?:[.,]\d+)? ml\b") || !Regex.IsMatch(key, @"\b(edp|edt|edc|extrait)\b"))
+            return new(null, "В исходном названии не удалось подтвердить объём и концентрацию.");
         var equal = list.Where(c => Canonical(c) == key).ToArray();
-        return equal.Length == 1 ? new(equal[0], conditionApplied ? "dented_tester_rule" : "exact_identity",
+        if (equal.Length == 0) return new(null, list.Length == 0 ? "Список кандидатов пуст." :
+            "Нет единственного строгого совпадения. Название для сравнения: «" + key + "». Кандидаты: " +
+            string.Join("; ", list.Select(c => "«" + Canonical(c) + "»")) + ". Различия обозначений и порядка слов автоматически не отбрасываются.");
+        if (equal.Length > 1) return new(null, "В списке несколько кандидатов с одинаковыми признаками.");
+        return new(new(equal[0], conditionApplied ? "dented_tester_rule" : "exact_identity",
             conditionApplied ? "Включённое правило этого поставщика: немного подмят → тестер. Остальные признаки совпали; кандидат единственный."
-                : "Все признаки названия совпали с учётом обозначений концентрации, объёма и написания линейки Moschino Cheap And Chic; кандидат единственный.") : null;
+                : "Все признаки названия совпали с учётом обозначений концентрации, объёма и написания линейки Moschino Cheap And Chic; кандидат единственный."), "Найдено единственное строгое совпадение.");
     }
     private static string Canonical(string title)
     {

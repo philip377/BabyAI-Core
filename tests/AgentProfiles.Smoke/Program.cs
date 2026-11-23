@@ -12,6 +12,11 @@ var original = File.ReadAllText(Path.Combine(root,"agents.json"));
 try { store.Save(catalog with { Agents = [AgentProfileStore.Ginger, AgentProfileStore.Ginger] }); throw new Exception("invalid accepted"); } catch (InvalidDataException) { }
 Check(File.ReadAllText(Path.Combine(root,"agents.json")) == original, "invalid profile preserves persisted data");
 var learning = new GingerLearning(Path.Combine(root, "learning"));
+var travelReview = learning.AssessAutomatic("Альянс", "Mont Blanc Explorer (M) 30ml EDP Travel Spray",
+    ["Mont Blanc EXPLORER (муж) edp 30ml ", "Mont Blanc EXPLORER (муж) edp 30ml (тестер)"]);
+Check(travelReview.Decision is null && travelReview.Reason.Contains("travel spray") && travelReview.Reason.Contains("муж"),
+    "real Mont Blanc ambiguity retains distinguishing words and explains review");
+Check(learning.AssessAutomatic("supplier", "Acme edt 30ml", []).Reason == "Список кандидатов пуст.", "empty candidate list explained");
 var moschino = "MOSCHINO CHEAPANDCHIC LIGHT CLOUDS edt 50 ml";
 var moschinoExpanded = "Moschino CHEAP AND CHIC LIGHT CLOUDS тв 50ml";
 Check(learning.AutomaticCandidate("supplier", moschino, [moschinoExpanded]) == moschinoExpanded, "Moschino joined line spelling accepted");
@@ -29,6 +34,7 @@ Check(learning.AutomaticCandidate("other supplier", "Supplier special title", ["
 Check(learning.AutomaticCandidate("supplier", "Changed special title", ["Exact product"]) is null, "renamed source requires review");
 learning.Teach(new("supplier", "Supplier special title", "Exact product", "revoke auto", false, DateTimeOffset.UtcNow));
 Check(learning.AutomaticCandidate("supplier", "Supplier special title", ["Exact product"]) is null, "later user correction revokes automatic pairing");
+Check(learning.AssessAutomatic("supplier", "Supplier special title", ["Exact product"]).Reason.Contains("запрещает"), "revocation reason distinguished from name mismatch");
 learning.TeachDentedTesterRule("supplier", true);
 var reloaded = new GingerLearning(Path.Combine(root, "learning"));
 var dented = "Acme Bloom edt 100 ml (немного подмят)";
