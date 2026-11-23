@@ -12,6 +12,20 @@ var original = File.ReadAllText(Path.Combine(root,"agents.json"));
 try { store.Save(catalog with { Agents = [AgentProfileStore.Ginger, AgentProfileStore.Ginger] }); throw new Exception("invalid accepted"); } catch (InvalidDataException) { }
 Check(File.ReadAllText(Path.Combine(root,"agents.json")) == original, "invalid profile preserves persisted data");
 var learning = new GingerLearning(Path.Combine(root, "learning"));
+var volumeFirst = "Acme Bloom (муж) 30ml EDP";
+var concentrationFirst = "Acme Bloom (муж) edp 30 мл";
+Check(learning.AutomaticCandidate("supplier", volumeFirst, [concentrationFirst]) == concentrationFirst,
+    "single adjacent volume concentration order normalized");
+foreach (var candidate in new[] { "Acme Bloom (муж) edt 30ml", "Acme Bloom (муж) edp 50ml",
+    "Acme Bloom (жен) edp 30ml", concentrationFirst + " tester", concentrationFirst + " vintage",
+    concentrationFirst + " Travel Spray", "Bloom Acme (муж) edp 30ml" })
+    Check(learning.AutomaticCandidate("supplier", volumeFirst, [candidate]) is null, "attribute reordering preserves identity: " + candidate);
+Check(learning.AutomaticCandidate("supplier", "Acme Bloom 30ml edp + 50ml edt", ["Acme Bloom edp 30ml + edt 50ml"]) is null,
+    "multi component set is not reordered");
+Check(learning.AutomaticCandidate("supplier", "Acme Bloom 30ml Travel Spray edp", ["Acme Bloom edp 30ml Travel Spray"]) is null,
+    "attributes never move across intervening words");
+Check(learning.AutomaticCandidate("supplier", volumeFirst, [concentrationFirst, volumeFirst]) is null,
+    "equivalent spellings remain duplicate candidates");
 var travelReview = learning.AssessAutomatic("Альянс", "Mont Blanc Explorer (M) 30ml EDP Travel Spray",
     ["Mont Blanc EXPLORER (муж) edp 30ml ", "Mont Blanc EXPLORER (муж) edp 30ml (тестер)"]);
 Check(travelReview.Decision is null && travelReview.Reason.Contains("travel spray") && travelReview.Reason.Contains("муж"),

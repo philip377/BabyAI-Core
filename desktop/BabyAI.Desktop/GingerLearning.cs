@@ -79,11 +79,11 @@ public sealed class GingerLearning
         var equal = list.Where(c => Canonical(c) == key).ToArray();
         if (equal.Length == 0) return new(null, list.Length == 0 ? "Список кандидатов пуст." :
             "Нет единственного строгого совпадения. Название для сравнения: «" + key + "». Кандидаты: " +
-            string.Join("; ", list.Select(c => "«" + Canonical(c) + "»")) + ". Различия обозначений и порядка слов автоматически не отбрасываются.");
+            string.Join("; ", list.Select(c => "«" + Canonical(c) + "»")) + ". Оставшиеся различия обозначений и порядка слов требуют проверки.");
         if (equal.Length > 1) return new(null, "В списке несколько кандидатов с одинаковыми признаками.");
         return new(new(equal[0], conditionApplied ? "dented_tester_rule" : "exact_identity",
             conditionApplied ? "Включённое правило этого поставщика: немного подмят → тестер. Остальные признаки совпали; кандидат единственный."
-                : "Все признаки названия совпали с учётом обозначений концентрации, объёма и написания линейки Moschino Cheap And Chic; кандидат единственный."), "Найдено единственное строгое совпадение.");
+                : "Все признаки названия совпали с учётом обозначений и соседнего порядка концентрации/объёма и написания линейки Moschino Cheap And Chic; кандидат единственный."), "Найдено единственное строгое совпадение.");
     }
     private static string Canonical(string title)
     {
@@ -94,6 +94,11 @@ public sealed class GingerLearning
         text = Regex.Replace(text, @"\bтв\b", "edt");
         text = Regex.Replace(text, @"\bпв\b", "edp");
         text = Regex.Replace(text, @"(\d)\s*(?:ml|мл)\b", "$1 ml");
+        // Reorder only a single adjacent volume/concentration pair. Do not sort
+        // name tokens or move attributes across words, punctuation or set components.
+        if (Regex.Matches(text, @"\b\d+(?:[.,]\d+)?\s+ml\b").Count == 1 &&
+            Regex.Matches(text, @"\b(?:edp|edt|edc|extrait)\b").Count == 1)
+            text = Regex.Replace(text, @"\b(\d+(?:[.,]\d+)?\s+ml)\s+(edp|edt|edc|extrait)\b", "$2 $1");
         // Keep every lexical token: vintage, lux, gender, concentration and flankers are not noise.
         return string.Join(" ", Regex.Matches(text, @"[\p{L}\p{N}]+(?:[.,]\d+)?").Select(m => m.Value));
     }
