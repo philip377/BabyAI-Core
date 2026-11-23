@@ -71,15 +71,12 @@ if($Operation -in @('Select','Filter')) {
 if($Operation -ne 'Observe'){Write-ReadStage 'table_after_input';$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)}
 $searchDeadline=[Diagnostics.Stopwatch]::StartNew()
 do {
- Write-ReadStage 'search_first'
- $first=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
- Start-Sleep -Milliseconds 700
- Write-ReadStage 'search_second'
- $second=[GingerMenuAccess]::ReadSearchContext($window,$ownerId)
+ Write-ReadStage 'search_pair'
+ # Native reader compares two complete contexts, separated by the settling pause.
+ $second=[GingerMenuAccess]::ReadSearchContext($window,$ownerId,700)
  Write-ReadStage 'table_recheck'
  [GingerMenuAccess]::RequireSameProductRows($rows,[GingerMenuAccess]::ReadProductRows($window,$ownerId),$true)
- if($first.QueryWordsMatchSource -and $second.QueryWordsMatchSource) {
-  [GingerMenuAccess]::RequireSameSearchContext($first,$second)
+ if($second.QueryWordsMatchSource) {
   break
  }
  # A stable but stale panel is not completion. Only repeat observation;

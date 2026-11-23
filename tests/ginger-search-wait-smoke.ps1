@@ -5,7 +5,12 @@ using System;
 public class Context { public bool QueryWordsMatchSource; }
 public static class GingerMenuAccess {
  public static int Reads; public static bool ChangeRows; public static bool NeverReady; public static bool ChangeCandidates;
- public static Context ReadSearchContext(IntPtr w,uint p) { return new Context { QueryWordsMatchSource=!NeverReady && ++Reads>2 }; }
+ public static Context ReadSearchContext(IntPtr w,uint p,int pause) {
+  if(pause!=700) throw new Exception("Settling pause removed");
+  Reads++; System.Threading.Thread.Sleep(pause);
+  if(ChangeCandidates) throw new Exception("Candidates changed");
+  return new Context { QueryWordsMatchSource=!NeverReady && Reads>1 };
+ }
  public static object ReadProductRows(IntPtr w,uint p) { return null; }
  public static void RequireSameProductRows(object a,object b,bool selected) { if(!selected) throw new Exception("Selection guard disabled"); if(ChangeRows) throw new Exception("Rows changed"); }
  public static void RequireSameSearchContext(Context a,Context b) { if(ChangeCandidates) throw new Exception("Candidates changed"); if(!a.QueryWordsMatchSource || !b.QueryWordsMatchSource) throw new Exception("Stale accepted"); }
@@ -19,10 +24,10 @@ if($end -le $start){throw 'Production search loop end not found'}
 $loop=[scriptblock]::Create($source.Substring($start,$end-$start))
 $window=[IntPtr]::Zero; $ownerId=[uint32]0; $rows=$null
 function Write-ReadStage([string]$Stage) {
- if($Stage -notin @('search_first','search_second','table_recheck','verified')){throw 'Unexpected read stage'}
+ if($Stage -notin @('search_pair','table_recheck','verified')){throw 'Unexpected read stage'}
 }
 & $loop
-if([GingerMenuAccess]::Reads -ne 4){throw 'Expected stale then fresh pair'}
+if([GingerMenuAccess]::Reads -ne 2){throw 'Expected stale then fresh verified context'}
 [GingerMenuAccess]::ChangeRows=$true
 $failed=$false
 try { & $loop } catch {
@@ -39,7 +44,7 @@ try { & $loop } catch {
  $failed=$true
 }
 if(-not $failed){throw 'Changing candidates accepted'}
-if([GingerMenuAccess]::Reads -ne ($readsBefore+2)){throw 'Candidate conflict retried instead of stopping'}
+if([GingerMenuAccess]::Reads -ne ($readsBefore+1)){throw 'Candidate conflict retried instead of stopping'}
 [GingerMenuAccess]::ChangeCandidates=$false
 [GingerMenuAccess]::NeverReady=$true
 $failed=$false

@@ -1113,7 +1113,13 @@ public static class GingerMenuAccess {
         RequireSameSelectedProduct(second.SearchWords.Source,second.Products.Source);
     }
     public static GingerSearchContext ReadSearchContext(IntPtr root,uint process) {
-        GingerSearchContext first=ReadSearchContextOnce(root,process),second=ReadSearchContextOnce(root,process);
+        return ReadSearchContext(root,process,0);
+    }
+    public static GingerSearchContext ReadSearchContext(IntPtr root,uint process,int settleMilliseconds) {
+        if(settleMilliseconds<0 || settleMilliseconds>1000) throw new ArgumentOutOfRangeException("settleMilliseconds");
+        GingerSearchContext first=ReadSearchContextOnce(root,process);
+        if(settleMilliseconds>0) System.Threading.Thread.Sleep(settleMilliseconds);
+        GingerSearchContext second=ReadSearchContextOnce(root,process);
         RequireSameSearchContext(first,second);
         return second; // A stable query and result list still cannot certify search completion.
     }
