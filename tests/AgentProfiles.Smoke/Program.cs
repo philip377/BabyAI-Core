@@ -19,6 +19,13 @@ Check(lessonReloaded.ReadLanguageLesson("other") is null, "language lesson suppl
 Check(lessonReloaded.AutomaticCandidate("supplier", "different source", ["candidate"]) is null, "language lesson alone cannot authorize matching");
 learning.SaveLanguageLesson(lessonReloaded.ReadLanguageLesson("supplier")! with { Enabled = false });
 Check(lessonReloaded.ReadLanguageLesson("supplier")?.Enabled == false, "language lesson revocation survives restart");
+learning.SaveLanguageLesson(new("lesson-supplier", "Правило", "Понимание", true, DateTimeOffset.UtcNow));
+Check(learning.LessonForReview("lesson-supplier", "new source") is not null, "active lesson available for review on new source");
+Check(learning.LessonForReview("other-supplier", "new source") is null, "review cannot borrow another supplier lesson");
+learning.Teach(new("lesson-supplier", "blocked source", "candidate", "отзыв", false, DateTimeOffset.UtcNow));
+Check(learning.LessonForReview("lesson-supplier", "blocked source") is null, "model review cannot bypass exact pair revocation");
+learning.SaveLanguageLesson(learning.ReadLanguageLesson("lesson-supplier")! with { Enabled = false });
+Check(learning.LessonForReview("lesson-supplier", "new source") is null, "revoked lesson unavailable to automatic pass review");
 var volumeFirst = "Acme Bloom (муж) 30ml EDP";
 var concentrationFirst = "Acme Bloom (муж) edp 30 мл";
 Check(learning.AutomaticCandidate("supplier", volumeFirst, [concentrationFirst]) == concentrationFirst,

@@ -10,6 +10,12 @@ public sealed class GingerLearning
     public sealed record AutomaticDecision(string Candidate, string Basis, string Explanation);
     public sealed record AutomaticAssessment(AutomaticDecision? Decision, string Reason);
     public sealed record LanguageLesson(string Supplier, string Text, string Understanding, bool Enabled, DateTimeOffset RecordedAt);
+    public LanguageLesson? LessonForReview(string supplier, string source)
+    {
+        // Never replace an explicit pair decision (including revocation) with a model guess.
+        if (Read().Any(pair => pair.Supplier == supplier && pair.Source == source)) return null;
+        return ReadLanguageLesson(supplier) is { Enabled: true } lesson ? lesson : null;
+    }
     public LanguageLesson? ReadLanguageLesson(string supplier)
     {
         var folder = Path.Combine(_directory, "language-lessons");

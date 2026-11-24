@@ -239,6 +239,7 @@ public sealed partial class MainWindow
         {
             if (permit.IsChecked != true || observation is null) { Log("Нужно разрешение на показанный прайс."); return; }
             var authorizedSupplier = observation.Supplier; var authorizedDocument = observation.Document;
+            string? lessonCandidate = null;
             await Execute(async token =>
             {
                 var visited = new HashSet<int>();
@@ -266,6 +267,32 @@ public sealed partial class MainWindow
                             var explanation = $"Строка {currentPosition}: {assessment.Reason}";
                             session.Record(explanation);
                             Log(explanation);
+                            var savedLesson = learning.LessonForReview(observation.Supplier, observation.Title);
+                            if (savedLesson is not null && observation.Candidates.Count() > 0)
+                            {
+                                Log("Применяю сохранённый урок к спорной строке. Предложение требует проверки пары.");
+                                var proposal = await _bridge.PreviewGingerLessonAsync(observation.Supplier,
+                                    observation.Title, savedLesson.Text, observation.Candidates, token);
+                                token.ThrowIfCancellationRequested();
+                                File.WriteAllText(Path.Combine(session.DirectoryPath, "lesson-review-" + Guid.NewGuid().ToString("N") + ".json"),
+                                    JsonSerializer.Serialize(new { lesson = savedLesson, supplier = observation.Supplier,
+                                        document = observation.Document, position = observation.Position,
+                                        source = observation.Title, observation_directory = observation.Directory, proposal }));
+                                lessonPreview.Text = "Пример: " + observation.Title + "\n" +
+                                    proposal.GetProperty("understanding").GetString() + "\n" +
+                                    proposal.GetProperty("explanation").GetString();
+                                lessonCandidate = proposal.GetProperty("candidate").GetString();
+                                if (lessonCandidate is not null)
+                                {
+                                    if (observation.Candidates.Count(c => c == lessonCandidate) != 1)
+                                        throw new InvalidDataException("Предложение урока не соответствует единственному кандидату.");
+                                    reason.Text = savedLesson.Text;
+                                    permit.IsChecked = false;
+                                    Log("Проход приостановлен на предложении по уроку. Проверь кандидата и отдельно подтверди пару; клика в Ginger не было.");
+                                    break;
+                                }
+                                Log("По сохранённому уроку модель не выбрала кандидата. Позиция остаётся на ручной проверке.");
+                            }
                         }
                         else
                         {
@@ -284,9 +311,10 @@ public sealed partial class MainWindow
                     if (observation.Position == currentPosition) await Next(token);
                     else if (observation.Position != currentPosition + 1) throw new InvalidDataException("После действия выделение переместилось неожиданно.");
                 }
-                Log($"Проход завершён. На ручной проверке: {pending.Count}. Документ Ginger оставлен открытым.");
+                Log($"{(lessonCandidate is null ? "Проход завершён" : "Проход приостановлен для проверки пары")}. На ручной проверке: {pending.Count}. Документ Ginger оставлен открытым.");
                 if (session is not null) Log("Результаты: " + session.DirectoryPath);
             });
+            if (!fatal && lessonCandidate is not null) candidates.SelectedItem = lessonCandidate;
         };
         stop.Click += (_, _) => { _gingerCancellation?.Cancel(); if (teaching) teachingCancellation?.Cancel(); Log("Останавливаю перед следующим действием. Если сопоставление уже отправлено, сначала проверю его результат."); };
         diagnostics.Click += (_, _) => { diagnosticsRequested = true; dialog.Hide(); };
