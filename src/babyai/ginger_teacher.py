@@ -2,7 +2,7 @@
 import json
 
 
-def consult(provider, payload):
+def consult(provider, payload, *, recognize=False):
     def text(key, limit):
         value = payload.get(key)
         if not isinstance(value, str) or not value.strip() or len(value) > limit:
@@ -11,7 +11,7 @@ def consult(provider, payload):
 
     supplier = text("supplier", 500)
     source = text("source", 2000)
-    lesson = text("lesson", 4000)
+    lesson = text("lesson", 4000) if not recognize else "Особых правил поставщика нет."
     candidates = payload.get("candidates")
     if (not isinstance(candidates, list) or not 1 <= len(candidates) <= 100
             or any(not isinstance(c, str) or not c.strip() or len(c) > 2000 for c in candidates)):
@@ -23,6 +23,17 @@ def consult(provider, payload):
         "Примени урок к исходному товару и кандидатам; не придумывай кандидатов. "
         "При неоднозначности candidate=null. Не игнорируй объём, концентрацию, пол, "
         "тестер, vintage, линейку или комплектацию без явного объяснения пользователя. "
+        "Сравнивай каждого кандидата отдельно. Распознавай транслитерацию, кириллицу/латиницу, "
+        "опечатки и общепринятые обозначения концентрации. Отсутствие необязательного признака "
+        "у обоих товаров не является противоречием: не требуй пол, vintage или комплектацию, "
+        "если они нигде не указаны. Явное отличие объёма или концентрации исключает кандидата. "
+        "При отсутствии пометки тестера в источнике исключи явно помеченного тестера, "
+        "если урок не задаёт другое значение. Наличие неподходящего тестера среди кандидатов "
+        "не делает подходящий обычный товар неоднозначным. Не придумывай скрытые версии. "
+        "Если после сравнения остался один соответствующий кандидат, верни его; если несколько "
+        "или существенное различие не объяснено — null. Кратко назови совпадения и причины исключений. "
+        "Ответ краткий: understanding — одно предложение до 150 символов, explanation — "
+        "до 300 символов. Не пересказывай инструкции и весь список товаров. "
         'Верни только JSON: {"understanding":"...","candidate":null,"explanation":"..."}.\n'
         + json.dumps(dict(supplier=supplier, source=source, lesson=lesson,
                           candidates=candidates), ensure_ascii=False)

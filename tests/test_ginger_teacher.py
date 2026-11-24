@@ -76,3 +76,22 @@ def test_teacher_requests_bounded_native_budget(tmp_path, monkeypatch):
     assert consult(provider, payload())["candidate"] == "A"
     assert observed == [512]
     assert provider.max_tokens == 128
+
+def test_recognition_requires_no_supplier_lesson():
+    model = Model()
+    request = payload()
+    del request['lesson']
+    assert consult(model, request, recognize=True)['candidate'] == 'A'
+    assert 'Особых правил поставщика нет.' in model.prompt
+
+
+def test_recognition_command_does_not_enter_agent_runtime(tmp_path, monkeypatch):
+    from babyai.config import BabyAIConfig
+    from babyai.desktop_commands import DesktopCommands
+    commands = DesktopCommands(BabyAIConfig(data_dir=tmp_path, provider='echo'))
+    monkeypatch.setattr(commands, '_provider', lambda: Model())
+    monkeypatch.setattr(commands, '_core', lambda: pytest.fail('No tool runtime allowed'))
+    request = payload()
+    del request['lesson']
+    assert commands.execute('ginger.recognize.preview', request)['candidate'] == 'A'
+    assert list(tmp_path.iterdir()) == []
