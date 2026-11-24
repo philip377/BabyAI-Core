@@ -23,7 +23,7 @@ public sealed partial class MainWindow
         var candidateFull = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
         var reason = new TextBox { Header = "Твоё объяснение для обучения", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxLength = 4000, PlaceholderText = "Например: у этого поставщика «немного подмят» означает тестер" };
         var lessonPreview = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Header = "Как модель поняла урок и пример применения" };
-        var askTeacher = new Button { Content = "Объяснить модели и посмотреть предложение" };
+        var askTeacher = new Button { Content = "Получить предложение модели (урок необязателен)" };
         var confirmLesson = new Button { Content = "Подтверждаю понимание — сохранить урок", IsEnabled = false };
         var loadLesson = new Button { Content = "Показать сохранённый урок" };
         var revokeLesson = new Button { Content = "Отозвать урок" };
@@ -148,14 +148,13 @@ public sealed partial class MainWindow
                 if (text.Length == 0) text = learning.ReadLanguageLesson(before.Supplier) is { Enabled: true } saved ? saved.Text : "";
             }
             catch (Exception ex) { Log("Не удалось прочитать урок: " + ex.Message); return; }
-            if (text.Length == 0) { Log("Напиши объяснение или загрузи сохранённый урок."); return; }
             teachingCancellation = new CancellationTokenSource();
             teaching = true; diagnostics.IsEnabled = false; stop.IsEnabled = true; draftLesson = null; confirmLesson.IsEnabled = false;
             askTeacher.IsEnabled = loadLesson.IsEnabled = revokeLesson.IsEnabled = reason.IsEnabled = false;
             approve.IsChecked = false;
             candidates.SelectedIndex = -1;
             candidates.IsEnabled = approve.IsEnabled = false;
-            lessonPreview.Text = "Модель разбирает объяснение…";
+            lessonPreview.Text = text.Length == 0 ? "Модель сравнивает кандидатов по отдельности…" : "Модель разбирает объяснение…";
             try
             {
                 var result = await _bridge.PreviewGingerLessonAsync(before.Supplier, before.Title, text,
@@ -166,8 +165,22 @@ public sealed partial class MainWindow
                 lessonPreview.Text = understanding + "\nПример: " + before.Title + "\nКандидат: " + (candidate ?? "нужна ручная проверка")
                     + "\n" + result.GetProperty("explanation").GetString();
                 approve.IsChecked = false;
-                draftLesson = new(before.Supplier, text, understanding, true, DateTimeOffset.UtcNow);
-                confirmLesson.IsEnabled = true;
+                draftLesson = text.Length == 0 ? null : new(before.Supplier, text, understanding, true, DateTimeOffset.UtcNow);
+                confirmLesson.IsEnabled = draftLesson is not null;
+                if (result.TryGetProperty("comparisons", out var comparisons))
+                {
+                    foreach (var comparison in comparisons.EnumerateArray())
+                    {
+                        var details = comparison.GetProperty("attributes").EnumerateObject().Select(attribute =>
+                        {
+                            var name = attribute.Name switch { "identity" => "Название", "volume" => "Объём",
+                                "concentration" => "Концентрация", "tester" => "Тестер", _ => "Версия/комплектация" };
+                            var verdict = attribute.Value.GetString() switch { "match" => "совпадает", "conflict" => "различается", _ => "не определено" };
+                            return name + ": " + verdict;
+                        });
+                        lessonPreview.Text += "\n" + comparison.GetProperty("candidate").GetString() + " — " + string.Join("; ", details);
+                    }
+                }
                 if (candidate is not null && before.Candidates.Count(c => c == candidate) == 1) candidates.SelectedItem = candidate;
                 Log("Получено предложение модели. Сопоставление не выполнялось. Проверь понимание и выбранную пару отдельно.");
             }

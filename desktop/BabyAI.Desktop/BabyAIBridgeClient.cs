@@ -106,7 +106,7 @@ public sealed class BabyAIBridgeClient : IDisposable
     public async Task<JsonElement> PreviewGingerLessonAsync(string supplier, string source,
         string lesson, IEnumerable<string> candidates, CancellationToken cancellationToken)
     {
-        var json = await ExecuteAsync("ginger.teach.preview",
+        var json = await ExecuteAsync(string.IsNullOrWhiteSpace(lesson) ? "ginger.recognize.preview" : "ginger.teach.preview",
             JsonSerializer.Serialize(new { supplier, source, lesson, candidates }), cancellationToken);
         using var document = JsonDocument.Parse(json);
         return document.RootElement.Clone();

@@ -77,21 +77,68 @@ def test_teacher_requests_bounded_native_budget(tmp_path, monkeypatch):
     assert observed == [512]
     assert provider.max_tokens == 128
 
+class ComparisonModel:
+    def __init__(self, answers=None):
+        self.prompts = []
+        self.answers = answers
+
+    def generate(self, prompt):
+        self.prompts.append(prompt)
+        attributes = dict.fromkeys(['identity', 'volume', 'concentration', 'tester', 'variant'], 'match')
+        attributes.update((self.answers or [{}, {'volume': 'conflict'}])[len(self.prompts) - 1])
+        return json.dumps(attributes)
+
+
 def test_recognition_requires_no_supplier_lesson():
-    model = Model()
+    model = ComparisonModel()
     request = payload()
     del request['lesson']
     assert consult(model, request, recognize=True)['candidate'] == 'A'
-    assert 'Особых правил поставщика нет.' in model.prompt
+    assert len(model.prompts) == 2
+    assert json.loads(model.prompts[0].split('\n')[-1])['candidate'] == 'A'
+    assert json.loads(model.prompts[1].split('\n')[-1])['candidate'] == 'B'
 
 
 def test_recognition_command_does_not_enter_agent_runtime(tmp_path, monkeypatch):
     from babyai.config import BabyAIConfig
     from babyai.desktop_commands import DesktopCommands
     commands = DesktopCommands(BabyAIConfig(data_dir=tmp_path, provider='echo'))
-    monkeypatch.setattr(commands, '_provider', lambda: Model())
+    monkeypatch.setattr(commands, '_provider', lambda: ComparisonModel())
     monkeypatch.setattr(commands, '_core', lambda: pytest.fail('No tool runtime allowed'))
     request = payload()
     del request['lesson']
     assert commands.execute('ginger.recognize.preview', request)['candidate'] == 'A'
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize('answers', [[{}, {}], [{}, {'identity': 'unknown'}],
+                                   [{'volume': 'conflict'}, {'tester': 'conflict'}]])
+def test_recognition_refuses_ambiguity_or_no_match(answers):
+    result = consult(ComparisonModel(answers), payload(), recognize=True)
+    assert result['candidate'] is None
+    assert len(result['comparisons']) == 2
+
+
+def test_recognition_rejects_incomplete_comparison():
+    with pytest.raises(ValueError):
+        consult(Model(), payload(), recognize=True)
+
+
+def test_recognition_bounds_work_without_truncating_candidates():
+    model = ComparisonModel()
+    with pytest.raises(ValueError):
+        consult(model, payload() | {'candidates': [str(i) for i in range(11)]}, recognize=True)
+    assert model.prompts == []
+
+
+def test_recognition_does_not_accept_duplicate_matches():
+    assert consult(ComparisonModel([{}, {}]), payload() | {'candidates': ['A', 'A']},
+                   recognize=True)['candidate'] is None
+    assert consult(ComparisonModel(), payload() | {'candidates': ['A', 'A']},
+                   recognize=True)['candidate'] is None
+
+
+@pytest.mark.parametrize('value', ['yes', None, {}, True])
+def test_recognition_rejects_invalid_attribute(value):
+    with pytest.raises(ValueError):
+        consult(ComparisonModel([{'volume': value}]), payload(), recognize=True)
