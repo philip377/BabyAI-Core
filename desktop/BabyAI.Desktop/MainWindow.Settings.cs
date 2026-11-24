@@ -14,7 +14,8 @@ public sealed partial class MainWindow
     {
         ApplyStoredUiSettings();
         _ = CheckForUpdatesOnStartupAsync();
-        if (Environment.GetCommandLineArgs().Contains("--ginger-read-check", StringComparer.Ordinal))
+        if (Environment.GetCommandLineArgs().Contains("--ginger-read-check", StringComparer.Ordinal)
+            || Environment.GetCommandLineArgs().Contains("--ginger-prepare-check", StringComparer.Ordinal))
         {
             _expanded = true;
             await ExpandPanelAsync();

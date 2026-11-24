@@ -18,7 +18,7 @@ public sealed partial class MainWindow
         var diagnosticsRequested = false;
         var startupReadCheck = !_gingerStartupReadConsumed && Environment.GetCommandLineArgs().Contains("--ginger-read-check", StringComparer.Ordinal);
         _gingerStartupReadConsumed = true;
-        var source = new TextBlock { Text = "Открой прайс Ginger на вкладке «Сопоставление — новые». Агент прочитает полные названия товаров.", TextWrapping = TextWrapping.Wrap, FontSize = 15 };
+        var source = new TextBlock { Text = "UNIX подготовит вкладку сопоставления и прочитает текущий прайс Ginger. Сопоставление потребует отдельного разрешения.", TextWrapping = TextWrapping.Wrap, FontSize = 15 };
         var candidates = new ComboBox { Header = "Кандидат из каталога Ginger", HorizontalAlignment = HorizontalAlignment.Stretch };
         var candidateFull = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
         var reason = new TextBox { Header = "Твоё объяснение для обучения", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxLength = 4000, PlaceholderText = "Например: у этого поставщика «немного подмят» означает тестер" };
@@ -232,6 +232,11 @@ public sealed partial class MainWindow
                 startupReadCheck = false;
                 Log("Диагностический запуск: только чтение текущего прайса. Разрешение сопоставления не выдано.");
                 await ReadCurrentPrice(prepare: false);
+            }
+            else
+            {
+                Log("Подготавливаю вкладку и панель кандидатов Ginger. Разрешение сопоставления не выдано.");
+                await ReadCurrentPrice(prepare: true);
             }
         };
         saveRule.Click += (_, _) =>
