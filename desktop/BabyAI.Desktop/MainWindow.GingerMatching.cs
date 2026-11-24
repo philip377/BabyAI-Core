@@ -143,16 +143,24 @@ public sealed partial class MainWindow
             if (_gingerRunning || teaching || observation is null || fatal) return;
             var before = observation;
             var text = reason.Text.Trim();
-            if (text.Length == 0) text = learning.ReadLanguageLesson(before.Supplier) is { Enabled: true } saved ? saved.Text : "";
+            try
+            {
+                if (text.Length == 0) text = learning.ReadLanguageLesson(before.Supplier) is { Enabled: true } saved ? saved.Text : "";
+            }
+            catch (Exception ex) { Log("Не удалось прочитать урок: " + ex.Message); return; }
             if (text.Length == 0) { Log("Напиши объяснение или загрузи сохранённый урок."); return; }
             teachingCancellation = new CancellationTokenSource();
             teaching = true; diagnostics.IsEnabled = false; stop.IsEnabled = true; draftLesson = null; confirmLesson.IsEnabled = false;
             askTeacher.IsEnabled = loadLesson.IsEnabled = revokeLesson.IsEnabled = reason.IsEnabled = false;
             approve.IsChecked = false;
+            candidates.SelectedIndex = -1;
+            candidates.IsEnabled = approve.IsEnabled = false;
+            lessonPreview.Text = "Модель разбирает объяснение…";
             try
             {
                 var result = await _bridge.PreviewGingerLessonAsync(before.Supplier, before.Title, text,
                     before.Candidates, teachingCancellation.Token);
+                teachingCancellation.Token.ThrowIfCancellationRequested();
                 var understanding = result.GetProperty("understanding").GetString()!;
                 var candidate = result.GetProperty("candidate").GetString();
                 lessonPreview.Text = understanding + "\nПример: " + before.Title + "\nКандидат: " + (candidate ?? "нужна ручная проверка")
@@ -163,8 +171,19 @@ public sealed partial class MainWindow
                 if (candidate is not null && before.Candidates.Count(c => c == candidate) == 1) candidates.SelectedItem = candidate;
                 Log("Получено предложение модели. Сопоставление не выполнялось. Проверь понимание и выбранную пару отдельно.");
             }
-            catch (Exception ex) { Log("Урок не сохранён: " + ex.Message); }
-            finally { teachingCancellation.Dispose(); teachingCancellation = null; teaching = false; diagnostics.IsEnabled = true; stop.IsEnabled = false; askTeacher.IsEnabled = loadLesson.IsEnabled = revokeLesson.IsEnabled = reason.IsEnabled = true; }
+            catch (OperationCanceledException)
+            {
+                lessonPreview.Text = "Разбор урока остановлен. Предложение не принято.";
+                Log("Разбор урока отменён. Урок не сохранён, кандидат не выбран.");
+            }
+            catch (Exception ex) { lessonPreview.Text = "Не удалось получить предложение."; Log("Урок не сохранён: " + ex.Message); }
+            finally
+            {
+                teachingCancellation.Dispose(); teachingCancellation = null; teaching = false;
+                diagnostics.IsEnabled = true; stop.IsEnabled = false;
+                candidates.IsEnabled = approve.IsEnabled = true;
+                askTeacher.IsEnabled = loadLesson.IsEnabled = revokeLesson.IsEnabled = reason.IsEnabled = true;
+            }
         };
         confirmLesson.Click += (_, _) =>
         {
