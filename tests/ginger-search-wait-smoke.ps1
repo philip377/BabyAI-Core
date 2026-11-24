@@ -3,11 +3,14 @@ $ErrorActionPreference='Stop'
 Add-Type @"
 using System;
 public class Context { public bool QueryWordsMatchSource; }
+public class GingerUiBusyException : Exception { }
 public static class GingerMenuAccess {
+ public static int BusyReads;
  public static int Reads; public static bool ChangeRows; public static bool NeverReady; public static bool ChangeCandidates;
  public static Context ReadSearchContext(IntPtr w,uint p,int pause) {
   if(pause!=700) throw new Exception("Settling pause removed");
   Reads++; System.Threading.Thread.Sleep(pause);
+  if(BusyReads>0) { BusyReads--; throw new GingerUiBusyException(); }
   if(ChangeCandidates) throw new Exception("Candidates changed");
   return new Context { QueryWordsMatchSource=!NeverReady && Reads>1 };
  }
@@ -24,10 +27,30 @@ if($end -le $start){throw 'Production search loop end not found'}
 $loop=[scriptblock]::Create($source.Substring($start,$end-$start))
 $window=[IntPtr]::Zero; $ownerId=[uint32]0; $rows=$null
 function Write-ReadStage([string]$Stage) {
- if($Stage -notin @('search_pair','table_recheck','verified')){throw 'Unexpected read stage'}
+ if($Stage -notin @('search_pair','table_recheck','verified','search_busy')){throw 'Unexpected read stage'}
 }
 & $loop
 if([GingerMenuAccess]::Reads -ne 2){throw 'Expected stale then fresh verified context'}
+[GingerMenuAccess]::BusyReads=1
+$readsBefore=[GingerMenuAccess]::Reads
+& $loop
+if([GingerMenuAccess]::Reads -ne ($readsBefore+2)){throw 'Transient busy observation not recovered once'}
+[GingerMenuAccess]::BusyReads=3
+$readsBefore=[GingerMenuAccess]::Reads
+$failed=$false
+try { & $loop } catch {
+ if($_.Exception.GetBaseException() -isnot [GingerUiBusyException]){throw}
+ $failed=$true
+}
+if(-not $failed -or [GingerMenuAccess]::Reads -ne ($readsBefore+2)){throw 'Repeated busy observation must stop after one retry'}
+[GingerMenuAccess]::BusyReads=1
+[GingerMenuAccess]::ChangeRows=$true
+$failed=$false
+try { & $loop } catch {
+ if($_.Exception.ToString() -notmatch 'Rows changed'){throw}
+ $failed=$true
+}
+if(-not $failed){throw 'Busy recovery accepted changed rows'}
 [GingerMenuAccess]::ChangeRows=$true
 $failed=$false
 try { & $loop } catch {

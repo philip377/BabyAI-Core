@@ -70,10 +70,22 @@ if($Operation -in @('Select','Filter')) {
 # Navigation/filter operations must obtain a new snapshot after their input.
 if($Operation -ne 'Observe'){Write-ReadStage 'table_after_input';$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)}
 $searchDeadline=[Diagnostics.Stopwatch]::StartNew()
+$busyObservationRetried=$false
 do {
  Write-ReadStage 'search_pair'
  # Native reader compares two complete contexts, separated by the settling pause.
- $second=[GingerMenuAccess]::ReadSearchContext($window,$ownerId,700)
+ try {
+  $second=[GingerMenuAccess]::ReadSearchContext($window,$ownerId,700)
+ } catch {
+  if($_.Exception.GetBaseException() -isnot [GingerUiBusyException]){throw}
+  if($busyObservationRetried -or $searchDeadline.Elapsed.TotalSeconds -ge 10){throw}
+  $busyObservationRetried=$true
+  Write-ReadStage 'search_busy'
+  Start-Sleep -Milliseconds 200
+  # Discard the incomplete context. Repeat reads only, once; the original table
+  # and selection must still pass the full comparison before anything is accepted.
+  continue
+ }
  Write-ReadStage 'table_recheck'
  [GingerMenuAccess]::RequireSameProductRows($rows,[GingerMenuAccess]::ReadProductRows($window,$ownerId),$true)
  if($second.QueryWordsMatchSource) {
