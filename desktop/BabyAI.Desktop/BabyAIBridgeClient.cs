@@ -114,6 +114,16 @@ public sealed class BabyAIBridgeClient : IDisposable
 
     public Task ApproveLessonAsync() => ExecuteAsync("lesson.approve", "{}");
 
+    public async Task<string> RateGingerAnswerAsync(JsonElement report, int points, string feedback)
+    {
+        var json = await ExecuteAsync("ginger.answer.rate", JsonSerializer.Serialize(new { report, points, feedback }));
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.GetProperty("answer_id").GetString()!;
+    }
+
+    public Task RevokeGingerAnswerAsync(string answerId, string feedback) =>
+        ExecuteAsync("ginger.answer.revoke", JsonSerializer.Serialize(new { answer_id = answerId, feedback }));
+
     public Task RejectLessonAsync() => ExecuteAsync("lesson.reject", "{}");
 
     public Task<string> ApproveToolAsync(CancellationToken cancellationToken = default) =>

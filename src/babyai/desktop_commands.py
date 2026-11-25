@@ -262,6 +262,17 @@ class DesktopCommands:
                 "review": review,
             }
 
+        if command in {"ginger.answer.rate", "ginger.answer.revoke"}:
+            from .ginger_answer_reward import record_answer_rating, revoke_answer_rating
+            directory = self.config.data_dir / "ginger-answer-ratings"
+            if command == "ginger.answer.rate":
+                record = record_answer_rating(directory, payload.get("report"),
+                    points=payload.get("points"), user_feedback=payload.get("feedback"))
+            else:
+                record = revoke_answer_rating(directory, payload.get("answer_id"),
+                    user_feedback=payload.get("feedback"))
+            return {"ok": True, "answer_id": record["answer_id"]}
+
         if command in {"ginger.teach.preview", "ginger.recognize.preview"}:
             from .ginger_teacher import consult
             return {"ok": True, "command": command,

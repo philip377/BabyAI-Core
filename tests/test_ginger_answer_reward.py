@@ -56,3 +56,17 @@ def test_revocation_rejects_invalid_identifier(tmp_path, key):
     with pytest.raises(ValueError):
         revoke_answer_rating(tmp_path, key, user_feedback='Отзыв')
     assert not list(tmp_path.iterdir())
+
+def test_desktop_rating_and_revocation_without_model_or_actions(tmp_path, monkeypatch):
+    from babyai.config import BabyAIConfig
+    from babyai.desktop_commands import DesktopCommands
+    from babyai.ginger_answer_reward import active_answer_ratings
+    commands = DesktopCommands(BabyAIConfig(data_dir=tmp_path, provider='echo'))
+    monkeypatch.setattr(commands, '_provider', lambda: pytest.fail('No model call'))
+    monkeypatch.setattr(commands, '_core', lambda: pytest.fail('No agent actions'))
+    saved = commands.execute('ginger.answer.rate', dict(report=report(), points=10, feedback='Верно'))
+    directory = tmp_path / 'ginger-answer-ratings'
+    assert len(active_answer_ratings(directory)) == 1
+    commands.execute('ginger.answer.revoke', dict(answer_id=saved['answer_id'], feedback='Отзываю'))
+    assert active_answer_ratings(directory) == []
+    assert list(tmp_path.iterdir()) == [directory]
