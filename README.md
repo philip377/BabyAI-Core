@@ -9,9 +9,9 @@ The project is no longer just an experimental chat window. It now has a native W
 
 The product name is **UNIX**. Existing package names, paths, environment variables, executable names, UI labels, and internal identifiers still use `BabyAI` in many places during development so compatibility work is not mixed into feature development.
 
-## Current status — August 2026
+## Current status — November 2026
 
-The main Milestone 2 foundation is complete, and the first Workspace / Documents / Retrieval foundation is integrated into `main`.
+The documented Milestone 2 foundation and the first Workspace / Documents / Retrieval foundation are integrated into `main`. The technical inventory below reflects implemented and previously accepted foundations; new experiments and roadmap goals are described separately rather than presented as shipped features.
 
 PR **#128** rebuilt the resident native conversation path around genuine ChatML turns and fixed the major repetition / progressive-streaming regressions. PR **#131** then added the first **model-driven Agent Runtime** and was accepted by owner Windows smoke: the model can request an approved local action, the agent performs it through the protected executor, and a real observation returns to the model before the final conversational answer.
 
@@ -51,6 +51,32 @@ Already working in `main`:
 - structured project Wiki source under `docs/wiki/`
 - Windows installer / portable release pipeline with bundled native CPU and Vulkan runtimes
 - side-by-side physical install slots so repeated development builds of the same logical version can be installed safely
+
+## Product direction — personal UNIX
+
+UNIX is intended to become a **personal, locally controlled AI environment**, not merely a chatbot or a collection of automation scripts. The long-term goal is an assistant whose useful experience can grow with its owner while remaining inspectable, transferable and subject to human control.
+
+The next research and product directions include:
+
+- **Accessible personal training:** a user-friendly flow for examples, corrections, validation and reusable skills, without requiring programming knowledge.
+- **Memory continuity:** durable, portable knowledge and preferences that can survive model upgrades, with provenance and safeguards against treating model guesses as facts.
+- **Model freedom:** experiments with user-selected local models and optional adapters; LoRA/QLoRA fine-tuning is distinct from instant memory updates and is **not claimed as a completed feature**.
+- **Developer Mode:** a proposed opt-in environment for advanced model and extension experiments, with clear warnings, isolated tests and rollback paths.
+- **Personal agents and desktop companions:** customizable agent profiles, roles, voice and presentation; some work is experimental.
+- **Local-only operation by choice:** offline use and user-controlled updates are central design goals. Optional remote or hybrid processing must not silently upload private data.
+- **Transparent activity:** understandable action logs and visualizations of memory/skill events, without pretending to expose the literal internal thoughts of a model.
+
+These are **development goals and experiments**, not promises of current availability or release dates.
+
+## Source and privacy policy
+
+The product is developed as a **proprietary project**. Availability of this repository does not imply that every component, model, dataset, internal integration or future version will be published under an open-source license. Check the actual repository licenses and file-level notices before assuming reuse rights.
+
+This README intentionally excludes private operational integrations, customer or supplier data, internal business records and confidential workflows. Real private data should remain on the owner's device unless its owner explicitly authorizes a specific transfer.
+
+## Origins
+
+The project traces its ideas to early experiments in persistent memory, voice, device interaction and self-improvement for a personal assistant. The current UNIX architecture emphasizes measurable execution, explicit permissions and verified learning rather than treating generated code or speculative model output as successful actions.
 
 ## Agent architecture
 
