@@ -22,7 +22,7 @@ public sealed partial class MainWindow
         var candidates = new ComboBox { Header = "Кандидат из каталога Ginger", HorizontalAlignment = HorizontalAlignment.Stretch };
         var candidateFull = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
         var reason = new TextBox { Header = "Твоё объяснение для обучения", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxLength = 4000, PlaceholderText = "Например: у этого поставщика «немного подмят» означает тестер" };
-        var lessonPreview = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Header = "Как модель поняла урок и пример применения" };
+        var lessonPreview = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Header = "Предложение модели и сравнение кандидатов", MaxHeight = 220 };
         var askTeacher = new Button { Content = "Получить предложение модели (урок необязателен)" };
         var score = new ComboBox { Header = "Оценка показанного ответа (0–10)", ItemsSource = Enumerable.Range(0, 11).ToArray(), SelectedIndex = -1 };
         var feedback = new TextBox { Header = "Почему такая оценка / причина отзыва", MaxLength = 4000 };
@@ -55,10 +55,12 @@ public sealed partial class MainWindow
         panel.Children.Add(source);
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         row.Children.Add(read); row.Children.Add(run); row.Children.Add(stop); panel.Children.Add(row);
-        panel.Children.Add(permit); panel.Children.Add(candidates); panel.Children.Add(candidateFull); panel.Children.Add(approve);
-        panel.Children.Add(reason); panel.Children.Add(remember); panel.Children.Add(match); panel.Children.Add(skip);
-        panel.Children.Add(askTeacher); panel.Children.Add(lessonPreview); panel.Children.Add(confirmLesson);
+        panel.Children.Add(reason);
+        panel.Children.Add(askTeacher); panel.Children.Add(lessonPreview);
         panel.Children.Add(score); panel.Children.Add(feedback); panel.Children.Add(rateAnswer); panel.Children.Add(revokeAnswer);
+        panel.Children.Add(permit); panel.Children.Add(candidates); panel.Children.Add(candidateFull); panel.Children.Add(approve);
+        panel.Children.Add(remember); panel.Children.Add(match); panel.Children.Add(skip);
+        panel.Children.Add(confirmLesson);
         panel.Children.Add(loadLesson); panel.Children.Add(revokeLesson);
         panel.Children.Add(conditionRule); panel.Children.Add(saveRule);
         panel.Children.Add(queue); panel.Children.Add(review); panel.Children.Add(log); panel.Children.Add(diagnostics);
