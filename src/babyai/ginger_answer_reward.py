@@ -5,9 +5,31 @@ or permission to act. A positive answer rating does not label every attribute.
 """
 import hashlib
 import json
+import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _publish_record(path, record):
+    """Publish complete evidence without replacing another writer's record."""
+    payload = json.dumps(record, ensure_ascii=False, indent=2, allow_nan=False)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                                         dir=path.parent, suffix='.pending',
+                                         delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Same-volume hard link publishes the completed file atomically and
+        # fails if evidence already exists. Never fall back to overwriting it.
+        os.link(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _answer_path(directory, answer_id):
@@ -28,8 +50,7 @@ def revoke_answer_rating(directory, answer_id, *, user_feedback):
     record = dict(answer_id=answer_id, user_feedback=user_feedback,
                   recorded_at=datetime.now(timezone.utc).isoformat())
     try:
-        with tombstone.open('x', encoding='utf-8') as stream:
-            json.dump(record, stream, ensure_ascii=False, indent=2)
+        _publish_record(tombstone, record)
     except FileExistsError:
         return json.loads(tombstone.read_text(encoding='utf-8'))
     return record
@@ -72,8 +93,7 @@ def record_answer_rating(directory, report, *, points, user_feedback):
                   recorded_at=datetime.now(timezone.utc).isoformat())
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with path.open('x', encoding='utf-8') as stream:
-            json.dump(record, stream, ensure_ascii=False, indent=2, allow_nan=False)
+        _publish_record(path, record)
     except FileExistsError:
         previous = json.loads(path.read_text(encoding='utf-8'))
         if previous['points'] != points or previous['user_feedback'] != user_feedback:

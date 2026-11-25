@@ -70,3 +70,40 @@ def test_desktop_rating_and_revocation_without_model_or_actions(tmp_path, monkey
     commands.execute('ginger.answer.revoke', dict(answer_id=saved['answer_id'], feedback='Отзываю'))
     assert active_answer_ratings(directory) == []
     assert list(tmp_path.iterdir()) == [directory]
+
+
+def test_failed_flush_leaves_no_rating_and_can_be_retried(tmp_path, monkeypatch):
+    from babyai import ginger_answer_reward as rewards
+    with monkeypatch.context() as patch:
+        def fail_flush(_):
+            raise OSError('disk write failed')
+        patch.setattr(rewards.os, 'fsync', fail_flush)
+        with pytest.raises(OSError):
+            record_answer_rating(tmp_path, report(), points=10, user_feedback='Верно')
+    assert list(tmp_path.iterdir()) == []
+    record_answer_rating(tmp_path, report(), points=10, user_feedback='Верно')
+    assert len(rewards.active_answer_ratings(tmp_path)) == 1
+
+
+def test_failed_revocation_does_not_publish_partial_tombstone(tmp_path, monkeypatch):
+    from babyai import ginger_answer_reward as rewards
+    saved = record_answer_rating(tmp_path, report(), points=10, user_feedback='Верно')
+    with monkeypatch.context() as patch:
+        def fail_publish(*args):
+            raise OSError('publication failed')
+        patch.setattr(rewards.os, 'link', fail_publish)
+        with pytest.raises(OSError):
+            rewards.revoke_answer_rating(tmp_path, saved['answer_id'], user_feedback='Отзыв')
+    assert rewards.active_answer_ratings(tmp_path) == [saved]
+    assert len(list(tmp_path.iterdir())) == 1
+    rewards.revoke_answer_rating(tmp_path, saved['answer_id'], user_feedback='Отзыв')
+    assert rewards.active_answer_ratings(tmp_path) == []
+
+
+def test_concurrent_identical_ratings_publish_one_complete_record(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: record_answer_rating(
+            tmp_path, report(), points=10, user_feedback='Верно'), range(20)))
+    assert all(result == results[0] for result in results)
+    assert len(list(tmp_path.iterdir())) == 1
