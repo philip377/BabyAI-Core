@@ -5,8 +5,50 @@ or permission to act. A positive answer rating does not label every attribute.
 """
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _answer_path(directory, answer_id):
+    if not isinstance(answer_id, str) or not re.fullmatch(r'[0-9a-f]{64}', answer_id):
+        raise ValueError("Неверный идентификатор ответа.")
+    return Path(directory) / (answer_id + '.json')
+
+
+def revoke_answer_rating(directory, answer_id, *, user_feedback):
+    """Keep original evidence; a separate tombstone excludes it from active ratings."""
+    if not isinstance(user_feedback, str) or not user_feedback.strip() or len(user_feedback) > 4000:
+        raise ValueError("Нужна причина отзыва оценки.")
+    path = _answer_path(directory, answer_id)
+    original = json.loads(path.read_text(encoding='utf-8'))
+    if original.get('answer_id') != answer_id:
+        raise ValueError("Идентификатор записи не совпадает.")
+    tombstone = path.with_suffix('.revoked.json')
+    record = dict(answer_id=answer_id, user_feedback=user_feedback,
+                  recorded_at=datetime.now(timezone.utc).isoformat())
+    try:
+        with tombstone.open('x', encoding='utf-8') as stream:
+            json.dump(record, stream, ensure_ascii=False, indent=2)
+    except FileExistsError:
+        return json.loads(tombstone.read_text(encoding='utf-8'))
+    return record
+
+
+def active_answer_ratings(directory):
+    """Return reviewed evidence only; revocation never alters action permissions."""
+    records = []
+    for path in sorted(Path(directory).glob('*.json')):
+        if path.name.endswith('.revoked.json'):
+            continue
+        _answer_path(directory, path.stem)
+        if path.with_suffix('.revoked.json').exists():
+            continue
+        record = json.loads(path.read_text(encoding='utf-8'))
+        if record.get('answer_id') != path.stem:
+            raise ValueError("Идентификатор записи не совпадает.")
+        records.append(record)
+    return records
 
 
 def record_answer_rating(directory, report, *, points, user_feedback):

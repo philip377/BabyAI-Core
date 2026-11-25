@@ -35,3 +35,24 @@ def test_invalid_rating(tmp_path, points):
 def test_error_is_not_a_completed_answer(tmp_path):
     with pytest.raises(ValueError):
         record_answer_rating(tmp_path, report() | {'result': {'error': 'timeout'}}, points=10, user_feedback='Верно')
+
+def test_revocation_preserves_evidence_and_excludes_rating(tmp_path):
+    from babyai.ginger_answer_reward import active_answer_ratings, revoke_answer_rating
+    result = record_answer_rating(tmp_path, report(), points=10, user_feedback='Верно')
+    original = (tmp_path / (result['answer_id'] + '.json')).read_bytes()
+    assert len(active_answer_ratings(tmp_path)) == 1
+    revoke_answer_rating(tmp_path, result['answer_id'], user_feedback='Отзываю оценку')
+    assert active_answer_ratings(tmp_path) == []
+    assert (tmp_path / (result['answer_id'] + '.json')).read_bytes() == original
+    record_answer_rating(tmp_path, report(), points=10, user_feedback='Верно')
+    assert active_answer_ratings(tmp_path) == []
+    revoke_answer_rating(tmp_path, result['answer_id'], user_feedback='Повтор')
+    assert len(list(tmp_path.iterdir())) == 2
+
+
+@pytest.mark.parametrize('key', ['../outside', '', 'A' * 64, '0' * 63])
+def test_revocation_rejects_invalid_identifier(tmp_path, key):
+    from babyai.ginger_answer_reward import revoke_answer_rating
+    with pytest.raises(ValueError):
+        revoke_answer_rating(tmp_path, key, user_feedback='Отзыв')
+    assert not list(tmp_path.iterdir())
