@@ -74,6 +74,7 @@ public sealed partial class MainWindow
         }
         void Update()
         {
+            draftLesson = null; confirmLesson.IsEnabled = false;
             ratedReport = null; answerId = null;
             rateAnswer.IsEnabled = revokeAnswer.IsEnabled = false;
             if (observation is not null)
@@ -153,6 +154,21 @@ public sealed partial class MainWindow
         askTeacher.Click += async (_, _) =>
         {
             if (_gingerRunning || teaching || ratingBusy || observation is null || fatal) return;
+            if (observation.Candidates.Length == 0)
+            {
+                lessonPreview.Text = "Кандидатов пока нет. Подготавливаю поиск по словам слева…";
+                Log("Перед запросом модели проверяю звёздочки слов и перечитываю кандидатов. Сопоставление не выполняется.");
+                var searchSource = observation;
+                await Execute(async token => observation = await session!.PrepareFiltersAsync(searchSource, token));
+                if (fatal || observation is null || observation.Candidates.Length == 0)
+                {
+                    lessonPreview.Text = fatal
+                        ? "Подготовка поиска остановлена. Причина указана в журнале; автоматического повтора нет."
+                        : "После подготовки фильтров кандидатов нет. Нужна ручная проверка поиска; модель не запрашивалась.";
+                    Log(lessonPreview.Text);
+                    return;
+                }
+            }
             var before = observation;
             var text = reason.Text.Trim();
             try
