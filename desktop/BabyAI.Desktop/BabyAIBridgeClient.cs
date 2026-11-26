@@ -149,6 +149,9 @@ public sealed class BabyAIBridgeClient : IDisposable
     public Task SetHistoryEnabledAsync(bool enabled) =>
         ExecuteAsync("history.set_enabled", JsonSerializer.Serialize(new { enabled }));
 
+    public Task RecordGingerChatAsync(string chatId, string message, string result) =>
+        ExecuteAsync("ginger.chat.record", JsonSerializer.Serialize(new { chat_id = chatId, message, result }));
+
     public Task ClearHistoryAsync(string? project = null) =>
         ExecuteAsync("history.clear", JsonSerializer.Serialize(new { project }));
 

@@ -229,6 +229,12 @@ public sealed partial class MainWindow : Window
         if (message.Length == 0)
             return;
 
+        if (GingerChatIntent.IsStart(message))
+        {
+            await RunGingerFromChatAsync(message);
+            return;
+        }
+
         _chatCancellation?.Dispose();
         var chatCancellation = new CancellationTokenSource();
         _chatCancellation = chatCancellation;

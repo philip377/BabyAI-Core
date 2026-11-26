@@ -396,9 +396,24 @@
                         <ScrollViewer x:Name="ConversationScroller"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
-                            <StackPanel x:Name="ConversationStack"
-                                        Padding="2,2,6,2"
-                                        Spacing="4" />
+                            <StackPanel Spacing="8">
+                                <StackPanel x:Name="ConversationStack"
+                                            Padding="2,2,6,2"
+                                            Spacing="4" />
+                                <Border x:Name="GingerChatActivity" Visibility="Collapsed"
+                                        Background="#141D2437" CornerRadius="12" Padding="12">
+                                    <StackPanel Orientation="Horizontal" Spacing="9">
+                                        <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
+                                            <Ellipse x:Name="GingerStepDot1" Width="5" Height="5" Fill="#FF8F9CFF" />
+                                            <Ellipse x:Name="GingerStepDot2" Width="5" Height="5" Fill="#FF8F9CFF" />
+                                            <Ellipse x:Name="GingerStepDot3" Width="5" Height="5" Fill="#FF8F9CFF" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="GingerChatStageText" Text="Агент Ginger"
+                                                   FontSize="12" TextWrapping="Wrap" MaxWidth="320"
+                                                   AutomationProperties.LiveSetting="Polite" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
                         </ScrollViewer>
                     </Border>
 

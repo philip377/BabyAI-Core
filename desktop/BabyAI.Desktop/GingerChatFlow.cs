@@ -1,0 +1,69 @@
+using System.Text.RegularExpressions;
+
+namespace BabyAI.Desktop;
+
+internal enum GingerChatStage { Started, Reading, Filtering, Comparing, Review, Empty, Cancelled, Failed }
+internal sealed record GingerChatItem(string Supplier, string Document, int Position, string Title, bool Linked, string[] Candidates);
+
+// Only explicit requests from the chat input enter this path. Model output and
+// Ginger text never route tasks or grant permission to match a product.
+internal static class GingerChatIntent
+{
+    public static bool IsStart(string message) => message.Length <= 200 && Regex.IsMatch(message.Trim(),
+        @"\A(?:(?:unix|юникс)[,\s]+)?(?:пожалуйста[,\s]+)?(?:надо бы |давай )?(?:продолжи(?:ть|м)?|начни|начать|запусти|запустить|возобнови)\s+сопоставление(?:\s+(?:в\s+)?(?:ginger|джинджер))?(?:[,\s]+пожалуйста)?[.!]*\z",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+}
+
+internal sealed class GingerChatFlow(
+    Func<CancellationToken, Task<GingerChatItem>> read,
+    Func<CancellationToken, Task<GingerChatItem>> filter,
+    Func<GingerChatItem, CancellationToken, Task<string>> compare,
+    Action<GingerChatStage, string> report)
+{
+    public async Task<string> RunAsync(CancellationToken token)
+    {
+        try
+        {
+            token.ThrowIfCancellationRequested();
+            report(GingerChatStage.Started, "Активирован агент Ginger. Задание: подготовить сопоставление текущей строки.");
+            report(GingerChatStage.Reading, "Использую компьютер: открываю панель сопоставления и читаю текущий прайс.");
+            var item = await read(token);
+            token.ThrowIfCancellationRequested();
+            if (item.Linked)
+            {
+                report(GingerChatStage.Review, "Строка уже сопоставлена. Повторная привязка не выполняется.");
+                return $"{item.Supplier} · строка {item.Position}\n{item.Title}\nУже сопоставлено. Выбери в Ginger следующую нужную строку и дай новое задание.";
+            }
+            if (item.Candidates.Length == 0)
+            {
+                report(GingerChatStage.Filtering, "Использую компьютер: проверяю звёздочки слов слева и перечитываю кандидатов.");
+                var filtered = await filter(token);
+                token.ThrowIfCancellationRequested();
+                if (filtered.Supplier != item.Supplier || filtered.Document != item.Document ||
+                    filtered.Position != item.Position || filtered.Title != item.Title || filtered.Linked != item.Linked)
+                    throw new InvalidDataException("Товар изменился во время подготовки поиска. Нужно новое чтение.");
+                item = filtered;
+            }
+            if (item.Candidates.Length == 0)
+            {
+                report(GingerChatStage.Empty, "Подготовка завершена: кандидатов нет. Нужна ручная проверка поиска.");
+                return $"{item.Title}\nКандидатов после подготовки фильтров нет. Модель не запрашивалась, сопоставление не выполнялось.";
+            }
+            report(GingerChatStage.Comparing, $"Сравниваю кандидатов: {item.Candidates.Length}. Компьютером сейчас не управляю.");
+            var proposal = await compare(item, token);
+            token.ThrowIfCancellationRequested();
+            report(GingerChatStage.Review, "Предложение получено. Ожидается проверка пары; сопоставление не выполнялось.");
+            return $"{item.Supplier} · документ {item.Document} · строка {item.Position}\n{item.Title}\n{proposal}\nЭто предложение. Привязка товара ещё не выполнена.";
+        }
+        catch (OperationCanceledException)
+        {
+            report(GingerChatStage.Cancelled, "Остановлено. Отправленные действия не повторяются; следующее задание начнётся со свежего чтения.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            report(GingerChatStage.Failed, "Процесс остановлен: " + ex.Message);
+            throw;
+        }
+    }
+}

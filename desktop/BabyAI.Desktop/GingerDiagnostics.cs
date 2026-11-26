@@ -108,6 +108,10 @@ internal static class GingerDiagnostics
                     ? "Не найдено единственное доступное окно Ginger. Открой Ginger и проверь, нет ли второго экземпляра."
                     : error.Contains("Candidate panel missing", StringComparison.OrdinalIgnoreCase)
                     ? "Не найдена панель кандидатов Ginger. Проверь, что прайс открыт двойным кликом, выбрана вкладка «Сопоставление — новые» и включено «Дополнительно → Сопоставления снизу». Дождись загрузки и повтори чтение прайса."
+                    : error.Contains("Product selection changed", StringComparison.OrdinalIgnoreCase)
+                    ? "Выделение товара в Ginger изменилось. Дальнейшие действия остановлены; нужно заново прочитать текущую строку."
+                    : error.Contains("Ginger UI is not responding", StringComparison.OrdinalIgnoreCase)
+                    ? "Интерфейс Ginger не ответил вовремя. Действия остановлены; автоматического повтора нет."
                     : error.Contains("Query", StringComparison.OrdinalIgnoreCase) && error.Contains("source", StringComparison.OrdinalIgnoreCase)
                     ? "Панель поиска ещё не соответствует выбранному товару. Дождись загрузки строки."
                     : error.Contains("selected", StringComparison.OrdinalIgnoreCase)

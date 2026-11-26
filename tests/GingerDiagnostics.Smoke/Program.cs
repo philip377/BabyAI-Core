@@ -184,6 +184,22 @@ try
 finally { if (Directory.Exists(failureFolder)) Directory.Delete(failureFolder, true); }
 Console.WriteLine("PASS: original subprocess error and exit code retained locally");
 
+foreach (var (diagnostic, expected) in new[] {
+    ("Product selection changed", "Выделение товара в Ginger изменилось"),
+    ("Ginger UI is not responding; further input blocked", "Интерфейс Ginger не ответил вовремя") })
+{
+    try
+    {
+        await GingerDiagnostics.RunAsync(Command($"[Console]::Error.Write('{diagnostic}'); exit 1"),
+            TimeSpan.FromSeconds(10), CancellationToken.None);
+        throw new Exception("Failed driver accepted");
+    }
+    catch (InvalidOperationException ex)
+    {
+        if (!ex.Message.Contains(expected)) throw new Exception("Specific driver reason lost", ex);
+    }
+}
+
 await MustFail("Start-Sleep -Seconds 60", TimeSpan.FromMilliseconds(500), CancellationToken.None);
 using var cancel = new CancellationTokenSource(500);
 await MustFail("Start-Sleep -Seconds 60", TimeSpan.FromSeconds(30), cancel.Token);

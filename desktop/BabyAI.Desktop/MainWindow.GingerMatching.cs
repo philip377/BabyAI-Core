@@ -114,7 +114,17 @@ public sealed partial class MainWindow
                 await action(_gingerCancellation.Token);
                 SetGingerPhase(GingerCompanionPhase.Completed);
             }
-            catch (OperationCanceledException) { Log("Остановлено. Уже отправленные действия не повторяются."); SetGingerPhase(GingerCompanionPhase.Cancelled); }
+            catch (OperationCanceledException)
+            {
+                // Navigation may have reached Ginger before cancellation. Never
+                // reuse the previous row or filter snapshot after an unknown outcome.
+                fatal = true;
+                observation = null;
+                candidates.ItemsSource = null;
+                source.Text = "Операция остановлена. Закрой это окно сопоставления UNIX и открой его снова для нового чтения прайса. Ginger закрывать не нужно.";
+                Log(source.Text + " Уже отправленные действия не повторяются.");
+                SetGingerPhase(GingerCompanionPhase.Cancelled);
+            }
             catch (Exception ex)
             {
                 fatal = true;

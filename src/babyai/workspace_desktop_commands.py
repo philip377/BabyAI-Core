@@ -218,6 +218,24 @@ class WorkspaceDesktopCommands(DesktopCommands):
     def execute(self, command: str, payload: dict[str, object] | None = None) -> dict[str, object]:
         payload = payload or {}
 
+        if command == "ginger.chat.record":
+            # Trusted desktop event log only; not an agent tool, lesson, or
+            # authorization. Preserve normal per-chat history/privacy settings.
+            message, result = payload.get("message"), payload.get("result")
+            if (not isinstance(message, str) or not 1 <= len(message.strip()) <= 200
+                    or not isinstance(result, str) or not 1 <= len(result.strip()) <= 60000):
+                raise DesktopCommandError("Нужны запрос и ограниченный результат агента Ginger.")
+            if payload.get("chat_id") != self._current_chat_id():
+                raise DesktopCommandError("Чат изменился; результат не записан в другой чат.")
+            session = self._session_store()
+            history = self._history()
+            project = self._active_project()
+            history.add("user", message, project=project)
+            history.add("babyai", result, project=project)
+            session.add("user", message)
+            session.add("babyai", result)
+            return {"ok": True, "command": command}
+
         if command in {"chat.list", "chat.current", "chat.create", "chat.select"}:
             if command in {"chat.create", "chat.select"}:
                 self._require_no_pending_action_for_workspace_switch()
