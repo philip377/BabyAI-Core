@@ -67,7 +67,8 @@ public sealed partial class MainWindow
     }
     private async void AgentsNavigationButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_agentsDialogOpen || _gingerDialogOpen) return;
+        if (_busy || _gingerRunning || _agentsDialogOpen || _gingerDialogOpen) return;
+        InvalidateGingerChatMatch();
         _agentsDialogOpen = true;
         var openGinger = false;
         try

@@ -229,6 +229,7 @@ public sealed partial class MainWindow : Window
         if (message.Length == 0)
             return;
 
+        InvalidateGingerChatMatch();
         if (GingerChatIntent.IsStart(message))
         {
             await RunGingerFromChatAsync(message);
@@ -374,6 +375,8 @@ public sealed partial class MainWindow : Window
 
         CoreStatusText.Text = "Core: останавливаю";
         ReplyText.Text = "Останавливаю…";
+        if (_gingerChatReconciling)
+            ReplyText.Text = "Останавливаю дальнейшие действия; если сопоставление уже отправлено, завершу проверку результата.";
         StopButton.IsEnabled = false;
         Interlocked.Increment(ref _chatGeneration);
         _chatCancellation.Cancel();
@@ -460,6 +463,8 @@ public sealed partial class MainWindow : Window
         SendButton.IsEnabled = !busy;
         NewChatButton.IsEnabled = !busy;
         GingerNavigationButton.IsEnabled = !busy;
+        GingerChatConfirmButton.IsEnabled = !busy;
+        GingerChatRejectButton.IsEnabled = !busy;
         WorkspaceItems.IsHitTestVisible = !busy;
         RecentChatItems.IsHitTestVisible = !busy;
         RetryButton.IsEnabled = !busy;

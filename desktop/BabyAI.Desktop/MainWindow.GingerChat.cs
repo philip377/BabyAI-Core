@@ -44,6 +44,8 @@ public sealed partial class MainWindow
             ReplyText.Text = "Сначала подтверди или отклони ожидающее действие.";
             return;
         }
+        InvalidateGingerChatMatch();
+        StopVoiceListening(updateUi: false);
         _chatCancellation?.Dispose();
         using var cancellation = new CancellationTokenSource();
         _chatCancellation = _gingerCancellation = cancellation;
@@ -55,6 +57,7 @@ public sealed partial class MainWindow
         var turn = CreateConversationTurn("UNIX", "Передаю задачу агенту Ginger…");
         GingerDesktopSession? session = null;
         GingerDesktopObservation? observation = null;
+        string? proposedCandidate = null;
         string? chatId = null;
         static GingerChatItem Item(GingerDesktopObservation value) => new(
             value.Supplier, value.Document, value.Position, value.Title, value.Linked, value.Candidates);
@@ -109,21 +112,26 @@ public sealed partial class MainWindow
                     var result = await _bridge.PreviewGingerLessonAsync(item.Supplier, item.Title,
                         lesson, item.Candidates, token);
                     token.ThrowIfCancellationRequested();
+                    proposedCandidate = result.GetProperty("candidate").GetString();
                     return FormatGingerChatProposal(result);
                 }, Report);
             var proposal = await flow.RunAsync(cancellation.Token);
             transcript.AppendLine().AppendLine(proposal);
-            transcript.AppendLine("Для подтверждения пары и обучения пока используется окно агента Ginger. Здесь выполнена подготовка кандидатов и получено предложение модели.");
+            if (observation is not null && proposedCandidate is not null && chatId is not null)
+                transcript.AppendLine(OfferGingerChatMatch(session, observation, chatId, proposedCandidate));
+            transcript.AppendLine("Объяснения и оценки пока сохраняются в окне агента Ginger. Предложение модели само по себе не разрешает сопоставление.");
             ReplaceConversationTurn(turn, "UNIX", transcript.ToString());
             session.Record(proposal);
         }
         catch (OperationCanceledException)
         {
+            InvalidateGingerChatMatch();
             if (!transcript.ToString().Contains("Остановлено.", StringComparison.Ordinal))
                 Report(GingerChatStage.Cancelled, "Остановлено. Агент не продолжает работу.");
         }
         catch (Exception ex)
         {
+            InvalidateGingerChatMatch();
             // Also handles failure to acquire the session, before the flow starts.
             if (!transcript.ToString().Contains("Процесс остановлен:", StringComparison.Ordinal))
                 Report(GingerChatStage.Failed, "Не удалось запустить агента Ginger: " + ex.Message);

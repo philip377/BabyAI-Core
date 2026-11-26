@@ -73,3 +73,113 @@ try {
 } catch (IOException) { }
 Require(filters == 0 && comparisons == 0 && stages.Last() == GingerChatStage.Failed, "Failure reported as completed");
 Console.WriteLine("Ginger chat: explicit routing, stage order, cancellation, empty search and stale row guards passed.");
+
+var snapshot = new GingerChatMatchSnapshot(123, 456, 20, "1500", "<не указано>",
+    source with { Candidates = ["A", "B"] });
+var matched = snapshot with { LinkedProduct = "A", Item = snapshot.Item with { Linked = true } };
+var now = DateTimeOffset.Parse("2026-11-27T00:00:00Z");
+GingerChatMatchGate Gate() => new(snapshot, "chat-1", "A", () => now);
+var matchStages = new List<GingerChatMatchStage>();
+int writes = 0;
+Task<GingerChatMatchSnapshot> Write(CancellationToken _) { writes++; return Task.FromResult(matched); }
+void MatchReport(GingerChatMatchStage stage, string _) => matchStages.Add(stage);
+async Task Refused(Func<Task> run, string name)
+{
+    var refused = false;
+    try { await run(); }
+    catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or OperationCanceledException or IOException)
+    { refused = true; }
+    Require(refused, name);
+}
+async Task RejectBeforeWrite(GingerChatMatchGate gate, GingerChatMatchSnapshot fresh,
+    string chat = "chat-1", bool reserved = false, CancellationToken token = default)
+{
+    writes = 0; matchStages.Clear();
+    await Refused(() => gate.RunAsync(chat, _ => Task.FromResult(fresh), () => reserved, Write, MatchReport, token),
+        "Unsafe match accepted");
+    Require(writes == 0 && !matchStages.Contains(GingerChatMatchStage.Verified), "Rejected request wrote or reported success");
+}
+
+var valid = Gate();
+await valid.RunAsync("chat-1", _ => Task.FromResult(snapshot), () => false, Write, MatchReport, CancellationToken.None);
+Require(writes == 1 && matchStages.SequenceEqual(new[] { GingerChatMatchStage.Checking,
+    GingerChatMatchStage.Matching, GingerChatMatchStage.Verified }), "Match stage order");
+await RejectBeforeWrite(valid, snapshot); // A second press cannot repeat a successful write.
+await RejectBeforeWrite(Gate(), snapshot, chat: "chat-2");
+await RejectBeforeWrite(Gate(), snapshot, reserved: true);
+foreach (var changed in new[] {
+    snapshot with { ProcessId = 124 }, snapshot with { TableHandle = 457 },
+    snapshot with { RowCount = 21 }, snapshot with { Price = "1600" },
+    snapshot with { LinkedProduct = "other" },
+    snapshot with { Item = snapshot.Item with { Supplier = "other" } },
+    snapshot with { Item = snapshot.Item with { Document = "other" } },
+    snapshot with { Item = snapshot.Item with { Position = 3 } },
+    snapshot with { Item = snapshot.Item with { Title = "other" } },
+    snapshot with { Item = snapshot.Item with { Linked = true } },
+    snapshot with { Item = snapshot.Item with { Candidates = ["A", "C"] } },
+    snapshot with { Item = snapshot.Item with { Candidates = ["B", "A"] } },
+    snapshot with { Item = snapshot.Item with { Candidates = ["A", "A"] } } })
+    await RejectBeforeWrite(Gate(), changed);
+
+var expired = Gate(); now = now.AddMinutes(15);
+await RejectBeforeWrite(expired, snapshot);
+var expiresDuringRead = Gate(); writes = 0;
+await Refused(() => expiresDuringRead.RunAsync("chat-1", _ => {
+    now = now.AddMinutes(15); return Task.FromResult(snapshot);
+}, () => false, Write, MatchReport, CancellationToken.None), "Expiry during read accepted");
+Require(writes == 0, "Expired read wrote");
+await RejectBeforeWrite(expiresDuringRead, snapshot); // Failure also consumes this confirmation.
+
+using var beforeMatchCancellation = new CancellationTokenSource();
+var cancelledGate = Gate(); writes = 0;
+await Refused(() => cancelledGate.RunAsync("chat-1", _ => {
+    beforeMatchCancellation.Cancel(); return Task.FromResult(snapshot);
+}, () => false, Write, MatchReport, beforeMatchCancellation.Token), "Cancelled read accepted");
+Require(writes == 0, "Cancellation before dispatch wrote");
+await RejectBeforeWrite(Gate(), snapshot, token: beforeMatchCancellation.Token);
+
+using var inFlightStop = new CancellationTokenSource();
+matchStages.Clear(); writes = 0;
+await Gate().RunAsync("chat-1", _ => Task.FromResult(snapshot), () => false, _ => {
+    writes++; inFlightStop.Cancel(); return Task.FromResult(matched);
+}, MatchReport, inFlightStop.Token);
+Require(writes == 1 && matchStages.Last() == GingerChatMatchStage.Verified,
+    "Stop hid a verified dispatched result");
+
+foreach (var uncertain in new[] { snapshot, matched with { LinkedProduct = "wrong" },
+    matched with { Item = matched.Item with { Position = 3 } }, matched with { ProcessId = 999 } })
+{
+    matchStages.Clear();
+    var uncertainGate = Gate();
+    await Refused(() => uncertainGate.RunAsync("chat-1", _ => Task.FromResult(snapshot), () => false,
+        _ => Task.FromResult(uncertain), MatchReport, CancellationToken.None), "Wrong post-action result accepted");
+    Require(!matchStages.Contains(GingerChatMatchStage.Verified), "Uncertain result reported as verified");
+    await RejectBeforeWrite(uncertainGate, snapshot);
+}
+var failedWriter = Gate();
+await Refused(() => failedWriter.RunAsync("chat-1", _ => Task.FromResult(snapshot), () => false,
+    _ => throw new IOException("dispatch uncertain"), MatchReport, CancellationToken.None), "Writer failure swallowed");
+await RejectBeforeWrite(failedWriter, snapshot);
+
+var concurrent = Gate();
+var readStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var releaseRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+writes = 0;
+var firstAttempt = concurrent.RunAsync("chat-1", async _ => {
+    readStarted.SetResult(); await releaseRead.Task; return snapshot;
+}, () => false, Write, (_, _) => { }, CancellationToken.None);
+await readStarted.Task;
+await Refused(() => concurrent.RunAsync("chat-1", _ => Task.FromResult(snapshot), () => false, Write,
+    (_, _) => { }, CancellationToken.None), "Concurrent click accepted");
+releaseRead.SetResult(); await firstAttempt;
+Require(writes == 1, "Concurrent confirmation wrote twice");
+
+foreach (var badCandidates in new[] { Array.Empty<string>(), new[] { "A", "A" }, new[] { "B" } })
+    await Refused(() => { _ = new GingerChatMatchGate(snapshot with { Item = snapshot.Item with { Candidates = badCandidates } }, "chat-1", "A"); return Task.CompletedTask; },
+        "Missing or duplicated proposed candidate accepted");
+await Refused(() => { _ = new GingerChatMatchGate(matched, "chat-1", "A"); return Task.CompletedTask; }, "Linked proposal accepted");
+var mutable = snapshot with { Item = snapshot.Item with { Candidates = ["A", "B"] } };
+var frozenGate = new GingerChatMatchGate(mutable, "chat-1", "A");
+mutable.Item.Candidates[1] = "C";
+await RejectBeforeWrite(frozenGate, mutable);
+Console.WriteLine("Ginger chat confirmation: one write, fresh identity, chat scope, expiry, prior claim, cancellation and verified result guards passed.");

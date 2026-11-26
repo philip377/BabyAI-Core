@@ -9,6 +9,7 @@ public sealed partial class MainWindow
     private async void GingerNavigationButton_Click(object sender, RoutedEventArgs e)
     {
         if (_gingerDialogOpen || _busy || _gingerRunning) return;
+        InvalidateGingerChatMatch();
         _gingerDialogOpen = true;
         GingerDesktopSession? session = null;
         GingerDesktopObservation? observation = null;

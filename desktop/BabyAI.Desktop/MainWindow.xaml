@@ -413,6 +413,20 @@
                                                    AutomationProperties.LiveSetting="Polite" />
                                     </StackPanel>
                                 </Border>
+                                <Border x:Name="GingerChatConfirmationCard" Visibility="Collapsed"
+                                        Background="#141D2437" CornerRadius="12" Padding="12">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="Проверка пары Ginger" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="GingerChatPairText" TextWrapping="Wrap"
+                                                   IsTextSelectionEnabled="True" />
+                                        <TextBlock Text="Проверь полные названия. Подтверждение разрешает одну привязку в открытом прайсе."
+                                                   FontSize="12" TextWrapping="Wrap" />
+                                        <Button x:Name="GingerChatConfirmButton" Content="Сопоставить эту пару"
+                                                Click="GingerChatConfirm_Click" />
+                                        <Button x:Name="GingerChatRejectButton" Content="Отклонить пару"
+                                                Click="GingerChatReject_Click" />
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </ScrollViewer>
                     </Border>

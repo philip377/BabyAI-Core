@@ -39,6 +39,8 @@ public sealed partial class MainWindow
 
     private async void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy || _gingerRunning) return;
+        InvalidateGingerChatMatch();
         var contentHost = new ContentControl
         {
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
