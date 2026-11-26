@@ -23,6 +23,8 @@ from .planner import Planner
 from .primus import Primus
 from .resident_native_brain import ResidentNativeBrainProvider
 from .runtime_trace import process_memory_metrics, trace
+from .ginger_local_vision import LocalGingerVision, LocalVisionError
+from .ginger_visual_pilot import GingerPilotError, observe_ginger_once
 from .screen_vision import ScreenCaptureStore
 from .tool_approval import PendingToolApproval, PendingToolApprovalStore
 from .windows_actions import APPLICATIONS
@@ -222,6 +224,44 @@ class DesktopCommands:
 
     def execute(self, command: str, payload: dict[str, object] | None = None) -> dict[str, object]:
         payload = payload or {}
+        if command == "ginger.preview":
+            # This narrow local-only command reads the OCR result from the
+            # bundled read-only Ginger script. It does NOT start UI automation,
+            # mutate an ERP record, approve rewards, or call a model.
+            from pathlib import Path
+            from .ginger_ocr_match_review import review_ginger_cpu_ocr_json
+
+            path_value = payload.get("report_path")
+            if not isinstance(path_value, str) or not path_value or len(path_value) > 1024:
+                raise DesktopCommandError("Не указан файл отчёта Ginger.")
+            downloads = (
+                Path(os.environ.get("USERPROFILE") or Path.home()) / "Downloads"
+            ).resolve()
+            try:
+                report = Path(path_value).resolve(strict=True)
+                # Defend against arbitrary file reads through the desktop
+                # worker and against paths escaping Downloads via symlinks.
+                if (
+                    report.name != "ginger-cpu-report.json"
+                    or not report.parent.name.startswith("ginger-cpu-test-")
+                    or report.parent.parent != downloads
+                ):
+                    raise DesktopCommandError(
+                        "Отчёт Ginger должен находиться в папке теста внутри Загрузок."
+                    )
+                review = review_ginger_cpu_ocr_json(report)
+            except (OSError, ValueError, TypeError) as exc:
+                if isinstance(exc, DesktopCommandError):
+                    raise
+                raise DesktopCommandError(
+                    "Не удалось прочитать проверенный локальный отчёт Ginger."
+                ) from exc
+            return {
+                "ok": True,
+                "command": command,
+                "review": review,
+            }
+
         if command == "chat":
             message = str(payload.get("message", "")).strip()
             if not message:
@@ -390,6 +430,35 @@ class DesktopCommands:
             if not store.delete(observation_id):
                 raise DesktopCommandError(f"Screen observation {observation_id} does not exist")
             return {"ok": True, "command": command, "observation_id": observation_id}
+
+        if command == "ginger.observe":
+            port = payload.get("port", 8080)
+            store = ScreenCaptureStore(
+                self.config.screen_captures_dir,
+                PermissionStore(self.config.permissions_file),
+            )
+            try:
+                result = observe_ginger_once(store, port=port)
+            except (GingerPilotError, LocalVisionError) as exc:
+                raise DesktopCommandError(str(exc)) from exc
+            return {"ok": True, "command": command, "ginger": result.as_dict()}
+
+        if command == "vision.analyze.local":
+            observation_id = str(payload.get("observation_id", "")).strip()
+            port = payload.get("port", 8080)
+            store = ScreenCaptureStore(
+                self.config.screen_captures_dir,
+                PermissionStore(self.config.permissions_file),
+            )
+            try:
+                observation = LocalGingerVision(store, port=port).analyze(observation_id)
+            except LocalVisionError as exc:
+                raise DesktopCommandError(str(exc)) from exc
+            return {
+                "ok": True,
+                "command": command,
+                "vision": observation.as_dict(),
+            }
 
         if command == "vision.action.propose":
             observation_id = str(payload.get("observation_id", "")).strip()

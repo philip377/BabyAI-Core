@@ -435,6 +435,7 @@ public sealed partial class MainWindow : Window
         _busy = busy;
         SendButton.IsEnabled = !busy;
         NewChatButton.IsEnabled = !busy;
+        GingerNavigationButton.IsEnabled = !busy;
         WorkspaceItems.IsHitTestVisible = !busy;
         RecentChatItems.IsHitTestVisible = !busy;
         RetryButton.IsEnabled = !busy;

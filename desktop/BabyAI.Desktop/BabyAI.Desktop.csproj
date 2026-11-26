@@ -21,6 +21,16 @@
     <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>
 
+  <!-- Bundle the previously validated read-only CPU OCR probe with the
+       desktop application. It is launched only by the explicit Ginger UI
+       button, never on startup or from untrusted model-generated commands. -->
+  <ItemGroup>
+    <Content Include="..\..\scripts\windows\test-ginger-cpu-ocr.ps1"
+             Link="Ginger\test-ginger-cpu-ocr.ps1"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <Target Name="CopyLooseXamlResourcesAfterPublish"
           AfterTargets="Publish"
           Condition="'$(WindowsPackageType)' == 'None' and '$(PublishSingleFile)' != 'true'">

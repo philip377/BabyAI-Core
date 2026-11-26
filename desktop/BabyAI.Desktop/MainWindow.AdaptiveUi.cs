@@ -306,6 +306,7 @@ public sealed partial class MainWindow
 
         ProfileLabel.Visibility = labelVisibility;
         SettingsNavigationLabel.Visibility = labelVisibility;
+        GingerNavigationLabel.Visibility = labelVisibility;
         VoiceNavigationLabel.Visibility = labelVisibility;
 
         NavigationToggleButton.HorizontalAlignment = _navigationExpanded
