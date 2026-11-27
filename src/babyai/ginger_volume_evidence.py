@@ -14,7 +14,7 @@ _COMPOSITE = re.compile(
     re.IGNORECASE,
 )
 _BEFORE_EXPRESSION = re.compile(
-    r'(?:[xх×*/+−\-–—~≈±]|(?<!\w)(?:около|примерно|до|от|about|approx\.?)|\d\s+)\s*\(?\s*$', re.IGNORECASE)
+    r'(?:[xх×*/+−\-–—~≈±]|(?<!\w)(?:около|примерно|до|от|about|approx\.?)|(?<!\w)\d+\s+)\s*\(?\s*$', re.IGNORECASE)
 _AFTER_EXPRESSION = re.compile(
     r'^\s*\(?\s*(?:[xх×*/+−\-–—±]\s*\d|(?:примерно|approx\.?)(?!\w))', re.IGNORECASE)
 

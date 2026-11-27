@@ -16,8 +16,14 @@ LESSON = "1. K7 означает тестер.\n\n2. Регистр не мен�
 def grounded_identity_match(monkeypatch):
     # Literal extraction is exercised separately and in the native-budget
     # integration below. Most tests isolate field parsing and aggregation.
-    monkeypatch.setattr("babyai.ginger_lesson_evidence.review_identity", lambda provider, source, candidates:
+    monkeypatch.setattr("babyai.ginger_lesson_evidence.review_identity", lambda provider, source, candidates, *, lesson:
         dict(source=source, candidates=[dict(candidate=candidates[0], identity="match")], can_match=False))
+    monkeypatch.setattr("babyai.ginger_lesson_evidence.review_markings", lambda *args, **kwargs:
+        marking_result())
+
+
+def marking_result(**updates):
+    return dict(attributes=dict(concentration="match", tester="match") | updates, can_match=False)
 
 
 def values(**updates):
@@ -51,7 +57,8 @@ def test_each_focused_comparison_receives_pair_and_all_lessons_unchanged_without
         dict(attribute=field, supplier=SUPPLIER, source=source, lesson=lesson, candidate=CANDIDATE)
         for field in FIELDS]
     assert result == dict(attributes=values(), can_match=False, identity_evidence=dict(
-        source=source, candidates=[dict(candidate=CANDIDATE, identity="match")], can_match=False))
+        source=source, candidates=[dict(candidate=CANDIDATE, identity="match")], can_match=False),
+        marking_evidence=marking_result())
     assert "candidate" not in result and "tools" not in result
     assert list(tmp_path.iterdir()) == []
 
@@ -76,14 +83,14 @@ def test_grounded_full_fragrance_can_reject_field_match_and_retains_evidence(mon
     evidence = dict(source=SOURCE, source_fields=dict(brand="Acme", fragrance="Bloom"),
                     candidates=[dict(candidate=CANDIDATE, identity=grounded)], can_match=False)
 
-    def check(provider, source, candidates):
-        checked.append((provider, source, candidates))
+    def check(provider, source, candidates, *, lesson):
+        checked.append((provider, source, candidates, lesson))
         return evidence
 
     monkeypatch.setattr("babyai.ginger_lesson_evidence.review_identity", check)
     model = Model()
     result = review(model)
-    assert checked == [(model, SOURCE, [CANDIDATE])]
+    assert checked == [(model, SOURCE, [CANDIDATE], LESSON)]
     assert result["attributes"] == values(identity=grounded)
     assert result["identity_evidence"] == evidence
     assert result["can_match"] is False and "candidate" not in result
@@ -102,7 +109,7 @@ def test_grounded_review_never_runs_to_promote_an_existing_identity_nonmatch(mon
 def test_failed_grounded_review_stops_proposal_without_fallback(monkeypatch):
     checked = []
 
-    def failed(provider, source, candidates):
+    def failed(provider, source, candidates, *, lesson):
         checked.append((source, candidates))
         raise ValueError("Непроверяемые фрагменты названия")
 
@@ -114,6 +121,44 @@ def test_failed_grounded_review_stops_proposal_without_fallback(monkeypatch):
     assert len(model.calls) == 5
 
 
+@pytest.mark.parametrize("field", ["concentration", "tester"])
+@pytest.mark.parametrize("status", ["unknown", "conflict"])
+def test_separately_extracted_markings_veto_unanimous_pair_checks(monkeypatch, field, status):
+    checked = []
+    evidence = marking_result(**{field: status})
+
+    def check(provider, source, candidate, *, lesson):
+        checked.append((provider, source, candidate, lesson))
+        return evidence
+
+    monkeypatch.setattr("babyai.ginger_lesson_evidence.review_markings", check)
+    model = Model()
+    result = review(model)
+    assert checked == [(model, SOURCE, CANDIDATE, LESSON)]
+    assert result["attributes"] == values(**{field: status})
+    assert result["marking_evidence"] == evidence
+    assert result["can_match"] is False and "candidate" not in result
+
+
+@pytest.mark.parametrize("field", FIELDS)
+@pytest.mark.parametrize("status", ["unknown", "conflict"])
+def test_marking_extraction_never_runs_to_rescue_prior_nonmatch(monkeypatch, field, status):
+    monkeypatch.setattr("babyai.ginger_lesson_evidence.review_markings",
+                        lambda *args, **kwargs: pytest.fail("No rescue of a rejected proposal"))
+    result = review(Model(values(**{field: status})))
+    assert result["attributes"] == values(**{field: status})
+    assert "marking_evidence" not in result
+
+
+def test_failed_marking_extraction_stops_proposal_without_fallback(monkeypatch):
+    def failed(*args, **kwargs):
+        raise ValueError("Непроверяемые обозначения")
+
+    monkeypatch.setattr("babyai.ginger_lesson_evidence.review_markings", failed)
+    with pytest.raises(ValueError, match="Непроверяемые обозначения"):
+        review(Model())
+
+
 @pytest.mark.parametrize("source,candidate,model_volume,expected", [
     ("Acme Bloom edp 100ml", "Acme BLOOM edp 50ml", "match", "conflict"),
     ("Acme Bloom edp 100ml", "Acme BLOOM edp 50ml", "unknown", "conflict"),
@@ -123,9 +168,12 @@ def test_failed_grounded_review_stops_proposal_without_fallback(monkeypatch):
     ("Acme Bloom edp", "Acme BLOOM edp 50ml", "match", "unknown"),
     ("Acme Bloom edp 2x30ml", "Acme BLOOM edp 60ml", "match", "unknown"),
     ("Acme Bloom edp 2x30ml", "Acme BLOOM edp 60ml", "conflict", "conflict"),
-    # Artificial numbered codes next to a measure remain ambiguous to the pure
-    # parser. Lesson decoding must not silently weaken its quantity safeguard.
-    ("Acme Bloom Z9 K4 100ml", "Acme BLOOM edp 100ml tester", "match", "unknown"),
+    # A digit inside an alphanumeric marking is not a standalone quantity.
+    # The literal 100ml remains checked; a separate number stays ambiguous.
+    ("Acme Bloom Z9 K4 100ml", "Acme BLOOM edp 100ml tester", "match", "match"),
+    ("Acme Bloom Z9 K4 100ml", "Acme BLOOM edp 50ml tester", "match", "conflict"),
+    ("Acme Bloom Z9 K4 100ml", "Acme BLOOM edp 100ml tester", "unknown", "unknown"),
+    ("Acme Bloom 4 100ml", "Acme BLOOM edp 100ml tester", "match", "unknown"),
 ])
 def test_explicit_volume_guard_only_restricts_model_proposal(source, candidate, model_volume, expected):
     result = review(Model(values(volume=model_volume)), source=source, candidate=candidate)

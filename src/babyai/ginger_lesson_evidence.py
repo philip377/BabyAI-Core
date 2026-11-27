@@ -7,6 +7,7 @@ import json
 
 from .ginger_identity_evidence import review_identity
 from .ginger_volume_evidence import review_volume
+from .ginger_marking_evidence import review_markings
 
 
 _VALUES = {"match", "conflict", "unknown"}
@@ -106,7 +107,7 @@ def review_lesson_candidate(provider, supplier, source, lesson, candidate):
         # The broad field verdict can still overlook a flanker. Reuse extraction
         # of literal brand/full-fragrance spans rather than asking the same pair
         # question again. This check may only withdraw the initial identity match.
-        identity_evidence = review_identity(provider, source, [candidate])
+        identity_evidence = review_identity(provider, source, [candidate], lesson=lesson)
         identity = identity_evidence["candidates"][0]["identity"]
         if identity in ("unknown", "conflict"):
             attributes["identity"] = identity
@@ -121,4 +122,13 @@ def review_lesson_candidate(provider, supplier, source, lesson, candidate):
     result = dict(attributes=attributes, can_match=False)
     if identity_evidence is not None:
         result["identity_evidence"] = identity_evidence
+    if all(value == "match" for value in attributes.values()):
+        # A pair-level yes/no can miss a difference even while explaining it.
+        # Extract each title in isolation, then compare values in Python.
+        # This is only a veto: it cannot rescue an already rejected proposal.
+        markings = review_markings(provider, source, candidate, lesson=lesson)
+        result["marking_evidence"] = markings
+        for field, status in markings["attributes"].items():
+            if status != "match":
+                attributes[field] = status
     return result

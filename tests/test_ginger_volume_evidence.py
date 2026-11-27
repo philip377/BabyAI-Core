@@ -17,6 +17,19 @@ def test_explicit_units_and_decimal_quantities(source, target, ml):
     assert result['can_match'] is False
 
 
+@pytest.mark.parametrize('name', [
+    'Acme Bloom Z9 K4', 'Acme Bloom Z9', 'Acme Bloom К4',
+    'Acme No5', 'Acme Fragrance24', 'Acme Аромат24',
+])
+def test_digits_within_words_do_not_make_the_following_measure_a_quantity(name):
+    title = name + ' 100ml'
+    for result in (review_volume(title, ['Acme 100ml']), review_volume('Acme 100ml', [title])):
+        assert result['source_measure']['millilitres'] == '100'
+        assert result['candidates'][0]['measure']['millilitres'] == '100'
+        assert result['candidates'][0]['volume'] == 'match'
+        assert result['can_match'] is False
+
+
 @pytest.mark.parametrize('notation', [
     '2x30ml', '2 х 30мл', '30ml x 2', '30ml*2', '30ml / 2',
     '30ml (x2)', '2x(30ml)', '2 × (30ml)', '30ml 2-pack',
@@ -24,7 +37,7 @@ def test_explicit_units_and_decimal_quantities(source, target, ml):
     'набор 30ml', 'set 30ml', '2 шт. 30ml', '30ml 2pcs', '2 bottles 30ml',
     'примерно 100ml', '~100ml', '100ml ±5', 'about 100ml', '100ml approx.',
     '-100ml', '0ml', '100', 'EDP100ml', '100ml2', '.5ml', '1e3ml',
-    '1,234.5ml', '1 250ml', '100mi',
+    '1,234.5ml', '1 250ml', '2 100ml', '12 100ml', '123 100ml', '100mi',
 ])
 def test_composite_absent_or_uncertain_volume_never_becomes_a_single_bottle(notation):
     title = 'Acme Bloom ' + notation
