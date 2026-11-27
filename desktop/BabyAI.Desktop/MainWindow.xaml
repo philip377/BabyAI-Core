@@ -427,6 +427,19 @@
                                                 Click="GingerChatReject_Click" />
                                     </StackPanel>
                                 </Border>
+                                <Expander x:Name="GingerBottleCard" Visibility="Collapsed"
+                                          Header="Флакон и упаковка — интернет-проверка" HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Stretch">
+                                    <StackPanel Spacing="10">
+                                        <TextBox x:Name="GingerBottleQuery" Header="Название для поиска" MaxLength="240" />
+                                        <TextBox x:Name="GingerBottleUrl" Header="Ссылка на страницу, если уже есть" MaxLength="2048" PlaceholderText="https://…" />
+                                        <TextBlock Text="В интернет уйдёт только указанное название. Фотографии и описания не подтверждают автоматически соответствие товару."
+                                                   FontSize="12" TextWrapping="Wrap" />
+                                        <Button x:Name="GingerBottleSearchButton" Content="Найти флакон в интернете" Click="GingerBottleSearch_Click" />
+                                        <TextBlock x:Name="GingerBottleStatus" TextWrapping="Wrap" IsTextSelectionEnabled="True" AutomationProperties.LiveSetting="Polite" />
+                                        <StackPanel x:Name="GingerBottleSources" Spacing="18" />
+                                    </StackPanel>
+                                </Expander>
                                 <Expander x:Name="GingerChatReviewCard" Visibility="Collapsed"
                                           Header="Оценить ответ UNIX" HorizontalAlignment="Stretch"
                                           HorizontalContentAlignment="Stretch">

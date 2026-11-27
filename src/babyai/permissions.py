@@ -20,6 +20,7 @@ class Capability(StrEnum):
     WINDOW_ACTIVATE = "window.activate"
     SYSTEM_LOCK = "system.lock"
     SCREEN_CAPTURE = "screen.capture"
+    PUBLIC_WEB_READ = "web.public_read"
 
 
 @dataclass(slots=True)

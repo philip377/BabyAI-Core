@@ -34,7 +34,7 @@ def test_agent_result_stays_in_its_chat_without_model_or_erp_actions(tmp_path, m
 
 @pytest.mark.parametrize('payload', [
     {'message': '', 'result': 'done'}, {'message': 'go', 'result': ''},
-    {'message': 'x' * 201, 'result': 'done'}, {'message': 'go', 'result': 'x' * 60001},
+    {'message': 'x' * 501, 'result': 'done'}, {'message': 'go', 'result': 'x' * 60001},
     {'message': ['go'], 'result': 'done'},
 ])
 def test_invalid_result_does_not_append_messages(tmp_path, payload):
@@ -43,3 +43,11 @@ def test_invalid_result_does_not_append_messages(tmp_path, payload):
     with pytest.raises(DesktopCommandError):
         commands.execute('ginger.chat.record', dict(payload, chat_id=chat))
     assert commands.execute('chat.current')['messages'] == []
+
+
+def test_long_bottle_query_is_preserved_in_its_chat(tmp_path):
+    commands = WorkspaceDesktopCommands(BabyAIConfig(data_dir=tmp_path, provider='echo'))
+    chat = commands.execute('chat.current')['active_chat_id']
+    message = 'Найди флакон: ' + 'A' * 240
+    commands.execute('ginger.chat.record', dict(chat_id=chat, message=message, result='Источник недоступен.'))
+    assert commands.execute('chat.current')['messages'][0]['content'] == message

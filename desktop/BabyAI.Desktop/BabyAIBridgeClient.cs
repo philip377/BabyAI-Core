@@ -110,6 +110,15 @@ public sealed class BabyAIBridgeClient : IDisposable
         return document.RootElement.Clone();
     }
 
+    public async Task<JsonElement> ResearchGingerBottleAsync(string query, string sourceUrl, CancellationToken cancellationToken)
+    {
+        var json = await ExecuteAsync("ginger.bottle.research", JsonSerializer.Serialize(new {
+            query, source_url = sourceUrl, allow_public_web = true
+        }), cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
     public async Task<JsonElement> PreviewGingerLessonAsync(string supplier, string source,
         string lesson, IEnumerable<string> candidates, CancellationToken cancellationToken)
     {

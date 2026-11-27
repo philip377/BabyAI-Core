@@ -205,6 +205,8 @@ public sealed partial class MainWindow
                     return FormatGingerChatProposal(result);
                 }, Report);
             var proposal = await flow.RunAsync(cancellation.Token);
+            if (observation is not null && chatId is not null)
+                ShowBottleResearch(chatId, observation.Title);
             transcript.AppendLine().AppendLine(proposal);
             if (review is not null)
             {

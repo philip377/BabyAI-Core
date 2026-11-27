@@ -279,6 +279,21 @@ class DesktopCommands:
             return {"ok": True, "command": command,
                     **review_intent(self._provider(), payload.get("message"))}
 
+        if command == "ginger.bottle.research":
+            from .ginger_bottle_research import research, validate_query
+            from .permissions import Capability
+            query = validate_query(payload.get("query"))
+            # This command belongs to the trusted Desktop surface, not the
+            # model tool catalogue. A click grants one bounded research only.
+            permissions = PermissionStore(self.config.permissions_file)
+            if payload.get("allow_public_web") is not True:
+                permissions.require(Capability.PUBLIC_WEB_READ)
+            with permissions.temporary_grant(Capability.PUBLIC_WEB_READ):
+                permissions.require(Capability.PUBLIC_WEB_READ)
+                result = research(query, source_url=payload.get("source_url", ""),
+                                  provider=self._provider())
+            return {"ok": True, "command": command, **result}
+
         if command in {"ginger.teach.preview", "ginger.recognize.preview"}:
             from .ginger_teacher import consult
             return {"ok": True, "command": command,

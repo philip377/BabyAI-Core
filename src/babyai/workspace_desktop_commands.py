@@ -222,7 +222,7 @@ class WorkspaceDesktopCommands(DesktopCommands):
             # Trusted desktop event log only; not an agent tool, lesson, or
             # authorization. Preserve normal per-chat history/privacy settings.
             message, result = payload.get("message"), payload.get("result")
-            if (not isinstance(message, str) or not 1 <= len(message.strip()) <= 200
+            if (not isinstance(message, str) or not 1 <= len(message.strip()) <= 500
                     or not isinstance(result, str) or not 1 <= len(result.strip()) <= 60000):
                 raise DesktopCommandError("Нужны запрос и ограниченный результат агента Ginger.")
             if payload.get("chat_id") != self._current_chat_id():

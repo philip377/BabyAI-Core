@@ -8,6 +8,7 @@ public sealed partial class MainWindow
 
     private void InvalidateGingerChatContext()
     {
+        InvalidateBottleResearch();
         InvalidateGingerChatMatch();
         InvalidateGingerChatLesson();
         InvalidateGingerChatReview();

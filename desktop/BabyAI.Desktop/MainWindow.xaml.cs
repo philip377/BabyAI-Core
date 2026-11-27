@@ -229,6 +229,8 @@ public sealed partial class MainWindow : Window
         if (message.Length == 0)
             return;
 
+        if (await TryRunBottleResearchFromChatAsync(message))
+            return;
         InvalidateGingerChatContext();
         if (await TryRouteGingerFromChatAsync(message))
             return;
@@ -459,6 +461,9 @@ public sealed partial class MainWindow : Window
         _busy = busy;
         UpdateGingerChatReviewControls();
         UpdateGingerChatLessonControls();
+        GingerBottleSearchButton.IsEnabled = !busy;
+        GingerBottleQuery.IsEnabled = !busy;
+        GingerBottleUrl.IsEnabled = !busy;
         SendButton.IsEnabled = !busy;
         NewChatButton.IsEnabled = !busy;
         GingerNavigationButton.IsEnabled = !busy;
