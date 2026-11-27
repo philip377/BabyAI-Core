@@ -45,6 +45,8 @@ public sealed partial class MainWindow
         var transcript = new StringBuilder($"{pending.Source.Supplier} · документ {pending.Source.Document} · строка {pending.Source.Position}\n" +
             $"У поставщика: {pending.Source.Title}\nНаш товар: {pending.Gate.Candidate}\n");
         using var cancellation = new CancellationTokenSource();
+        var taskRunId = Guid.NewGuid().ToString("N");
+        var taskStarted = DateTimeOffset.UtcNow;
         GingerProgressTurn? progress = null;
         GingerDesktopSession? session = null;
         OverlappedPresenter? minimized = null;
@@ -151,6 +153,10 @@ public sealed partial class MainWindow
                         : "Сопоставление проверено в Ginger. Показанная пара связана."
                     : matchCancelled ? "Остановлено. Результат сопоставления не подтверждён; эта попытка не повторяется."
                         : "Результат сопоставления не подтверждён. Нужна проверка; автоматического повтора нет.";
+                RecordGingerTaskResult(pending.ChatId, taskRunId, taskStarted,
+                    matchVerified ? GingerChatTaskState.Matched
+                        : matchCancelled ? GingerChatTaskState.Cancelled : GingerChatTaskState.Failed,
+                    0, summary);
                 var details = transcript.ToString();
                 var historyResult = summary + "\n\n" + details;
                 BestEffort("final card failed", () =>
@@ -190,6 +196,8 @@ public sealed partial class MainWindow
         StopVoiceListening(updateUi: false);
         const string message = "Отклоняю показанную пару Ginger.";
         var result = $"Пара отклонена: {pending.Source.Title} → {pending.Gate.Candidate}. Сопоставление не выполнялось.";
+        RecordGingerTaskResult(pending.ChatId, Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow,
+            GingerChatTaskState.Rejected, 0, "Показанная пара отклонена пользователем. Сопоставление не выполнялось.");
         SetBusy(true);
         AppendConversation("Вы", message);
         AppendConversation("UNIX", result);

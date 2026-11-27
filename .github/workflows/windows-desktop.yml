@@ -29,6 +29,15 @@ jobs:
       - name: Test bounded Ginger filter preparation and incomplete observation guards
         shell: pwsh
         run: dotnet run --project tests/GingerDesktopSession.Smoke/GingerDesktopSession.Smoke.csproj -c Release
+      - name: Test grounded Ginger status and contextual follow-ups without desktop input
+        shell: pwsh
+        run: |
+          dotnet run --project tests/GingerTaskStatus.Smoke/GingerTaskStatus.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Ginger task status checks failed' }
+          dotnet run --project tests/GingerChatFollowUp.Smoke/GingerChatFollowUp.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Ginger follow-up checks failed' }
+          dotnet run --project tests/GingerChatStatusRouting.Smoke/GingerChatStatusRouting.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Ginger status routing checks failed' }
       - name: Test Ginger driver import preserves explicit confirmation
         shell: powershell
         run: ./tests/ginger-driver-import-smoke.ps1

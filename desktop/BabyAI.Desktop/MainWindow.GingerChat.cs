@@ -38,6 +38,7 @@ public sealed partial class MainWindow
 
     private async Task<bool> TryRouteGingerFromChatAsync(string message)
     {
+        if (await TryRouteGingerFollowUpAsync(message)) return true;
         if (GingerChatIntent.IsStart(message))
         {
             await RunGingerFromChatAsync(message);
@@ -99,6 +100,7 @@ public sealed partial class MainWindow
         }
         if (reply is not null)
         {
+            ClearGingerFollowUp();
             // A failed, unclear or cancelled interpretation never falls through
             // to the general agent with a half-understood executable request.
             if (selectedChat != _selectedChatId) return true;
@@ -135,6 +137,9 @@ public sealed partial class MainWindow
         _chatCancellation = _gingerCancellation = cancellation;
         _gingerRunning = true;
         var transcript = new StringBuilder();
+        var taskRunId = Guid.NewGuid().ToString("N");
+        var taskStarted = DateTimeOffset.UtcNow;
+        var taskState = GingerChatTaskState.Failed;
         GingerProgressTurn? progress = null;
         var summary = "Подготовка остановлена. Подробности доступны ниже.";
         string? failureStatus = null;
@@ -266,12 +271,15 @@ public sealed partial class MainWindow
             session.Record(proposal);
             if (scan?.ReachedEnd == true)
             {
+                taskState = GingerChatTaskState.End;
                 summary = $"Дошёл до конца открытого прайса. Отложено без кандидатов: {scan.DeferredCount}. " +
                     $"Уже сопоставленных строк пройдено: {scan.AlreadyLinkedCount}.";
                 notificationKind = deferred.Count > 0 ? GingerNotificationKind.ManualReview : GingerNotificationKind.RunFinished;
             }
             else
             {
+                taskState = _gingerChatConfirmation is not null ? GingerChatTaskState.PairReady
+                    : observation?.Linked == true ? GingerChatTaskState.AlreadyLinked : GingerChatTaskState.Review;
                 notificationKind = GingerTaskNotification.ForPreparation(
                     observation?.Linked == true, _gingerChatConfirmation is not null);
                 summary = _gingerChatConfirmation is not null
@@ -283,6 +291,7 @@ public sealed partial class MainWindow
         }
         catch (TimeoutException ex)
         {
+            taskState = GingerChatTaskState.TimedOut;
             notificationKind = GingerNotificationKind.Failed;
             summary = GingerChatOutcomeText.TimedOut(deferred.Count);
             failureStatus = "время ожидания истекло";
@@ -293,6 +302,7 @@ public sealed partial class MainWindow
         }
         catch (OperationCanceledException)
         {
+            taskState = GingerChatTaskState.Cancelled;
             notificationKind = GingerNotificationKind.Cancelled;
             summary = GingerChatOutcomeText.Cancelled(cancellation.IsCancellationRequested, deferred.Count);
             failureStatus = cancellation.IsCancellationRequested ? "остановлено пользователем" : "прервано";
@@ -301,6 +311,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
+            taskState = GingerChatTaskState.Failed;
             summary = GingerChatOutcomeText.Failed(deferred.Count);
             failureStatus = "ошибка";
             InvalidateGingerChatContext();
@@ -311,6 +322,7 @@ public sealed partial class MainWindow
         }
         finally
         {
+            RecordGingerTaskResult(chatId, taskRunId, taskStarted, taskState, deferred.Count, summary);
             try
             {
                 try
