@@ -9,6 +9,12 @@ public sealed partial class MainWindow
     private void InvalidateGingerChatContext()
     {
         InvalidateGingerChatMatch();
+        InvalidateGingerChatLesson();
+        InvalidateGingerChatReview();
+    }
+
+    private void InvalidateGingerChatReview()
+    {
         _gingerChatReview?.Invalidate();
         _gingerChatReview = null;
         GingerChatReviewCard.Visibility = Visibility.Collapsed;

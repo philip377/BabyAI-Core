@@ -121,10 +121,15 @@ public sealed partial class MainWindow
                 }, Report);
             var proposal = await flow.RunAsync(cancellation.Token);
             transcript.AppendLine().AppendLine(proposal);
-            if (review is not null) ShowGingerChatReview(review);
+            if (review is not null)
+            {
+                ShowGingerChatReview(review);
+                ShowGingerChatLesson(new GingerChatLessonReview(chatId!, Item(observation!), new GingerLearning()));
+            }
             if (observation is not null && proposedCandidate is not null && chatId is not null)
                 transcript.AppendLine(OfferGingerChatMatch(session, observation, chatId, proposedCandidate));
-            transcript.AppendLine("Оценить показанный ответ и отозвать оценку можно здесь, в чате. Подтверждение языкового урока пока находится в окне агента Ginger.");
+            if (review is not null)
+                transcript.AppendLine("Здесь можно оценить ответ или объяснить правило поставщика. Перед сохранением урока проверь понимание модели в блоке «Объяснить UNIX».");
             ReplaceConversationTurn(turn, "UNIX", transcript.ToString());
             session.Record(proposal);
         }

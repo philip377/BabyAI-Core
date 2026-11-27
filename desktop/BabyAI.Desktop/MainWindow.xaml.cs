@@ -461,6 +461,7 @@ public sealed partial class MainWindow : Window
     {
         _busy = busy;
         UpdateGingerChatReviewControls();
+        UpdateGingerChatLessonControls();
         SendButton.IsEnabled = !busy;
         NewChatButton.IsEnabled = !busy;
         GingerNavigationButton.IsEnabled = !busy;

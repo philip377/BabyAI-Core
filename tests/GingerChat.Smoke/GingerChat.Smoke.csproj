@@ -6,4 +6,8 @@
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatFlow.cs" Link="GingerChatFlow.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatMatchGate.cs" Link="GingerChatMatchGate.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatAnswerReview.cs" Link="GingerChatAnswerReview.cs" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerChatLessonReview.cs" Link="GingerChatLessonReview.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerLearning.cs" Link="GingerLearning.cs" />
+  </ItemGroup>
 </Project>

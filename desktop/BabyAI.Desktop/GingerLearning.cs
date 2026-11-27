@@ -26,15 +26,34 @@ public sealed class GingerLearning
             .LastOrDefault(item => item.Supplier == supplier);
     }
     public void SaveLanguageLesson(LanguageLesson lesson)
+        => WriteLanguageLesson(lesson, null, compare: false);
+
+    public void SaveLanguageLessonIfUnchanged(LanguageLesson lesson, LanguageLesson? expected)
+        => WriteLanguageLesson(lesson, expected, compare: true);
+
+    private void WriteLanguageLesson(LanguageLesson lesson, LanguageLesson? expected, bool compare)
     {
         if (string.IsNullOrWhiteSpace(lesson.Supplier) || string.IsNullOrWhiteSpace(lesson.Text)
             || lesson.Text.Length > 4000 || string.IsNullOrWhiteSpace(lesson.Understanding) || lesson.Understanding.Length > 4000)
             throw new InvalidDataException("Нужны объяснение и проверенное понимание урока.");
         var folder = Path.Combine(_directory, "language-lessons");
         Directory.CreateDirectory(folder);
-        using var stream = new FileStream(Path.Combine(folder, DateTime.UtcNow.ToString("yyyyMMddHHmmssfffffff")
-            + "-" + Guid.NewGuid().ToString("N") + ".json"), FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        JsonSerializer.Serialize(stream, lesson); stream.Flush(true);
+        // All writers, including the agent dialog, share this lock. Readers see
+        // only complete immutable JSON files; an interrupted staging file is ignored.
+        using var writeLock = new FileStream(Path.Combine(folder, ".write.lock"),
+            FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        if (compare && ReadLanguageLesson(lesson.Supplier) != expected)
+            throw new InvalidOperationException("Урок уже изменён в другом окне. Заново прочитай прайс и проверь сохранённый урок.");
+        var path = Path.Combine(folder, DateTime.UtcNow.ToString("yyyyMMddHHmmssfffffff")
+            + "-" + Guid.NewGuid().ToString("N") + ".json");
+        var pending = path + ".pending";
+        try
+        {
+            using (var stream = new FileStream(pending, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            { JsonSerializer.Serialize(stream, lesson); stream.Flush(true); }
+            File.Move(pending, path);
+        }
+        finally { if (File.Exists(pending)) File.Delete(pending); }
     }
     public sealed record ConditionRule(string Supplier, bool Enabled, DateTimeOffset RecordedAt);
     public void TeachDentedTesterRule(string supplier, bool enabled)

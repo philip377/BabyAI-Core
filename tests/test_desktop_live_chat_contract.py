@@ -9,7 +9,9 @@ def test_ginger_review_and_confirmation_belong_to_conversation_not_sidebar() -> 
     conversation = next(item for item in tree.iter() if item.get(name) == "ConversationScroller")
     children = {item.get(name) for item in conversation.iter()}
     assert {"GingerChatConfirmationCard", "GingerChatReviewCard", "GingerChatScore",
-            "GingerChatRateButton", "GingerChatRevokeRatingButton"} <= children
+            "GingerChatRateButton", "GingerChatRevokeRatingButton", "GingerChatLessonCard",
+            "GingerChatPreviewLessonButton", "GingerChatSaveLessonButton",
+            "GingerChatRevokeLessonButton"} <= children
 
 
 def test_desktop_live_chat_exposes_transcript_runtime_and_stop_controls() -> None:
