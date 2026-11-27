@@ -519,6 +519,7 @@ public sealed partial class MainWindow : Window
     private void RenderConversation()
     {
         ConversationText.Text = string.Join("\n\n", _conversation);
+        RestoreGingerProgressTurn();
         ConversationScroller.UpdateLayout();
         ConversationScroller.ChangeView(null, ConversationScroller.ScrollableHeight, null);
     }

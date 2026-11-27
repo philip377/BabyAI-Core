@@ -119,7 +119,8 @@ public sealed partial class MainWindow
         return true;
     }
 
-    private async Task RunGingerFromChatAsync(string message, string? expectedChatId = null)
+    private async Task RunGingerFromChatAsync(string message, string? expectedChatId = null,
+        GingerDeferredRow? revisit = null)
     {
         if (_busy || _gingerRunning || _gingerDialogOpen || _agentsDialogOpen) return;
         if (ApprovalCard.Visibility == Visibility.Visible)
@@ -133,11 +134,10 @@ public sealed partial class MainWindow
         using var cancellation = new CancellationTokenSource();
         _chatCancellation = _gingerCancellation = cancellation;
         _gingerRunning = true;
-        SetBusy(true, canStop: true);
-        AppendConversation("Вы", message);
-        MessageBox.Text = string.Empty;
         var transcript = new StringBuilder();
-        var turn = CreateConversationTurn("UNIX", "Передаю задачу агенту Ginger…");
+        GingerProgressTurn? progress = null;
+        var summary = "Подготовка остановлена. Подробности доступны ниже.";
+        var deferred = new List<GingerDeferredRow>();
         GingerDesktopSession? session = null;
         GingerDesktopObservation? observation = null;
         string? proposedCandidate = null;
@@ -149,16 +149,16 @@ public sealed partial class MainWindow
         void Report(GingerChatStage stage, string text)
         {
             transcript.AppendLine(text);
-            ReplaceConversationTurn(turn, "UNIX", transcript.ToString());
             session?.Record(text);
             SaveGingerLogLine(text);
-            var active = stage is GingerChatStage.Started or GingerChatStage.Reading
-                or GingerChatStage.Filtering or GingerChatStage.Comparing;
-            ShowGingerChatStep(text, active);
+            progress?.Report(stage, text);
+            // The card owns the active step animation; do not show the legacy dots as well.
+            ShowGingerChatStep(text, false);
             SetGingerPhase(stage switch
             {
                 GingerChatStage.Cancelled => GingerCompanionPhase.Cancelled,
                 GingerChatStage.Failed => GingerCompanionPhase.Failed,
+                GingerChatStage.Completed => GingerCompanionPhase.Completed,
                 GingerChatStage.Review or GingerChatStage.Empty => GingerCompanionPhase.Reviewing,
                 GingerChatStage.Comparing => GingerCompanionPhase.Checking,
                 _ => GingerCompanionPhase.Reading
@@ -167,6 +167,7 @@ public sealed partial class MainWindow
             {
                 GingerChatStage.Failed => OrbState.Error,
                 GingerChatStage.Cancelled => OrbState.Idle,
+                GingerChatStage.Completed => OrbState.Done,
                 GingerChatStage.Review or GingerChatStage.Empty => OrbState.Done,
                 GingerChatStage.Comparing => OrbState.Thinking,
                 _ => OrbState.Executing
@@ -174,38 +175,79 @@ public sealed partial class MainWindow
         }
         try
         {
+            SetBusy(true, canStop: true);
+            AppendConversation("Вы", message);
+            MessageBox.Text = string.Empty;
+            progress = CreateGingerProgressTurn();
             chatId = (await _bridge.NavigationAsync("chat.current")).GetProperty("active_chat_id").GetString();
             cancellation.Token.ThrowIfCancellationRequested();
             if (expectedChatId is not null && chatId != expectedChatId)
                 throw new OperationCanceledException("Чат изменился после разбора задания.");
+            if (string.IsNullOrWhiteSpace(chatId))
+                throw new InvalidDataException("Не удалось определить чат для сохранения отложенных строк.");
             session = new GingerDesktopSession();
-            var flow = new GingerChatFlow(
-                async token =>
-                {
-                    SetGingerCaptureMode(true);
-                    observation = await session.ObserveAsync(token, prepare: true);
-                    return Item(observation);
-                },
-                async token =>
-                {
-                    observation = await session.PrepareFiltersAsync(observation!, token);
-                    return Item(observation);
-                },
-                async (item, token) =>
-                {
-                    SetGingerCaptureMode(false);
-                    var lessons = new GingerLearning().ReadLanguageLessons(item.Supplier);
-                    var lesson = GingerLearning.ComposeLanguageLessons(lessons);
-                    var result = await _bridge.PreviewGingerLessonAsync(item.Supplier, item.Title,
-                        lesson, item.Candidates, token);
-                    token.ThrowIfCancellationRequested();
-                    proposedCandidate = result.GetProperty("candidate").GetString();
-                    review = new GingerChatAnswerReview(chatId!, JsonSerializer.SerializeToElement(new {
-                        request = new { supplier = item.Supplier, source = item.Title, lesson, candidates = item.Candidates }, result
-                    }));
-                    return FormatGingerChatProposal(result);
-                }, Report);
-            var proposal = await flow.RunAsync(cancellation.Token);
+            static GingerChatScanRow Row(GingerDesktopObservation value) => new(Item(value), value.Count,
+                value.Data.GetProperty("process_id").GetInt64(), value.Source.GetProperty("TableHandle").GetInt64(), value.Directory);
+            async Task<GingerChatScanRow> Read(CancellationToken token)
+            {
+                SetGingerCaptureMode(true);
+                observation = await ReadGingerChatStartAsync(session, revisit, token);
+                return Row(observation);
+            }
+            async Task<GingerChatScanRow> Filter(GingerChatScanRow before, CancellationToken token)
+            {
+                if (observation?.Directory != before.ObservationDirectory)
+                    throw new InvalidDataException("Наблюдение строки изменилось до подготовки фильтров.");
+                observation = await session.PrepareFiltersAsync(observation, token);
+                // Even a plan with no new stars needs a fresh read before deferring.
+                if (observation.Candidates.Length == 0)
+                    observation = await session.ObserveAsync(token);
+                return Row(observation);
+            }
+            async Task<string> Compare(GingerChatItem item, CancellationToken token)
+            {
+                SetGingerCaptureMode(false);
+                var lessons = new GingerLearning().ReadLanguageLessons(item.Supplier);
+                var lesson = GingerLearning.ComposeLanguageLessons(lessons);
+                var result = await _bridge.PreviewGingerLessonAsync(item.Supplier, item.Title,
+                    lesson, item.Candidates, token);
+                token.ThrowIfCancellationRequested();
+                proposedCandidate = result.GetProperty("candidate").GetString();
+                review = new GingerChatAnswerReview(chatId!, JsonSerializer.SerializeToElement(new {
+                    request = new { supplier = item.Supplier, source = item.Title, lesson, candidates = item.Candidates }, result
+                }));
+                return FormatGingerChatProposal(result);
+            }
+            string proposal;
+            GingerChatScanResult? scan = null;
+            if (revisit is not null)
+            {
+                // An explicit review of a saved row must stay on that row, even when still empty.
+                var one = new GingerChatFlow(async token => (await Read(token)).Item,
+                    async token => (await Filter(Row(observation!), token)).Item, Compare, Report);
+                proposal = await one.RunAsync(cancellation.Token);
+            }
+            else
+            {
+                var flow = new GingerChatScanFlow(Read, Filter,
+                    async (before, token) =>
+                    {
+                        if (observation?.Directory != before.ObservationDirectory)
+                            throw new InvalidDataException("Наблюдение изменилось до перехода к следующей строке.");
+                        SetGingerCaptureMode(true);
+                        observation = await session.ObserveAsync(token, observation, before.Item.Position + 1);
+                        return Row(observation);
+                    },
+                    async (before, token) =>
+                    {
+                        var saved = await Task.Run(() => new GingerDeferredRows().Add(before.Item,
+                            chatId!, before.ObservationDirectory), token);
+                        deferred.Add(saved);
+                    }, Compare, Report);
+                scan = await flow.RunAsync(cancellation.Token);
+                proposal = scan.Proposal is null ? "В открытом прайсе больше нет следующих строк."
+                    : $"{scan.Row.Item.Supplier} · документ {scan.Row.Item.Document} · строка {scan.Row.Item.Position}\n{scan.Row.Item.Title}\n{scan.Proposal}";
+            }
             if (observation is not null && chatId is not null)
                 ShowBottleResearch(chatId, observation.Title);
             transcript.AppendLine().AppendLine(proposal);
@@ -218,20 +260,35 @@ public sealed partial class MainWindow
                 transcript.AppendLine(OfferGingerChatMatch(session, observation, chatId, proposedCandidate));
             if (review is not null)
                 transcript.AppendLine("Здесь можно оценить ответ или объяснить правило поставщика. Перед сохранением урока проверь понимание модели в блоке «Объяснить UNIX».");
-            ReplaceConversationTurn(turn, "UNIX", transcript.ToString());
             session.Record(proposal);
-            notificationKind = GingerTaskNotification.ForPreparation(
-                observation?.Linked == true, _gingerChatConfirmation is not null);
+            if (scan?.ReachedEnd == true)
+            {
+                summary = $"Дошёл до конца открытого прайса. Отложено без кандидатов: {scan.DeferredCount}. " +
+                    $"Уже сопоставленных строк пройдено: {scan.AlreadyLinkedCount}.";
+                notificationKind = deferred.Count > 0 ? GingerNotificationKind.ManualReview : GingerNotificationKind.RunFinished;
+            }
+            else
+            {
+                notificationKind = GingerTaskNotification.ForPreparation(
+                    observation?.Linked == true, _gingerChatConfirmation is not null);
+                summary = _gingerChatConfirmation is not null
+                    ? $"Строка {observation!.Position}: пара готова к твоему подтверждению. Сопоставление ещё не выполнено."
+                    : observation?.Linked == true ? "Эта строка уже сопоставлена. Повтор не выполнялся."
+                    : $"Строка {observation?.Position}: нужна ручная проверка. Однозначная пара не подтверждена.";
+                if (deferred.Count > 0) summary += $" Отложено без кандидатов: {deferred.Count}.";
+            }
         }
         catch (OperationCanceledException)
         {
             notificationKind = GingerNotificationKind.Cancelled;
+            summary = "Работа остановлена. Отложенные позиции сохранены.";
             InvalidateGingerChatContext();
             if (!transcript.ToString().Contains("Остановлено.", StringComparison.Ordinal))
                 Report(GingerChatStage.Cancelled, "Остановлено. Агент не продолжает работу.");
         }
         catch (Exception ex)
         {
+            summary = "Работа остановлена из-за ошибки. Автоматического повтора нет; подробности ниже.";
             InvalidateGingerChatContext();
             // Also handles failure to acquire the session, before the flow starts.
             if (!transcript.ToString().Contains("Процесс остановлен:", StringComparison.Ordinal))
@@ -240,25 +297,59 @@ public sealed partial class MainWindow
         }
         finally
         {
-            _gingerStepAnimation?.Stop();
-            _gingerStepAnimation = null;
-            GingerChatActivity.Visibility = Visibility.Collapsed;
-            SetGingerCaptureMode(false);
-            session?.Dispose();
-            _gingerRunning = false;
-            _gingerCancellation = _chatCancellation = null;
             try
             {
-                if (chatId is not null)
-                    await _bridge.RecordGingerChatAsync(chatId, message, transcript.ToString());
+                try
+                {
+                    _gingerStepAnimation?.Stop();
+                    _gingerStepAnimation = null;
+                    GingerChatActivity.Visibility = Visibility.Collapsed;
+                    SetGingerCaptureMode(false);
+                }
+                catch (Exception ex) { StartupDiagnostics.Log("Ginger chat display cleanup failed", ex); }
+                try { session?.Dispose(); }
+                catch (Exception ex) { StartupDiagnostics.Log("Ginger chat session cleanup failed", ex); }
+                if (deferred.Count > 0)
+                {
+                    transcript.AppendLine().AppendLine("Отложенные позиции без кандидатов:");
+                    foreach (var row in deferred)
+                        transcript.AppendLine($"{row.Supplier} · документ {row.Document} · строка {row.Position}: {row.Title}");
+                    transcript.AppendLine("Список сохранён отдельно от истории чата. Открой «Отложенные позиции», чтобы вернуться к разбору.");
+                }
+                var details = transcript.ToString();
+                if (details.Length > 20_000)
+                {
+                    // Full observations and per-step messages remain in the durable session journal.
+                    var length = char.IsHighSurrogate(details[19_999]) ? 19_999 : 20_000;
+                    details = details[..length] + $"\n\nПоказана первая часть подробностей. Полный журнал: {session?.DirectoryPath}\\journal-ru.txt. Отложенные строки доступны отдельным списком.";
+                }
+                var savedTranscript = summary + "\n\n" + details;
+                try
+                {
+                    progress?.Finish(summary, details);
+                    if (progress is not null) savedTranscript = progress.Transcript;
+                }
+                catch (Exception ex) { StartupDiagnostics.Log("Ginger chat final display failed", ex); }
+                try { await RefreshGingerDeferredRowsAsync(); }
+                catch (Exception ex) { StartupDiagnostics.Log("Ginger deferred list refresh failed", ex); }
+                try
+                {
+                    if (chatId is not null)
+                        await _bridge.RecordGingerChatAsync(chatId, message, savedTranscript);
+                }
+                catch (Exception ex)
+                {
+                    StartupDiagnostics.Log("Ginger chat history failed", ex);
+                    AppendConversation("Система", "Результат показан, но не записан в историю чата. " + ex.Message);
+                }
             }
-            catch (Exception ex)
+            finally
             {
-                AppendConversation("Система", "Результат показан, но не записан в историю чата. " + ex.Message);
-                StartupDiagnostics.Log("Ginger chat history failed", ex);
+                _gingerRunning = false;
+                _gingerCancellation = _chatCancellation = null;
+                try { SetBusy(false); }
+                finally { NotifyGingerOutcome(notificationKind, chatId); }
             }
-            SetBusy(false);
-            NotifyGingerOutcome(notificationKind, chatId);
         }
     }
 

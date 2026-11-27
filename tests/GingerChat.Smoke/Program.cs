@@ -14,6 +14,11 @@ foreach (var message in new[] { "не продолжай сопоставлен�
 
 var source = new GingerChatItem("Supplier", "123", 2, "Product", false, []);
 await IntentTests.Run();
+await IntentBindingTests.Run();
+DeferredRowsTests.Run();
+DeferredSelectionTests.Run();
+await ScanFlowTests.Run();
+ProgressTranscriptTests.Run();
 BottleTests.Run();
 var stages = new List<GingerChatStage>();
 int reads = 0, filters = 0, comparisons = 0;

@@ -4,6 +4,10 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatFlow.cs" Link="GingerChatFlow.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatScanFlow.cs" Link="GingerChatScanFlow.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerProgressTranscript.cs" Link="GingerProgressTranscript.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerDeferredRows.cs" Link="GingerDeferredRows.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerDeferredSelection.cs" Link="GingerDeferredSelection.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatIntent.cs" Link="GingerChatIntent.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerBottleResearch.cs" Link="GingerBottleResearch.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatMatchGate.cs" Link="GingerChatMatchGate.cs" /></ItemGroup>

@@ -345,6 +345,10 @@
                     </Grid>
 
                     <Grid Grid.Row="1" ColumnSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -387,6 +391,23 @@
                                 Style="{StaticResource IconButtonStyle}"
                                 Click="RetryButton_Click"
                                 Visibility="Collapsed" />
+                        <Button x:Name="GingerDeferredButton"
+                                Grid.Row="1" Grid.ColumnSpan="3"
+                                Margin="0,8,0,0" Padding="10,6" CornerRadius="11"
+                                HorizontalAlignment="Left"
+                                Style="{StaticResource IconButtonStyle}"
+                                IsEnabled="{Binding IsEnabled, ElementName=SendButton}"
+                                Loaded="GingerDeferredButton_Loaded"
+                                Click="GingerDeferredButton_Click"
+                                AutomationProperties.Name="Отложенные позиции">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="Отложенные позиции" FontSize="11" VerticalAlignment="Center" />
+                                <Border Background="#257C8DFF" CornerRadius="8" MinWidth="22" Padding="5,1">
+                                    <TextBlock x:Name="GingerDeferredCount" Text="…" FontSize="10"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
                     </Grid>
 
                     <Border Grid.Row="2"

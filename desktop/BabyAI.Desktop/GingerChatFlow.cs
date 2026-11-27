@@ -1,6 +1,6 @@
 namespace BabyAI.Desktop;
 
-internal enum GingerChatStage { Started, Reading, Filtering, Comparing, Review, Empty, Cancelled, Failed }
+internal enum GingerChatStage { Started, Reading, Filtering, Comparing, Review, Empty, Cancelled, Failed, Skipping, Completed }
 internal sealed record GingerChatItem(string Supplier, string Document, int Position, string Title, bool Linked, string[] Candidates);
 
 internal sealed class GingerChatFlow(

@@ -132,6 +132,8 @@ public static class ConversationTranscriptBehavior
             || speaker.Equals("Вы", StringComparison.OrdinalIgnoreCase);
         var isSystem = speaker.Equals("System", StringComparison.OrdinalIgnoreCase)
             || speaker.Equals("Система", StringComparison.OrdinalIgnoreCase);
+        if (!isUser && !isSystem && GingerProgressTurn.TryCreateHistoryCard(text, out var progressCard))
+            return progressCard!;
         var alignment = isSystem
             ? HorizontalAlignment.Center
             : isUser ? HorizontalAlignment.Right : HorizontalAlignment.Left;

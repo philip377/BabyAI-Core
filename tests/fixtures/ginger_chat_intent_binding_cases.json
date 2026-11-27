@@ -1,0 +1,37 @@
+[
+  {
+    "message": "продолжим сопоставление?",
+    "labels": ["request", "matching", "current"],
+    "response": {"id": 13, "ok": true, "command": "ginger.intent.preview", "message": "продолжим сопоставление?", "intent": "prepare_matching", "scope": "current_row_preview", "can_match": false}
+  },
+  {
+    "message": "  Продолжим\u00a0сопоставление?!  ",
+    "labels": ["request", "matching", "current"],
+    "response": {"id": 14, "ok": true, "command": "ginger.intent.preview", "message": "  Продолжим\u00a0сопоставление?!  ", "intent": "prepare_matching", "scope": "current_row_preview", "can_match": false}
+  },
+  {
+    "message": "Даваи\u0306 дальше по прайсу?",
+    "labels": ["request", "matching", "current"],
+    "response": {"id": 15, "ok": true, "command": "ginger.intent.preview", "message": "Даваи\u0306 дальше по прайсу?", "intent": "prepare_matching", "scope": "current_row_preview", "can_match": false}
+  },
+  {
+    "message": "Вернёмся к сопоставлению? 🧪",
+    "labels": ["request", "matching", "current"],
+    "response": {"id": 16, "ok": true, "command": "ginger.intent.preview", "message": "Вернёмся к сопоставлению? 🧪", "intent": "prepare_matching", "scope": "current_row_preview", "can_match": false}
+  },
+  {
+    "message": "не продолжим сопоставление?",
+    "labels": [],
+    "response": {"id": 17, "ok": true, "command": "ginger.intent.preview", "message": "не продолжим сопоставление?", "intent": "other", "scope": "current_row_preview", "can_match": false}
+  },
+  {
+    "message": "«продолжим сопоставление?»",
+    "labels": [],
+    "response": {"id": 18, "ok": true, "command": "ginger.intent.preview", "message": "«продолжим сопоставление?»", "intent": "other", "scope": "current_row_preview", "can_match": false}
+  },
+  {
+    "message": "Продолжим сопоставление всего прайса?",
+    "labels": ["request", "matching", "specified"],
+    "response": {"id": 19, "ok": true, "command": "ginger.intent.preview", "message": "Продолжим сопоставление всего прайса?", "intent": "clarify", "scope": "current_row_preview", "can_match": false}
+  }
+]

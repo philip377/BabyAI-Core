@@ -1,5 +1,13 @@
 [
   {
+    "message": "продолжим сопоставление?",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Продолжим сопоставление?!",
+    "expected": "prepare_matching"
+  },
+  {
     "message": "Продолжи сопоставлять товары",
     "expected": "prepare_matching"
   },

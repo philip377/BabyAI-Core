@@ -232,7 +232,7 @@ internal static class NotificationTests
             "App activation bypasses the driver-idle and pending-confirmation checks");
 
         var preparation = Method(Source("MainWindow.GingerChat.cs"),
-            "private async Task RunGingerFromChatAsync(string message, string? expectedChatId = null)");
+            "private async Task RunGingerFromChatAsync(string message, string? expectedChatId = null,\n        GingerDeferredRow? revisit = null)");
         Check(Regex.IsMatch(preparation, @"GingerTaskNotification\.ForPreparation\(\s*observation\?\.Linked\s*==\s*true,\s*_gingerChatConfirmation\s+is\s+not\s+null\)"),
             "Preparation notification trusts a model proposal instead of the actual confirmation card");
         Before(preparation, "OfferGingerChatMatch(", "GingerTaskNotification.ForPreparation(",

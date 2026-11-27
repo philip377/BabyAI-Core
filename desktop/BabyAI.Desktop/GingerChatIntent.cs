@@ -34,7 +34,7 @@ internal static class GingerChatIntent
     {
         // The response is bound to the original message and fixed workflow.
         // Never interpret arbitrary model-produced tool names or action text.
-        if (result.ValueKind != JsonValueKind.Object || result.EnumerateObject().Count() != 6 ||
+        if (!HasReviewShape(result) ||
             !result.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True ||
             !IsText(result, "command", "ginger.intent.preview") ||
             !IsText(result, "message", message) || !IsText(result, "scope", "current_row_preview") ||
@@ -48,6 +48,22 @@ internal static class GingerChatIntent
             "clarify" => GingerChatRoute.Clarify,
             _ => throw new InvalidDataException("Неизвестное намерение. Ginger не запущен.")
         };
+    }
+
+    private static bool HasReviewShape(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object) return false;
+        // The persistent Python worker adds its transport id to the six command
+        // fields. BabyAIBridgeClient already checks it against the pending request.
+        // Direct command replies have no id. No other extra fields are accepted.
+        var fields = 6;
+        if (result.TryGetProperty("id", out var id))
+        {
+            if (id.ValueKind != JsonValueKind.Number || !id.TryGetInt64(out var number) || number < 0)
+                return false;
+            fields++;
+        }
+        return result.EnumerateObject().Count() == fields;
     }
 
     private static bool IsText(JsonElement value, string name, string expected) =>

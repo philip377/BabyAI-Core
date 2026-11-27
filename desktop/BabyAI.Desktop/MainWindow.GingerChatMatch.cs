@@ -41,32 +41,53 @@ public sealed partial class MainWindow
     {
         if (_busy || _gingerRunning || _gingerDialogOpen || _agentsDialogOpen ||
             ApprovalCard.Visibility == Visibility.Visible || _gingerChatConfirmation is not { } pending) return;
-        InvalidateGingerChatMatch();
-        StopVoiceListening(updateUi: false);
         const string message = "Подтверждаю показанную пару Ginger.";
         var transcript = new StringBuilder($"{pending.Source.Supplier} · документ {pending.Source.Document} · строка {pending.Source.Position}\n" +
             $"У поставщика: {pending.Source.Title}\nНаш товар: {pending.Gate.Candidate}\n");
-        _chatCancellation?.Dispose();
         using var cancellation = new CancellationTokenSource();
-        _chatCancellation = _gingerCancellation = cancellation;
-        _gingerRunning = true;
-        SetBusy(true, canStop: true);
-        AppendConversation("Вы", message);
-        var turn = CreateConversationTurn("UNIX", transcript.ToString());
+        GingerProgressTurn? progress = null;
         GingerDesktopSession? session = null;
         OverlappedPresenter? minimized = null;
         var matchVerified = false;
         var matchCancelled = false;
-        void Report(string text, bool active)
+        var matchFailed = false;
+        static void BestEffort(string operation, Action action)
+        {
+            try { action(); }
+            catch (Exception ex) { StartupDiagnostics.Log("Ginger chat match " + operation, ex); }
+        }
+        void Record(string text)
         {
             transcript.AppendLine(text);
-            ReplaceConversationTurn(turn, "UNIX", transcript.ToString());
             session?.Record(text);
             SaveGingerLogLine(text);
-            ShowGingerChatStep(text, active);
+        }
+        void Report(GingerChatMatchStage stage, string text)
+        {
+            Record(text);
+            progress?.Report(stage, text);
+            ReplyText.Text = text;
+        }
+        void ReportOutcome(GingerChatStage stage, string text)
+        {
+            // The outcome remains available even if presentation or logging
+            // failed while reporting an earlier stage.
+            transcript.AppendLine(text);
+            BestEffort("outcome journal failed", () => session?.Record(text));
+            BestEffort("outcome log failed", () => SaveGingerLogLine(text));
+            BestEffort("outcome card failed", () => progress?.Report(stage, text));
+            BestEffort("outcome text failed", () => ReplyText.Text = text);
         }
         try
         {
+            InvalidateGingerChatMatch();
+            StopVoiceListening(updateUi: false);
+            _chatCancellation?.Dispose();
+            _chatCancellation = _gingerCancellation = cancellation;
+            _gingerRunning = true;
+            SetBusy(true, canStop: true);
+            AppendConversation("Вы", message);
+            progress = CreateGingerProgressTurn();
             var activeChat = (await _bridge.NavigationAsync("chat.current")).GetProperty("active_chat_id").GetString();
             cancellation.Token.ThrowIfCancellationRequested();
             session = new GingerDesktopSession();
@@ -92,45 +113,73 @@ public sealed partial class MainWindow
                 {
                     var verified = stage == GingerChatMatchStage.Verified;
                     if (verified) matchVerified = true;
-                    Report(text, !verified);
+                    Report(stage, text);
                     SetGingerPhase(verified ? GingerCompanionPhase.Completed : GingerCompanionPhase.Checking);
                     ApplyState(verified ? OrbState.Done : OrbState.Executing);
                 }, cancellation.Token);
-            Report("Разрешение использовано. Следующее задание начнётся с нового чтения; урок и оценка автоматически не сохранялись.", false);
+            Record("Разрешение использовано. Следующее задание начнётся с нового чтения; урок и оценка автоматически не сохранялись.");
         }
         catch (OperationCanceledException)
         {
             matchCancelled = true;
-            Report("Остановлено. Эта попытка не повторяется; продолжение требует нового чтения Ginger.", false);
-            SetGingerPhase(GingerCompanionPhase.Cancelled);
-            ApplyState(OrbState.Idle);
+            ReportOutcome(GingerChatStage.Cancelled,
+                "Остановлено. Эта попытка не повторяется; продолжение требует нового чтения Ginger.");
+            BestEffort("cancelled phase failed", () => SetGingerPhase(GingerCompanionPhase.Cancelled));
+            BestEffort("cancelled state failed", () => ApplyState(OrbState.Idle));
         }
         catch (Exception ex)
         {
-            Report("Сопоставление остановлено: " + ex.Message + " Автоматического повтора нет.", false);
-            SetGingerPhase(GingerCompanionPhase.Failed);
-            ApplyState(OrbState.Error);
+            matchFailed = true;
+            ReportOutcome(GingerChatStage.Failed,
+                "Сопоставление остановлено: " + ex.Message + " Автоматического повтора нет.");
+            BestEffort("failed phase failed", () => SetGingerPhase(GingerCompanionPhase.Failed));
+            BestEffort("failed state failed", () => ApplyState(OrbState.Error));
             StartupDiagnostics.Log("Ginger chat match failed", ex);
         }
         finally
         {
-            _gingerStepAnimation?.Stop();
-            _gingerStepAnimation = null;
-            GingerChatActivity.Visibility = Visibility.Collapsed;
-            _gingerChatReconciling = false;
-            minimized?.Restore(false);
-            SetGingerCaptureMode(false);
-            session?.Dispose();
-            _gingerRunning = false;
-            _gingerCancellation = _chatCancellation = null;
-            try { await _bridge.RecordGingerChatAsync(pending.ChatId, message, transcript.ToString()); }
-            catch (Exception ex)
+            try
             {
-                AppendConversation("Система", "Результат показан, но не записан в историю чата. " + ex.Message);
-                StartupDiagnostics.Log("Ginger chat match history failed", ex);
+                BestEffort("animation cleanup failed", () => _gingerStepAnimation?.Stop());
+                BestEffort("activity cleanup failed", () => GingerChatActivity.Visibility = Visibility.Collapsed);
+                BestEffort("window restore failed", () => minimized?.Restore(false));
+                BestEffort("capture cleanup failed", () => SetGingerCaptureMode(false));
+                BestEffort("session cleanup failed", () => session?.Dispose());
+
+                var summary = matchVerified
+                    ? matchFailed ? "Сопоставление проверено в Ginger. После проверки произошла ошибка; подробности ниже."
+                        : "Сопоставление проверено в Ginger. Показанная пара связана."
+                    : matchCancelled ? "Остановлено. Результат сопоставления не подтверждён; эта попытка не повторяется."
+                        : "Результат сопоставления не подтверждён. Нужна проверка; автоматического повтора нет.";
+                var details = transcript.ToString();
+                var historyResult = summary + "\n\n" + details;
+                BestEffort("final card failed", () =>
+                {
+                    if (progress is null) return;
+                    progress.Finish(summary, details);
+                    historyResult = progress.Transcript;
+                });
+                try { await _bridge.RecordGingerChatAsync(pending.ChatId, message, historyResult); }
+                catch (Exception ex)
+                {
+                    BestEffort("history notice failed", () => AppendConversation("Система",
+                        "Результат не записан в историю чата. " + ex.Message));
+                    StartupDiagnostics.Log("Ginger chat match history failed", ex);
+                }
             }
-            SetBusy(false);
-            NotifyGingerOutcome(GingerTaskNotification.ForMatch(matchVerified, matchCancelled), pending.ChatId);
+            finally
+            {
+                // No rendering, window restoration or history failure can
+                // retain the driver/confirmation flags or the busy state.
+                _gingerStepAnimation = null;
+                _gingerChatReconciling = false;
+                _gingerRunning = false;
+                _gingerCancellation = _chatCancellation = null;
+                BestEffort("busy cleanup failed", () => SetBusy(false));
+                _busy = false;
+                BestEffort("notification failed", () => NotifyGingerOutcome(
+                    GingerTaskNotification.ForMatch(matchVerified, matchCancelled), pending.ChatId));
+            }
         }
     }
 

@@ -25,6 +25,8 @@ _OTHER_TOPIC = re.compile(r"\b(?:цен[аыуюе]|ценой|стоимост\
 
 
 def _result(message, intent):
+    # Echo the original text exactly: the desktop binds this result to its input.
+    # Trimming, case folding or Unicode/punctuation normalization breaks that bond.
     return dict(message=message, intent=intent, scope="current_row_preview", can_match=False)
 
 

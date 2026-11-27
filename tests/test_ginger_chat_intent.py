@@ -1,4 +1,6 @@
+import io
 import json
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +21,7 @@ class Model:
     'Продолжи сопоставлять товары', 'Давай дальше по прайсу',
     'Ну что, вернёмся к сопоставлению', 'Можешь продолжить сопоставление?',
     'Подбери соответствия товарам из прайса', 'Продолжай сапоставлять товары',
+    'продолжим сопоставление?',
 ])
 def test_semantic_route_is_only_a_bound_current_row_preview(message):
     model = Model('request', 'matching', 'current')
@@ -106,6 +109,33 @@ def test_command_uses_read_only_provider_without_runtime_or_persistent_effects(t
     result = commands.execute('ginger.intent.preview', {'message': message})
     assert result == dict(ok=True, command='ginger.intent.preview', message=message,
                          intent='prepare_matching', scope='current_row_preview', can_match=False)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize('case', json.loads((Path(__file__).parent / 'fixtures' /
+    'ginger_chat_intent_binding_cases.json').read_text(encoding='utf-8')))
+def test_worker_intent_envelope_preserves_exact_message_for_desktop(case, tmp_path, monkeypatch):
+    from babyai.config import BabyAIConfig
+    from babyai.desktop_commands import DesktopCommands
+    from babyai.desktop_worker import serve
+
+    model = Model(*case['labels'])
+    commands = DesktopCommands(BabyAIConfig(data_dir=tmp_path, provider='echo'))
+    monkeypatch.setattr(commands, '_provider', lambda: model)
+    monkeypatch.setattr(commands, '_core', lambda: pytest.fail('No chat/tools/runtime'))
+    source = io.StringIO(json.dumps({'id': case['response']['id'],
+        'command': 'ginger.intent.preview', 'payload': {'message': case['message']}}) + '\n')
+    output = io.StringIO()
+
+    assert serve(commands, stdin=source, stdout=output) == 0
+    # The same fixture is parsed by the C# smoke test. Unlike direct execute(),
+    # the real desktop worker adds an id; Unicode escapes retain exact text.
+    wire = output.getvalue()
+    assert wire.isascii()
+    assert json.loads(wire) == case['response']
+    assert len(model.prompts) == len(case['labels'])
+    for prompt in model.prompts:
+        assert json.loads(prompt.split('\n')[-1]) == {'message': case['message']}
     assert list(tmp_path.iterdir()) == []
 
 
