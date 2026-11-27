@@ -13,6 +13,7 @@ import time
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 from .public_web import WebReadError, public_url, read_public
+from .public_search_settings import SearchAccess, validate_key
 
 
 def compact(value):
@@ -128,16 +129,28 @@ class ProductPageParser(HTMLParser):
         return list(dict.fromkeys(link for _, link in sorted(ranked, key=lambda x: -x[0])))[:3]
 
 
-def search_pages(query, fetch, deadline):
-    key = os.getenv('BABYAI_BRAVE_SEARCH_KEY', '').strip()
-    if key:
-        page = fetch('https://api.search.brave.com/res/v1/web/search?' + urlencode(
-            dict(q=query, count=5, safesearch='strict', result_filter='web')),
-            types=('application/json',), deadline=deadline, api_key=key)
+def search_pages(query, fetch, deadline, access=None):
+    if access is None:
+        key = os.getenv('BABYAI_BRAVE_SEARCH_KEY', '').strip()
+        access = SearchAccess('brave', validate_key(key), 'environment') if key else SearchAccess('duckduckgo')
+    if access.mode == 'links_only':
+        raise WebReadError('Выбран режим «Только по ссылке». Укажи страницу или включи поиск в Настройки → Интернет-поиск.')
+    if access.mode == 'brave':
+        key = validate_key(access.key)
+        try:
+            page = fetch('https://api.search.brave.com/res/v1/web/search?' + urlencode(
+                dict(q=query, count=5, safesearch='strict', result_filter='web', spellcheck='false')),
+                types=('application/json',), deadline=deadline, api_key=key)
+        except WebReadError as exc:
+            if exc.status in (401, 403):
+                raise WebReadError('Brave не принял ключ или доступ к поиску. Проверь ключ и тариф в Настройки → Интернет-поиск.') from None
+            if exc.status == 429:
+                raise WebReadError('Brave ограничил число запросов. Автоматического повтора нет; попробуй позднее или дай ссылку.') from None
+            raise
         raw = json.loads(page.body)
-        if not isinstance(raw, dict) or not isinstance(raw.get('web', {}), dict):
+        if not isinstance(raw, dict) or not isinstance(raw.get('web'), dict):
             raise ValueError('Некорректная выдача поискового API.')
-        rows = raw.get('web', {}).get('results', [])
+        rows = raw['web'].get('results')
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
             raise ValueError('Некорректные источники поискового API.')
         results = []
@@ -146,17 +159,20 @@ def search_pages(query, fetch, deadline):
                 url = public_url(row.get('url'))
             except WebReadError:
                 continue
-            results.append(dict(url=url, title=compact(str(row.get('title', '')))[:240]))
+            if url not in [r['url'] for r in results]:
+                results.append(dict(url=url, title=compact(str(row.get('title', '')))[:240]))
         return results
+    if access.mode != 'duckduckgo':
+        raise WebReadError('Неизвестный поисковик. Проверь настройки интернет-поиска.')
     try:
         page = fetch('https://html.duckduckgo.com/html/?' + urlencode(dict(q=query)), deadline=deadline)
     except WebReadError as exc:
-        if 'HTTP 202' in str(exc):
-            raise WebReadError('Поисковик запросил проверку человека. Поиск не выполнен; можно указать страницу источника.') from exc
+        if exc.status == 202:
+            raise WebReadError('DuckDuckGo запросил проверку человека. Укажи страницу или настрой Brave: Настройки → Интернет-поиск.') from None
         raise
     html = page.body.decode('utf-8', errors='replace')
     if any(marker in html.lower() for marker in ('challenge-form', 'anomaly-modal', 'captcha')):
-        raise WebReadError('Поисковик запросил проверку человека. Поиск не выполнен; это не отсутствие флакона.')
+        raise WebReadError('DuckDuckGo запросил проверку человека. Это не отсутствие флакона. Укажи страницу или настрой Brave: Настройки → Интернет-поиск.')
     parser = SearchParser()
     parser.feed(html)
     if not parser.results and 'no-results' not in html:
@@ -228,7 +244,18 @@ def extract_evidence(provider, query, pages):
     return excerpts
 
 
-def research(query, *, source_url='', provider=None, fetch=read_public):
+def check_search(settings, *, fetch=read_public):
+    """One explicit connection check; no product fetch, model, or saved success flag."""
+    result = dict(connected=False, checked_at=datetime.now(timezone.utc).isoformat(), result_count=0)
+    try:
+        access = settings.access()
+        rows = search_pages('EX NIHILO Blue Talisman perfume bottle', fetch, time.monotonic() + 15, access)
+        return dict(result, connected=True, result_count=len(rows), message='Поисковик ответил. Проверка подключения завершена.')
+    except (WebReadError, ValueError, TypeError) as exc:
+        return dict(result, message=str(exc) if isinstance(exc, WebReadError) else 'Поисковик вернул некорректный ответ.')
+
+
+def research(query, *, source_url='', provider=None, provider_factory=None, settings=None, fetch=read_public):
     query = validate_query(query)
     if not isinstance(source_url, str):
         raise ValueError('Ссылка источника должна быть текстом.')
@@ -241,7 +268,8 @@ def research(query, *, source_url='', provider=None, fetch=read_public):
                   conclusion='Версия флакона и соответствие товару требуют проверки по источникам.')
     try:
         links = ([dict(url=source_url, title='Страница пользователя')] if source_url else
-                 search_pages(query + ' perfume bottle packaging', fetch, deadline))
+                 search_pages(query + ' perfume bottle packaging', fetch, deadline,
+                              settings.access() if settings is not None else None))
     except (WebReadError, ValueError, TypeError) as exc:
         result['warnings'].append(str(exc) if isinstance(exc, WebReadError) else 'Поиск вернул некорректный ответ.')
         return result
@@ -279,8 +307,10 @@ def research(query, *, source_url='', provider=None, fetch=read_public):
             result['warnings'].append(f'{source["id"]}: {exc}')
     if links and not any(p['status'] == 'read' for p in result['sources']):
         result['status'] = 'unavailable'
-    if provider is not None:
+    if (provider is not None or provider_factory is not None) and any(p.get('text') for p in result['sources']):
         try:
+            if provider is None:
+                provider = provider_factory()
             result['excerpts'] = extract_evidence(provider, query, result['sources'])
         except (ValueError, TypeError, RuntimeError):
             result['warnings'].append('Модель не дала проверяемых выдержек. Источники доступны для ручной проверки.')

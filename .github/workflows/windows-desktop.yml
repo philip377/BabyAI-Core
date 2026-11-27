@@ -44,6 +44,9 @@ jobs:
       - name: Install BabyAI Core package
         shell: pwsh
         run: python -m pip install -e ".[dev]"
+      - name: Test protected search settings and bounded research without external requests
+        shell: pwsh
+        run: python -m pytest tests/test_public_search_settings.py tests/test_ginger_bottle_research.py -q
       - name: Test persistent Ginger queue controller guards
         # Uses synthetic files and rejects before live UI access.
         shell: pwsh

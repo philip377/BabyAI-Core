@@ -9,7 +9,9 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 
 class WebReadError(ValueError):
-    pass
+    def __init__(self, message, *, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 def public_url(value):
@@ -85,7 +87,7 @@ def read_public(url, *, limit=1_000_000, types=('text/html',), deadline=None, ap
                 url = public_url(urljoin(url, location))
                 continue
             if response.status != 200:
-                raise WebReadError(f'Сайт не предоставил данные (HTTP {response.status}).')
+                raise WebReadError(f'Сайт не предоставил данные (HTTP {response.status}).', status=response.status)
             content_type = response.getheader('Content-Type', '').split(';')[0].strip().lower()
             if content_type not in types or response.getheader('Content-Encoding', 'identity') != 'identity':
                 raise WebReadError('Сайт вернул неподдерживаемый формат.')

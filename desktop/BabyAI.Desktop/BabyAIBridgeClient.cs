@@ -119,6 +119,20 @@ public sealed class BabyAIBridgeClient : IDisposable
         return document.RootElement.Clone();
     }
 
+    public async Task<JsonElement> SearchSettingsAsync(string command, string? mode = null,
+        string? apiKey = null, bool clearKey = false, CancellationToken cancellationToken = default)
+    {
+        if (command is not ("web.search.status" or "web.search.configure" or "web.search.check"))
+            throw new ArgumentException("Неизвестная команда настроек поиска.", nameof(command));
+        // Credentials travel only through the private worker pipe, never chat/history/logs.
+        var payload = JsonSerializer.Serialize(new {
+            mode, api_key = apiKey, clear_key = clearKey, allow_public_web = command == "web.search.check"
+        });
+        var json = await ExecuteAsync(command, payload, cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
     public async Task<JsonElement> PreviewGingerLessonAsync(string supplier, string source,
         string lesson, IEnumerable<string> candidates, CancellationToken cancellationToken)
     {

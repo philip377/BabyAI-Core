@@ -87,6 +87,7 @@ public sealed partial class MainWindow
         var generalButton = AddSection("Общие", BuildGeneralSettings);
         AddSection("Обновления", BuildUpdateSettings);
         AddSection("Мозг", BuildBrainSettings);
+        AddSection("Интернет-поиск", BuildSearchSettings);
         AddSection("Производительность", BuildPerformanceSettings);
         AddSection("История и проекты", BuildHistorySettings);
         AddSection("Интерфейс", BuildInterfaceSettings);
