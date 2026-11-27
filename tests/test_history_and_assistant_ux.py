@@ -107,8 +107,8 @@ def test_desktop_has_explicit_localized_assistant_states() -> None:
     reject_handler = reject_handler.split("private static bool IsNoPendingToolApproval", 1)[0]
     assert "ApplyState(OrbState.Approval)" in reject_handler
     assert "ApplyState(OrbState.Executing)" not in reject_handler
-    assert "BabyAI · выполняю" in adaptive
-    assert "BabyAI · ждёт решения" in adaptive
+    assert "UNIX · выполняю" in adaptive
+    assert "UNIX · ждёт решения" in adaptive
     assert 'x:Name="ApprovalDescriptionText"' in xaml
     assert "Thinking…" not in window
     assert "Response complete." not in window
