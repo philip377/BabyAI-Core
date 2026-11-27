@@ -26,6 +26,9 @@ jobs:
       - name: Test Ginger chat stages, confirmation, ratings, lessons and cancellation without desktop input
         shell: pwsh
         run: dotnet run --project tests/GingerChat.Smoke/GingerChat.Smoke.csproj
+      - name: Test bounded Ginger filter preparation and incomplete observation guards
+        shell: pwsh
+        run: dotnet run --project tests/GingerDesktopSession.Smoke/GingerDesktopSession.Smoke.csproj -c Release
       - name: Test Ginger driver import preserves explicit confirmation
         shell: powershell
         run: ./tests/ginger-driver-import-smoke.ps1
@@ -38,6 +41,9 @@ jobs:
       - name: Test Ginger preparation snapshots and post-input reads without desktop access
         shell: powershell
         run: ./tests/ginger-desktop-prepare-smoke.ps1
+      - name: Test Ginger filter-only context without desktop access
+        shell: powershell
+        run: ./tests/ginger-filter-only-context-smoke.ps1
       - name: Test Ginger panel loading without repeating navigation
         shell: powershell
         run: ./tests/ginger-panel-wait-smoke.ps1
@@ -47,6 +53,9 @@ jobs:
       - name: Install BabyAI Core package
         shell: pwsh
         run: python -m pip install -e ".[dev]"
+      - name: Test bounded filter-only planning without model or desktop input
+        shell: pwsh
+        run: python -m pytest tests/test_ginger_filter_only.py -q
       - name: Test protected search settings and bounded research without external requests
         shell: pwsh
         run: python -m pytest tests/test_public_search_settings.py tests/test_ginger_bottle_research.py -q

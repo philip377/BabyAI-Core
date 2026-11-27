@@ -187,6 +187,7 @@ public sealed partial class MainWindow
             if (string.IsNullOrWhiteSpace(chatId))
                 throw new InvalidDataException("Не удалось определить чат для сохранения отложенных строк.");
             session = new GingerDesktopSession();
+            session.FilterProgress = text => Report(GingerChatStage.Filtering, text);
             static GingerChatScanRow Row(GingerDesktopObservation value) => new(Item(value), value.Count,
                 value.Data.GetProperty("process_id").GetInt64(), value.Source.GetProperty("TableHandle").GetInt64(), value.Directory);
             async Task<GingerChatScanRow> Read(CancellationToken token)
@@ -236,7 +237,8 @@ public sealed partial class MainWindow
                         if (observation?.Directory != before.ObservationDirectory)
                             throw new InvalidDataException("Наблюдение изменилось до перехода к следующей строке.");
                         SetGingerCaptureMode(true);
-                        observation = await session.ObserveAsync(token, observation, before.Item.Position + 1);
+                        observation = await session.ObserveAsync(token, observation, before.Item.Position + 1,
+                            prepareFiltersOnOverflow: true);
                         return Row(observation);
                     },
                     async (before, token) =>

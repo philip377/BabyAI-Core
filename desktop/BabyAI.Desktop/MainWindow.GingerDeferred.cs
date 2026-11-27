@@ -142,7 +142,8 @@ public sealed partial class MainWindow
         GingerDeferredRow? revisit, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        var fresh = await session.ObserveAsync(token, prepare: true);
+        // A saved-row revisit must validate its target before any additive filter input.
+        var fresh = await session.ObserveAsync(token, prepare: true, prepareFiltersOnOverflow: revisit is null);
         token.ThrowIfCancellationRequested();
         if (revisit is null) return fresh;
 
@@ -163,7 +164,7 @@ public sealed partial class MainWindow
                 processId, table, fresh.Count);
         }, token);
         token.ThrowIfCancellationRequested();
-        var selected = await session.ObserveAsync(token, fresh, position: revisit.Position);
+        var selected = await session.ObserveAsync(token, fresh, position: revisit.Position, prepareFiltersOnOverflow: true);
         token.ThrowIfCancellationRequested();
         GingerDeferredSelection.ValidateSelected(revisit, Item(selected));
         if (selected.Data.GetProperty("process_id").GetInt64() != processId ||

@@ -36,7 +36,11 @@ def propose_filters(context, *, policy=POLICY_V2):
     if policy not in (POLICY_V1, POLICY_V2):
         raise PriceQueueError("Unknown filter policy")
     _query(context)
-    panel = context["SearchWords"]
+    return _propose_word_filters(context["SearchWords"], policy=policy)
+
+
+def _propose_word_filters(panel, *, policy=POLICY_V2):
+    """Shared pure proposal after each entry point validates its own context."""
     rows = panel["Candidates"]
     words = [row["Title"] for row in rows]
     tokens = lambda value: re.findall(r"[^\W\d_]+|\d+|[^\s]", value.casefold())

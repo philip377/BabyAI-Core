@@ -6,6 +6,7 @@ Add-Type @'
 using System;
 using System.Collections.Generic;
 public class GingerUiBusyException : Exception { }
+public class GingerCandidateLimitException : Exception { }
 public class GingerProductRow {
  public int Snapshot { get; set; }
  public long Table { get; set; }
@@ -15,14 +16,18 @@ public class GingerCandidateSnapshot { public string Marker { get; set; } }
 public class PrepareDocument { public string Number="document"; public string Supplier="supplier"; }
 public class PrepareView { public string Status="rows_observed_identity_unverified"; }
 public class PrepareSearchContext { public bool QueryWordsMatchSource=true; }
+public class PrepareFilterContext { public bool QueryWordsMatchSource=true; public long ProductRows=278; }
 public static class GingerMenuAccess {
  public static int RowReads, DocumentReads, SearchReads, OpenInputs, SelectInputs, FilterInputs;
  public static int FirstSearchAtRowRead, ConflictRead, SelectionConflictRead;
  public static bool ChangeDocument;
+ public static bool Overflow, FilterContextConflict;
+ public static int FilterContextReads;
  public static List<string> Guards=new List<string>();
  public static void Reset() {
   RowReads=DocumentReads=SearchReads=OpenInputs=SelectInputs=FilterInputs=FirstSearchAtRowRead=0;
   ConflictRead=SelectionConflictRead=0; ChangeDocument=false; Guards.Clear();
+  Overflow=FilterContextConflict=false; FilterContextReads=0;
  }
  public static GingerProductRow[] ReadProductRows(IntPtr window,uint owner) {
   RowReads++;
@@ -57,13 +62,20 @@ public static class GingerMenuAccess {
   if(pause!=700) throw new Exception("Settling pause removed");
   SearchReads++;
   if(SearchReads==1) FirstSearchAtRowRead=RowReads;
+  if(Overflow) throw new GingerCandidateLimitException();
   return new PrepareSearchContext();
+ }
+ public static PrepareFilterContext ReadFilterOnlyContext(IntPtr window,uint owner,int pause) {
+  if(pause!=700) throw new Exception("Filter settling pause removed");
+  FilterContextReads++;
+  if(FilterContextConflict) throw new Exception("Filter context changed");
+  return new PrepareFilterContext();
  }
 }
 '@
 $source=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../scripts/windows/ginger-desktop-step.ps1') -Raw
 $start=$source.IndexOf('$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)')
-$end=$source.IndexOf('[pscustomobject]@{status=''observed''', $start)
+$end=$source.IndexOf('# Emit a single explicitly typed observation', $start)
 if($start -lt 0 -or $end -le $start){throw 'Production Prepare/read boundaries missing'}
 $fragmentText=$source.Substring($start,$end-$start)
 if($fragmentText -match 'Get-Process|Add-Type|ActivateForRead|Start-Process|Invoke-Expression'){
@@ -79,11 +91,14 @@ function Require([bool]$Condition,[string]$Message) { if(-not $Condition){throw 
 function Invoke-PrepareFixture {
  param([string]$Operation,[int]$ConflictRead=0,[int]$SelectionConflictRead=0,
   [bool]$ChangeDocument=$false,[bool]$ConfirmNavigation=$true,
-  [int]$ExpectedProcess=7,[long]$ExpectedTable=42,[string]$ExpectedFailure='')
+  [int]$ExpectedProcess=7,[long]$ExpectedTable=42,[string]$ExpectedFailure='',
+  [bool]$Overflow=$false,[bool]$FilterContextConflict=$false,[bool]$PreviousFilterOnly=$false,[bool]$AmbiguousContext=$false)
  [GingerMenuAccess]::Reset()
  [GingerMenuAccess]::ConflictRead=$ConflictRead
  [GingerMenuAccess]::SelectionConflictRead=$SelectionConflictRead
  [GingerMenuAccess]::ChangeDocument=$ChangeDocument
+ [GingerMenuAccess]::Overflow=$Overflow
+ [GingerMenuAccess]::FilterContextConflict=$FilterContextConflict
  $script:caseNumber++
  $caseRoot=Join-Path $fixtureRoot $script:caseNumber
  $OutputDirectory=Join-Path $caseRoot 'output'
@@ -92,12 +107,17 @@ function Invoke-PrepareFixture {
  [void][IO.Directory]::CreateDirectory($ExpectedDirectory)
  [pscustomobject]@{process_id=$ExpectedProcess;rows=@(@{Snapshot=0;Table=$ExpectedTable;Selected=$true})} |
   ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ExpectedDirectory 'before.json') -Encoding UTF8
+ $expectedName=if($PreviousFilterOnly){'filter-context.json'}else{'search-context.json'}
  [pscustomobject]@{SearchWords=@{Marker='expected'}} |
-  ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ExpectedDirectory 'search-context.json') -Encoding UTF8
+  ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ExpectedDirectory $expectedName) -Encoding UTF8
+ if($AmbiguousContext){
+  [pscustomobject]@{SearchWords=@{Marker='expected'}} |
+   ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ExpectedDirectory 'filter-context.json') -Encoding UTF8
+ }
  $window=[IntPtr]::Zero; $ownerId=[uint32]7; $Position=2; $Word='needle'; $Enabled=$true
  $stages=New-Object 'System.Collections.Generic.List[string]'
  function Write-ReadStage([string]$Stage) {
-  Require ($Stage -in @('prepared_table','table_after_input','search_pair','table_recheck','verified','search_busy')) 'Unexpected read stage'
+  Require ($Stage -in @('prepared_table','table_after_input','search_pair','table_recheck','verified','search_busy','search_filters_only')) 'Unexpected read stage'
   $stages.Add($Stage)
  }
  $failed=$false
@@ -115,12 +135,14 @@ function Invoke-PrepareFixture {
   $saved=Get-Content -LiteralPath $beforePath -Raw -Encoding UTF8 | ConvertFrom-Json
   Require ($saved.process_id -eq $ownerId) 'Saved snapshot process changed'
   Require ($stages.Contains('verified')) 'Final verification did not run'
+  Require ((Test-Path -LiteralPath (Join-Path $OutputDirectory 'search-context.json')) -eq (-not $Overflow)) 'Overflow must not publish a full search context'
+  Require ((Test-Path -LiteralPath (Join-Path $OutputDirectory 'filter-context.json')) -eq $Overflow) 'Filter-only context not published separately'
  }
  [pscustomobject]@{Saved=$saved;Stages=$stages.ToArray();Rows=[GingerMenuAccess]::RowReads;
   Documents=[GingerMenuAccess]::DocumentReads;Searches=[GingerMenuAccess]::SearchReads;
   SearchAtRow=[GingerMenuAccess]::FirstSearchAtRowRead;Opens=[GingerMenuAccess]::OpenInputs;
   Selects=[GingerMenuAccess]::SelectInputs;Filters=[GingerMenuAccess]::FilterInputs;
-  Guards=[GingerMenuAccess]::Guards.ToArray()}
+  FilterContexts=[GingerMenuAccess]::FilterContextReads;Guards=[GingerMenuAccess]::Guards.ToArray()}
 }
 
 try {
@@ -160,7 +182,21 @@ try {
   $wrongTable=Invoke-PrepareFixture -Operation $operation -ExpectedTable 99 -ExpectedFailure 'Table changed'
   Require ($wrongTable.Selects+$wrongTable.Filters -eq 0 -and $wrongTable.Rows -eq 1) "$operation acted on a changed table"
  }
- 'PASS: production Prepare reuses its verified fresh snapshot; conflicts stop; Select/Filter retain post-input reads and final guards; no real UI'
+ foreach($operation in @('Prepare','Select','Filter','Observe')) {
+  $overflow=Invoke-PrepareFixture -Operation $operation -Overflow $true
+  Require ($overflow.Searches -eq 1 -and $overflow.FilterContexts -eq 1) "$operation retried the full candidate list"
+  Require ($overflow.Opens -eq [int]($operation -eq 'Prepare') -and $overflow.Selects -eq [int]($operation -eq 'Select') -and $overflow.Filters -eq [int]($operation -eq 'Filter')) "$operation repeated input after overflow"
+  Require ($overflow.Stages -contains 'table_recheck' -and $overflow.Stages -contains 'search_filters_only') "$operation lost final source verification"
+ }
+ $filterNext=Invoke-PrepareFixture -Operation Filter -PreviousFilterOnly $true
+ Require ($filterNext.Filters -eq 1 -and $filterNext.Searches -eq 1) 'Filter-only predecessor cannot feed one guarded additive filter'
+ $ambiguous=Invoke-PrepareFixture -Operation Filter -AmbiguousContext $true -ExpectedFailure 'Ambiguous search observation'
+ Require ($ambiguous.Filters -eq 0 -and $ambiguous.Searches -eq 0) 'Ambiguous context permitted input'
+ $overflowConflict=Invoke-PrepareFixture -Operation Select -Overflow $true -ConflictRead 3 -ExpectedFailure 'Table changed'
+ Require ($overflowConflict.Selects -eq 1 -and $overflowConflict.FilterContexts -eq 1) 'Overflow conflict repeated selection'
+ $filterConflict=Invoke-PrepareFixture -Operation Select -Overflow $true -FilterContextConflict $true -ExpectedFailure 'Filter context changed'
+ Require ($filterConflict.Selects -eq 1 -and $filterConflict.Searches -eq 1 -and $filterConflict.FilterContexts -eq 1) 'Filter-only conflict repeated input or observation'
+ "PASS: $script:caseNumber production Prepare/Select/Filter/Observe cases including typed overflow; no real UI"
 } finally {
  $cleanupPath=[IO.Path]::GetFullPath($fixtureRoot)
  $cleanupPrefix=$temporaryRoot+[IO.Path]::DirectorySeparatorChar+'babyai-ginger-prepare-'

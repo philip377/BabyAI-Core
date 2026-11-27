@@ -23,6 +23,13 @@ using Accessibility;
 public sealed class GingerUiBusyException : InvalidOperationException {
     public GingerUiBusyException() : base("Ginger UI is not responding; further input blocked") { }
 }
+public sealed class GingerCandidateLimitException : InvalidOperationException {
+    public long ObservedCount { get; private set; }
+    public GingerCandidateLimitException(long count)
+        : base("Candidate read limit exceeded: observed "+count+", maximum 256") {
+        ObservedCount=count;
+    }
+}
 public sealed class GingerMenuNode {
     public IAccessible Owner;
     public object Child;
@@ -81,6 +88,13 @@ public sealed class GingerSearchContext {
     // Raw UI text only; search rows do not prove query completion or product identity.
     public GingerCandidateSnapshot SearchWords, Products;
     public bool QueryWordsMatchSource; // Lexical evidence only, not completion or identity.
+    public bool CanMatch=false, SearchCompletionVerified=false;
+}
+public sealed class GingerFilterOnlyContext {
+    // No product contents are observed here. This can only prepare additive filters.
+    public GingerCandidateSnapshot SearchWords;
+    public long ProductPanelHandle, ProductRows;
+    public bool QueryWordsMatchSource;
     public bool CanMatch=false, SearchCompletionVerified=false;
 }
 public sealed class GingerSelectionEvidence {
@@ -827,7 +841,10 @@ public static class GingerMenuAccess {
             if(!products) continue;
             if(result!=null) throw new InvalidOperationException("Ambiguous candidate panels");
             long count=ListCount(hwnd,process);
-            if(count>256) throw new InvalidOperationException((searchWords ? "Search word" : "Candidate")+" read limit exceeded: observed "+count+", maximum 256");
+            if(count>256) {
+                if(!searchWords) throw new GingerCandidateLimitException(count);
+                throw new InvalidOperationException("Search word read limit exceeded: observed "+count+", maximum 256");
+            }
             IAccessible list=Client(hwnd);
             if(list==null || Convert.ToInt32(list.get_accRole(0))!=33 || list.accChildCount>260)
                 throw new InvalidOperationException("Unsupported candidate list");
@@ -1127,6 +1144,59 @@ public static class GingerMenuAccess {
         GingerSearchContext second=ReadSearchContextOnce(root,process);
         RequireSameSearchContext(first,second);
         return second; // A stable query and result list still cannot certify search completion.
+    }
+    private static GingerFilterOnlyContext ReadFilterOnlyContextOnce(IntPtr root,uint process) {
+        GingerCandidateSnapshot words=ReadCandidatesOnce(root,process,true);
+        long productPanel=0,productRows=-1;
+        foreach(IntPtr hwnd in Windows(root,process)) {
+            StringBuilder cls=new StringBuilder(256); GetClassNameW(hwnd,cls,cls.Capacity);
+            if(!IsWindowVisible(hwnd) || !cls.ToString().Contains("SysListView32")) continue;
+            bool isSearch=false,isProduct=false;
+            foreach(string[] columns in Headers(hwnd,process)) {
+                isSearch |= Column(columns,"слово")>=0 && Column(columns,"поиск")>=0;
+                isProduct |= Column(columns,"товар")>=0 && Column(columns,"цена")>=0;
+            }
+            if(!isProduct) continue;
+            if(isSearch) throw new InvalidOperationException("Ambiguous matching panel");
+            if(productPanel!=0) throw new InvalidOperationException("Ambiguous candidate panels");
+            productPanel=hwnd.ToInt64();
+            productRows=ListCount(hwnd,process);
+            // Continue the entire window enumeration: an overflow does not prove uniqueness.
+        }
+        if(productPanel==0) throw new InvalidOperationException("Candidate panel missing");
+        if(productPanel==words.PanelHandle) throw new InvalidOperationException("Search and product panels must be distinct");
+        if(productRows<=256) throw new InvalidOperationException("Candidate list is within the read limit; complete observation required");
+        GingerSelectedProduct afterSource=ReadSelectedProductOnce(root,process);
+        RequireSameSelectedProduct(words.Source,afterSource);
+        if(ListCount(new IntPtr(productPanel),process)!=productRows)
+            throw new InvalidOperationException("Candidate count changed during filter-only observation");
+        RequireWindow(root,process);
+        words.Source=afterSource;
+        bool lexical=SearchWordsDescribeSource(Array.ConvertAll(words.Candidates,row=>row.Title),afterSource.Title);
+        if(!lexical) throw new InvalidOperationException("Search words do not describe selected source");
+        return new GingerFilterOnlyContext {SearchWords=words,ProductPanelHandle=productPanel,
+            ProductRows=productRows,QueryWordsMatchSource=lexical};
+    }
+    private static void RequireSameFilterOnlyContext(GingerFilterOnlyContext first,GingerFilterOnlyContext second) {
+        foreach(GingerFilterOnlyContext context in new[] {first,second}) {
+            if(context==null || context.CanMatch || context.SearchCompletionVerified || !context.QueryWordsMatchSource ||
+               context.ProductRows<=256 || context.ProductPanelHandle<=0 || context.SearchWords==null ||
+               context.SearchWords.PanelHandle<=0 || context.ProductPanelHandle==context.SearchWords.PanelHandle ||
+               context.SearchWords.CanMatch || context.SearchWords.IdentityVerified || context.SearchWords.SearchCompletionVerified ||
+               context.SearchWords.Source==null || context.SearchWords.Source.CanMatch || context.SearchWords.Source.IdentityVerified)
+                throw new InvalidOperationException("Invalid filter-only context");
+        }
+        if(first.ProductPanelHandle!=second.ProductPanelHandle || first.ProductRows!=second.ProductRows)
+            throw new InvalidOperationException("Candidate metadata changed between filter-only observations");
+        RequireSameCandidates(first.SearchWords,second.SearchWords);
+    }
+    public static GingerFilterOnlyContext ReadFilterOnlyContext(IntPtr root,uint process,int settleMilliseconds) {
+        if(settleMilliseconds<0 || settleMilliseconds>1000) throw new ArgumentOutOfRangeException("settleMilliseconds");
+        GingerFilterOnlyContext first=ReadFilterOnlyContextOnce(root,process);
+        if(settleMilliseconds>0) System.Threading.Thread.Sleep(settleMilliseconds);
+        GingerFilterOnlyContext second=ReadFilterOnlyContextOnce(root,process);
+        RequireSameFilterOnlyContext(first,second);
+        return second;
     }
     public static GingerMatchingView InspectMatching(IntPtr root,uint process) {
         GingerMatchingView result=new GingerMatchingView();

@@ -4,6 +4,7 @@ Add-Type @"
 using System;
 public class Context { public bool QueryWordsMatchSource; }
 public class GingerUiBusyException : Exception { }
+public class GingerCandidateLimitException : Exception { }
 public static class GingerMenuAccess {
  public static int BusyReads;
  public static int Reads; public static bool ChangeRows; public static bool NeverReady; public static bool ChangeCandidates;
@@ -14,6 +15,7 @@ public static class GingerMenuAccess {
   if(ChangeCandidates) throw new Exception("Candidates changed");
   return new Context { QueryWordsMatchSource=!NeverReady && Reads>1 };
  }
+ public static Context ReadFilterOnlyContext(IntPtr w,uint p,int pause) { throw new Exception("Unexpected filter-only fallback"); }
  public static object ReadProductRows(IntPtr w,uint p) { return null; }
  public static void RequireSameProductRows(object a,object b,bool selected) { if(!selected) throw new Exception("Selection guard disabled"); if(ChangeRows) throw new Exception("Rows changed"); }
  public static void RequireSameSearchContext(Context a,Context b) { if(ChangeCandidates) throw new Exception("Candidates changed"); if(!a.QueryWordsMatchSource || !b.QueryWordsMatchSource) throw new Exception("Stale accepted"); }

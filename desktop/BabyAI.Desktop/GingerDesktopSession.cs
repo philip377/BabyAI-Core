@@ -3,21 +3,11 @@ using System.Text;
 using System.Text.Json;
 namespace BabyAI.Desktop;
 
-internal sealed record GingerDesktopObservation(string Directory, JsonElement Data)
-{
-    public JsonElement Source => Data.GetProperty("source");
-    public string Title => Source.GetProperty("Title").GetString()!;
-    public string Supplier => Source.GetProperty("Supplier").GetString()!;
-    public string Document => Source.GetProperty("DocumentNumber").GetString()!;
-    public int Position => Source.GetProperty("ObservedRowPosition").GetInt32();
-    public int Count => Data.GetProperty("row_count").GetInt32();
-    public bool Linked => Source.GetProperty("LinkedProductText").GetString() is not ("<не указано" or "<не указано>");
-    public string[] Candidates => Data.GetProperty("candidates").EnumerateArray().Select(c => c.GetProperty("Title").GetString()!).ToArray();
-}
 internal sealed class GingerDesktopSession : IDisposable
 {
     private readonly FileStream _lock;
     public string DirectoryPath { get; }
+    public Action<string>? FilterProgress { get; set; }
     public GingerDesktopSession()
     {
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BabyAI");
@@ -43,9 +33,26 @@ internal sealed class GingerDesktopSession : IDisposable
         foreach (var value in new[] { "-NoProfile", "-NonInteractive", "-STA", "-File", path }.Concat(args)) info.ArgumentList.Add(value);
         return info;
     }
-    public async Task<GingerDesktopObservation> ObserveAsync(CancellationToken token,
+    public Task<GingerDesktopObservation> ObserveAsync(CancellationToken token,
+        GingerDesktopObservation? previous = null, int? position = null, string? word = null, bool prepare = false,
+        bool prepareFiltersOnOverflow = false)
+        => GingerDesktopFilterFlow.ObserveAsync(
+            readToken => ReadOnceAsync(readToken, previous, position, word, prepare),
+            PlanFiltersAsync, ReadFilterOnceAsync, token, prepareFiltersOnOverflow, ReportFilter);
+
+    // This is deliberately raw: a filter may still yield an overflow and must not
+    // recursively plan, replay the original Select/Prepare, or repeat that filter.
+    private Task<GingerDesktopObservation> ReadFilterOnceAsync(GingerDesktopObservation previous, string word, CancellationToken token)
+        => ReadOnceAsync(token, previous, word: word);
+
+    private async Task<GingerDesktopObservation> ReadOnceAsync(CancellationToken token,
         GingerDesktopObservation? previous = null, int? position = null, string? word = null, bool prepare = false)
     {
+        token.ThrowIfCancellationRequested();
+        if ((position.HasValue || word is not null) && previous is null || position.HasValue && word is not null)
+            throw new InvalidOperationException("Выбор строки и фильтр требуют отдельного свежего наблюдения.");
+        if (position.HasValue && (position.Value < 1 || position.Value > previous!.Count))
+            throw new InvalidDataException("Неверная позиция строки Ginger.");
         var folder = Path.Combine(DirectoryPath, Guid.NewGuid().ToString("N"));
         var args = new List<string> { "-OutputDirectory", folder };
         if (prepare)
@@ -65,36 +72,39 @@ internal sealed class GingerDesktopSession : IDisposable
         // on the user's price list. Keep a finite budget and immediate user Stop;
         // a deadline is a failure, never an instruction to retry navigation.
         var json = await GingerDiagnostics.RunAsync(Command("ginger-desktop-step.ps1", args.ToArray()), TimeSpan.FromSeconds(120), token, DirectoryPath);
+        token.ThrowIfCancellationRequested();
         using var document = JsonDocument.Parse(json);
-        var observed = new GingerDesktopObservation(folder, document.RootElement.Clone());
-        if (observed.Position < 1 || observed.Position > observed.Count || observed.Count > 500 || observed.Candidates.Length > 256)
-            throw new InvalidDataException("Неверные размеры наблюдения Ginger.");
-        if (previous is not null && (previous.Supplier != observed.Supplier || previous.Document != observed.Document))
-            throw new InvalidDataException("Документ Ginger изменился.");
-        Record($"Прочитана строка {observed.Position}/{observed.Count}: {observed.Title}. Кандидатов: {observed.Candidates.Length}.");
+        var observed = new GingerDesktopObservation(folder, document.RootElement);
+        previous?.RequireSameSource(observed, position);
+        Record($"Прочитана строка {observed.Position}/{observed.Count}: {observed.Title}. Кандидатов: {observed.CandidateCount}" +
+            (observed.NeedsFilters ? "; требуется сужение, содержимое кандидатов не прочитано." : "."));
         return observed;
     }
-    public async Task<GingerDesktopObservation> PrepareFiltersAsync(GingerDesktopObservation observed, CancellationToken token)
+    public Task<GingerDesktopObservation> PrepareFiltersAsync(GingerDesktopObservation observed, CancellationToken token)
+        => GingerDesktopFilterFlow.PrepareFiltersAsync(observed, PlanFiltersAsync, ReadFilterOnceAsync, token, ReportFilter);
+
+    private void ReportFilter(string message)
     {
+        if (FilterProgress is not null) FilterProgress(message);
+        else Record(message);
+    }
+
+    private async Task<string> PlanFiltersAsync(GingerDesktopObservation observed, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
         var python = Environment.GetEnvironmentVariable("BABYAI_PYTHON");
         if (string.IsNullOrWhiteSpace(python)) python = "python";
         var info = new ProcessStartInfo { FileName = python, UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
-        foreach (var arg in new[] { "-X", "utf8", Path.Combine(AppContext.BaseDirectory, "Ginger", "ginger-desktop-plan.py"), Path.Combine(observed.Directory, "search-context.json") }) info.ArgumentList.Add(arg);
-        var json = await GingerDiagnostics.RunAsync(info, TimeSpan.FromSeconds(20), token, DirectoryPath);
-        using var plan = JsonDocument.Parse(json);
-        foreach (var step in plan.RootElement.GetProperty("steps").EnumerateArray())
-        {
-            token.ThrowIfCancellationRequested();
-            var word = step.GetProperty("word").GetString()!;
-            Record("Проверяю и включаю звёздочку слева: " + word);
-            observed = await ObserveAsync(token, observed, word: word);
-        }
-        return observed;
+        foreach (var arg in new[] { "-X", "utf8", Path.Combine(AppContext.BaseDirectory, "Ginger", "ginger-desktop-plan.py"),
+            Path.Combine(observed.Directory, observed.NeedsFilters ? "filter-context.json" : "search-context.json") }) info.ArgumentList.Add(arg);
+        if (observed.NeedsFilters) info.ArgumentList.Add("--filter-only");
+        return await GingerDiagnostics.RunAsync(info, TimeSpan.FromSeconds(20), token, DirectoryPath);
     }
     public async Task<GingerDesktopObservation> MatchAsync(GingerDesktopObservation before, string candidate, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
+        before.RequireComplete();
         if (before.Linked || before.Candidates.Count(c => c == candidate) != 1) throw new InvalidDataException("Пара не уникальна или строка уже сопоставлена.");
         var receipt = Path.Combine(DirectoryPath, "match-" + Guid.NewGuid().ToString("N"));
         Record($"Подтверждено сопоставление строки {before.Position}: {candidate}. Проверяю синее выделение.");

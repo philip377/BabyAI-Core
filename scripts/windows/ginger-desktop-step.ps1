@@ -67,7 +67,11 @@ if($Operation -in @('Select','Filter')) {
  if($Operation -eq 'Select') {
   [void][GingerMenuAccess]::RestoreProductSelection($window,$ownerId,$rows,$Position,$true)
  } else {
-  $expected=Get-Content -LiteralPath (Join-Path $ExpectedDirectory 'search-context.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $searchPath=Join-Path $ExpectedDirectory 'search-context.json'
+  $filterPath=Join-Path $ExpectedDirectory 'filter-context.json'
+  if((Test-Path -LiteralPath $searchPath) -and (Test-Path -LiteralPath $filterPath)){throw 'Ambiguous search observation'}
+  $contextPath=if(Test-Path -LiteralPath $filterPath){$filterPath}else{$searchPath}
+  $expected=Get-Content -LiteralPath $contextPath -Raw -Encoding UTF8 | ConvertFrom-Json
   [void][GingerMenuAccess]::SetSearchWord($window,$ownerId,[GingerCandidateSnapshot]$expected.SearchWords,$Word,[bool]$Enabled,$true)
  }
  Start-Sleep -Milliseconds 600
@@ -79,9 +83,18 @@ $searchDeadline=[Diagnostics.Stopwatch]::StartNew()
 $busyObservationRetried=$false
 do {
  Write-ReadStage 'search_pair'
- # Native reader compares two complete contexts, separated by the settling pause.
+ # A product overflow permits only a separate, verified filter-only context.
+ # It never represents an empty/truncated candidate list and cannot authorize a match.
+ $filterOnly=$false
  try {
-  $second=[GingerMenuAccess]::ReadSearchContext($window,$ownerId,700)
+  try {
+   $second=[GingerMenuAccess]::ReadSearchContext($window,$ownerId,700)
+  } catch {
+   if($_.Exception.GetBaseException() -isnot [GingerCandidateLimitException]){throw}
+   Write-ReadStage 'search_filters_only'
+   $second=[GingerMenuAccess]::ReadFilterOnlyContext($window,$ownerId,700)
+   $filterOnly=$true
+  }
  } catch {
   if($_.Exception.GetBaseException() -isnot [GingerUiBusyException]){throw}
   if($busyObservationRetried -or $searchDeadline.Elapsed.TotalSeconds -ge 10){throw}
@@ -103,5 +116,14 @@ do {
 } while($true)
 Write-ReadStage 'verified'
 [pscustomobject]@{process_id=$ownerId;rows=$rows} | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'before.json') -Encoding UTF8
-$second | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'search-context.json') -Encoding UTF8
-[pscustomobject]@{status='observed';directory=$OutputDirectory;source=$second.Products.Source;candidates=@($second.Products.Candidates);words=@($second.SearchWords.Candidates);row_count=$rows.Length;process_id=$ownerId;search_completion_verified=$false} | ConvertTo-Json -Depth 8
+if($filterOnly) {
+ $second | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'filter-context.json') -Encoding UTF8
+} else {
+ $second | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'search-context.json') -Encoding UTF8
+}
+# Emit a single explicitly typed observation; filter-only has no candidates field.
+if($filterOnly) {
+ [pscustomobject]@{status='needs_filters';directory=$OutputDirectory;source=$second.SearchWords.Source;candidate_count=$second.ProductRows;words=@($second.SearchWords.Candidates);row_count=$rows.Length;process_id=$ownerId;search_completion_verified=$false} | ConvertTo-Json -Depth 8
+} else {
+ [pscustomobject]@{status='observed';directory=$OutputDirectory;source=$second.Products.Source;candidates=@($second.Products.Candidates);words=@($second.SearchWords.Candidates);row_count=$rows.Length;process_id=$ownerId;search_completion_verified=$false} | ConvertTo-Json -Depth 8
+}
