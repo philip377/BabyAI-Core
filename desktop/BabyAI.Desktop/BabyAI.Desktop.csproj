@@ -5,6 +5,7 @@
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>BabyAI.Desktop</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Unix.ico</ApplicationIcon>
     <Platforms>x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <PublishProfile>win-$(Platform).pubxml</PublishProfile>
@@ -23,6 +24,12 @@
   </ItemGroup>
 
   <Import Project="WindowsAppRuntimeInsights.targets" />
+
+  <ItemGroup>
+    <Content Include="Assets\Unix.ico;Assets\Unix.png"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <!-- Bundle the previously validated read-only CPU OCR probe with the
        desktop application. It is launched only by the explicit Ginger UI

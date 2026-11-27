@@ -1,7 +1,6 @@
 using H.NotifyIcon;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 
 namespace BabyAI.Desktop;
 
@@ -28,14 +27,14 @@ public sealed class TrayIconService : IDisposable
 
         var runtime = new MenuFlyoutItem
         {
-            Text = $"BabyAI · {provider}",
+            Text = $"UNIX · {provider}",
             IsEnabled = false,
             Width = 172,
         };
 
         var show = new MenuFlyoutItem
         {
-            Text = "Открыть BabyAI",
+            Text = "Открыть UNIX",
         };
         show.Click += (_, _) => _window.ShowFromTray();
 
@@ -60,18 +59,10 @@ public sealed class TrayIconService : IDisposable
 
         _icon = new TaskbarIcon
         {
-            ToolTipText = $"BabyAI · {provider}",
+            ToolTipText = $"UNIX · {provider}",
             Visibility = Visibility.Visible,
             NoLeftClickDelay = true,
             ContextFlyout = menu,
-            IconSource = new GeneratedIconSource
-            {
-                Text = "✦",
-                FontSize = 36,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255)),
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 93, 108, 255)),
-            },
         };
 
         _window.Activated += Window_Activated;
@@ -85,6 +76,10 @@ public sealed class TrayIconService : IDisposable
         _createAttempted = true;
         try
         {
+            // Load the same multi-size asset embedded in the executable. The
+            // TaskbarIcon owns/disposes Icon; no async URI decoding is needed.
+            _icon.Icon = new System.Drawing.Icon(System.IO.Path.Combine(
+                AppContext.BaseDirectory, "Assets", "Unix.ico"), 32, 32);
             _icon.ForceCreate(enablesEfficiencyMode: false);
             _created = true;
         }
@@ -98,7 +93,7 @@ public sealed class TrayIconService : IDisposable
     public void SetUpdateAvailable(string? version)
     {
         if (_created && !string.IsNullOrWhiteSpace(version))
-            _icon.ToolTipText = $"BabyAI · доступно обновление {version}";
+            _icon.ToolTipText = $"UNIX · доступно обновление {version}";
     }
 
     public void Dispose()

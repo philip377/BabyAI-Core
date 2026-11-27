@@ -129,7 +129,7 @@ internal sealed class GingerProgressTurn
         body.Children.Add(_expander);
         Card = new StackPanel
         {
-            MaxWidth = 336, HorizontalAlignment = HorizontalAlignment.Left,
+            MaxWidth = 630, HorizontalAlignment = HorizontalAlignment.Left,
             Spacing = 4, Margin = new Thickness(0, 0, 0, 10)
         };
         Card.Children.Add(new TextBlock
@@ -140,7 +140,7 @@ internal sealed class GingerProgressTurn
         });
         Card.Children.Add(new Border
         {
-            MaxWidth = 326, Padding = new Thickness(13, 11, 13, 11),
+            MaxWidth = 620, Padding = new Thickness(13, 11, 13, 11),
             CornerRadius = new CornerRadius(18, 18, 18, 7),
             Background = Brush(255, 255, 255, 19), BorderBrush = Brush(171, 187, 255, 22),
             BorderThickness = new Thickness(1), Child = body

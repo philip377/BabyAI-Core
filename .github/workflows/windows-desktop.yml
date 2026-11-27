@@ -19,6 +19,9 @@ jobs:
       - name: Test agent profiles and scoped matching decisions
         shell: pwsh
         run: dotnet run --project tests/AgentProfiles.Smoke/AgentProfiles.Smoke.csproj
+      - name: Test window restoration, DPI and work areas without desktop input
+        shell: pwsh
+        run: dotnet run --project tests/WindowFrame.Smoke/WindowFrame.Smoke.csproj -c Release
       - name: Test Ginger diagnostics subprocess safety
         # Runs only fixed synthetic subprocesses, not a live Ginger session.
         shell: pwsh

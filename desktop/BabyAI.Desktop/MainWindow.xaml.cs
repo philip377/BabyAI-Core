@@ -21,11 +21,11 @@ public sealed partial class MainWindow : Window
     private readonly DesktopSettingsStore _settings = new();
     private readonly TrayIconService _tray;
     private readonly List<string> _conversation = [];
-    private Storyboard? _orbStoryboard;
     private CancellationTokenSource? _chatCancellation;
     private long _chatGeneration;
     private OrbState _state = OrbState.Idle;
     private bool _expanded;
+    private bool _panelTransitioning;
     private bool _dragging;
     private bool _dragMoved;
     private bool _exitRequested;
@@ -43,7 +43,10 @@ public sealed partial class MainWindow : Window
         RuntimeText.Text = BuildRuntimeLabel();
         ConfigureWindow();
         InitializeWindowFrame();
+        InitializeOrbMotion();
+        ConfigureApplicationIcon();
         RestoreWindowPosition();
+        RestoreWindowFromTray();
         ApplyState(OrbState.Idle);
         _tray = new TrayIconService(this);
         AppWindow.Closing += (_, args) =>
@@ -78,6 +81,8 @@ public sealed partial class MainWindow : Window
     public void ShowFromTray()
     {
         WindowExtensions.Show(this);
+        RestoreWindowFromTray();
+        RefreshOrbMotionVisibility();
         Activate();
     }
 
@@ -86,6 +91,7 @@ public sealed partial class MainWindow : Window
         var position = AppWindow.Position;
         _settings.Save(position.X, position.Y);
         WindowExtensions.Hide(this);
+        RefreshOrbMotionVisibility();
     }
 
     public void RequestExit()
@@ -97,6 +103,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         _exitRequested = true;
+        StopOrbMotion();
         _chatCancellation?.Cancel();
         _gingerCancellation?.Cancel();
         CloseCompanions();
@@ -115,21 +122,26 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (_busy)
+        if (_panelTransitioning)
             return;
 
+        _panelTransitioning = true;
+        var refreshing = false;
         try
         {
             _expanded = !_expanded;
             if (!_expanded)
             {
                 await CollapsePanelAsync();
-                ApplyState(OrbState.Idle);
                 return;
             }
 
             await ExpandPanelAsync();
             MessageBox.Focus(FocusState.Programmatic);
+            // Opening the shell must not interrupt a running agent or replace its state.
+            if (_busy || _gingerRunning || _voiceListening)
+                return;
+            refreshing = true;
             ApplyState(OrbState.Thinking);
             SetBusy(true);
             await RefreshStatusAsync();
@@ -140,47 +152,58 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            SetBusy(false);
-            if (_expanded)
-                MessageBox.Focus(FocusState.Programmatic);
+            _panelTransitioning = false;
+            if (refreshing) SetBusy(false);
+            if (_expanded) MessageBox.Focus(FocusState.Programmatic);
         }
     }
 
     private void OrbButton_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
         var point = e.GetCurrentPoint(Root);
-        if (!point.Properties.IsLeftButtonPressed)
+        if (_expanded || !point.Properties.IsLeftButtonPressed)
             return;
 
         _dragging = true;
         _dragMoved = false;
-        _dragOrigin = point.Position;
         _windowOrigin = AppWindow.Position;
+        var scale = Root.XamlRoot?.RasterizationScale ?? 1;
+        _dragOrigin = new Point(_windowOrigin.X + point.Position.X * scale,
+            _windowOrigin.Y + point.Position.Y * scale);
         OrbButton.CapturePointer(e.Pointer);
     }
 
     private void OrbButton_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!_dragging)
-            return;
-
+        if (!_dragging) return;
         var point = e.GetCurrentPoint(Root).Position;
-        var dx = (int)Math.Round(point.X - _dragOrigin.X);
-        var dy = (int)Math.Round(point.Y - _dragOrigin.Y);
-        if (Math.Abs(dx) + Math.Abs(dy) < 4)
-            return;
-
+        var scale = Root.XamlRoot?.RasterizationScale ?? 1;
+        var position = AppWindow.Position;
+        // Screen-space delta stays stable after the HWND moves, including non-100% DPI.
+        var dx = (int)Math.Round(position.X + point.X * scale - _dragOrigin.X);
+        var dy = (int)Math.Round(position.Y + point.Y * scale - _dragOrigin.Y);
+        if (!_dragMoved && Math.Abs(dx) + Math.Abs(dy) < 4 * scale) return;
         _dragMoved = true;
         AppWindow.Move(new PointInt32(_windowOrigin.X + dx, _windowOrigin.Y + dy));
     }
 
     private void OrbButton_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
-        if (!_dragging)
-            return;
-
+        if (!_dragging) return;
         _dragging = false;
         OrbButton.ReleasePointerCapture(e.Pointer);
+        SaveShellPosition();
+    }
+
+    private void OrbButton_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_dragging) return;
+        _dragging = false;
+        SaveShellPosition();
+    }
+
+    private void SaveShellPosition()
+    {
         var position = AppWindow.Position;
         _settings.Save(position.X, position.Y);
     }
@@ -626,6 +649,7 @@ public sealed partial class MainWindow : Window
 
     private async Task ExpandPanelAsync()
     {
+        SetShellExpanded(true);
         Panel.Visibility = Visibility.Visible;
         SetExpandedWindowMode(true);
         ApplyAdaptiveExpandedLayout();
@@ -638,18 +662,24 @@ public sealed partial class MainWindow : Window
         Panel.Visibility = Visibility.Collapsed;
         Panel.Width = 0;
         PanelColumn.Width = new GridLength(0);
+        SetShellExpanded(false);
         SetExpandedWindowMode(false);
     }
 
     private static Task AnimateOpacityAsync(UIElement target, double from, double to, int milliseconds)
     {
+        if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
+        {
+            target.Opacity = to;
+            return Task.CompletedTask;
+        }
         var completion = new TaskCompletionSource();
         var animation = new DoubleAnimation
         {
             From = from,
             To = to,
             Duration = new Duration(TimeSpan.FromMilliseconds(milliseconds)),
-            EnableDependentAnimation = true,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
         };
         Storyboard.SetTarget(animation, target);
         Storyboard.SetTargetProperty(animation, "Opacity");
@@ -657,6 +687,7 @@ public sealed partial class MainWindow : Window
         storyboard.Children.Add(animation);
         storyboard.Completed += (_, _) =>
         {
+            storyboard.Stop();
             target.Opacity = to;
             completion.TrySetResult();
         };
@@ -664,75 +695,7 @@ public sealed partial class MainWindow : Window
         return completion.Task;
     }
 
-    private void ApplyState(OrbState state)
-    {
-        _state = state;
-        _orbStoryboard?.Stop();
 
-        StateGlyph.Text = state switch
-        {
-            OrbState.Idle => "•",
-            OrbState.Listening => "≈",
-            OrbState.Thinking => "✦",
-            OrbState.Answering => "…",
-            OrbState.Executing => "›",
-            OrbState.Approval => "!",
-            OrbState.Done => "✓",
-            OrbState.Error => "×",
-            _ => "•"
-        };
-
-        var visual = state switch
-        {
-            OrbState.Idle => new OrbVisual(1.035, 0.26, 2600, Color.FromArgb(255, 124, 141, 255), Color.FromArgb(255, 184, 200, 255), Color.FromArgb(255, 109, 124, 255)),
-            OrbState.Listening => new OrbVisual(1.09, 0.48, 850, Color.FromArgb(255, 99, 220, 255), Color.FromArgb(255, 126, 220, 255), Color.FromArgb(255, 65, 151, 255)),
-            OrbState.Thinking => new OrbVisual(1.075, 0.58, 650, Color.FromArgb(255, 174, 122, 255), Color.FromArgb(255, 163, 132, 255), Color.FromArgb(255, 111, 90, 255)),
-            OrbState.Answering => new OrbVisual(1.055, 0.46, 920, Color.FromArgb(255, 125, 164, 255), Color.FromArgb(255, 153, 181, 255), Color.FromArgb(255, 79, 112, 229)),
-            OrbState.Executing => new OrbVisual(1.07, 0.55, 720, Color.FromArgb(255, 83, 205, 214), Color.FromArgb(255, 111, 218, 224), Color.FromArgb(255, 45, 156, 171)),
-            OrbState.Approval => new OrbVisual(1.055, 0.62, 1100, Color.FromArgb(255, 255, 190, 86), Color.FromArgb(255, 255, 204, 118), Color.FromArgb(255, 227, 148, 44)),
-            OrbState.Done => new OrbVisual(1.045, 0.42, 1800, Color.FromArgb(255, 76, 212, 145), Color.FromArgb(255, 108, 236, 173), Color.FromArgb(255, 49, 165, 112)),
-            OrbState.Error => new OrbVisual(1.045, 0.64, 420, Color.FromArgb(255, 255, 96, 113), Color.FromArgb(255, 255, 132, 145), Color.FromArgb(255, 208, 62, 84)),
-            _ => new OrbVisual(1.035, 0.26, 2600, Color.FromArgb(255, 124, 141, 255), Color.FromArgb(255, 184, 200, 255), Color.FromArgb(255, 109, 124, 255)),
-        };
-
-        MidStop.Color = visual.Mid;
-        EdgeStop.Color = visual.Edge;
-        OrbGlow.Fill = new SolidColorBrush(visual.Glow);
-        OrbRing.Stroke = new SolidColorBrush(Color.FromArgb(210, visual.Glow.R, visual.Glow.G, visual.Glow.B));
-        OrbButton.Opacity = state == OrbState.Thinking ? 0.94 : 1.0;
-        _orbStoryboard = CreateOrbPulseStoryboard(visual.Scale, visual.GlowOpacity, visual.DurationMs);
-        _orbStoryboard.Begin();
-    }
-
-    private Storyboard CreateOrbPulseStoryboard(double peakScale, double peakGlowOpacity, int durationMs)
-    {
-        var storyboard = new Storyboard { RepeatBehavior = RepeatBehavior.Forever, AutoReverse = true };
-        var duration = new Duration(TimeSpan.FromMilliseconds(durationMs));
-
-        var scaleX = new DoubleAnimation { From = 1.0, To = peakScale, Duration = duration, EnableDependentAnimation = true };
-        Storyboard.SetTarget(scaleX, OrbScale);
-        Storyboard.SetTargetProperty(scaleX, "ScaleX");
-        storyboard.Children.Add(scaleX);
-
-        var scaleY = new DoubleAnimation { From = 1.0, To = peakScale, Duration = duration, EnableDependentAnimation = true };
-        Storyboard.SetTarget(scaleY, OrbScale);
-        Storyboard.SetTargetProperty(scaleY, "ScaleY");
-        storyboard.Children.Add(scaleY);
-
-        var glow = new DoubleAnimation { From = Math.Max(0.12, peakGlowOpacity * 0.45), To = peakGlowOpacity, Duration = duration, EnableDependentAnimation = true };
-        Storyboard.SetTarget(glow, OrbGlow);
-        Storyboard.SetTargetProperty(glow, "Opacity");
-        storyboard.Children.Add(glow);
-
-        var ring = new DoubleAnimation { From = 0.48, To = 0.96, Duration = duration, EnableDependentAnimation = true };
-        Storyboard.SetTarget(ring, OrbRing);
-        Storyboard.SetTargetProperty(ring, "Opacity");
-        storyboard.Children.Add(ring);
-
-        return storyboard;
-    }
-
-    private sealed record OrbVisual(double Scale, double GlowOpacity, int DurationMs, Color Glow, Color Mid, Color Edge);
 }
 
 public enum OrbState
