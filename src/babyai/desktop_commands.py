@@ -271,7 +271,8 @@ class DesktopCommands:
             else:
                 record = revoke_answer_rating(directory, payload.get("answer_id"),
                     user_feedback=payload.get("feedback"))
-            return {"ok": True, "answer_id": record["answer_id"]}
+            active = not (directory / (record["answer_id"] + ".revoked.json")).exists()
+            return {"ok": True, "answer_id": record["answer_id"], "rating_active": active}
 
         if command in {"ginger.teach.preview", "ginger.recognize.preview"}:
             from .ginger_teacher import consult

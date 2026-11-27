@@ -183,3 +183,4 @@ var frozenGate = new GingerChatMatchGate(mutable, "chat-1", "A");
 mutable.Item.Candidates[1] = "C";
 await RejectBeforeWrite(frozenGate, mutable);
 Console.WriteLine("Ginger chat confirmation: one write, fresh identity, chat scope, expiry, prior claim, cancellation and verified result guards passed.");
+await ReviewTests.Run();

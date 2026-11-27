@@ -65,9 +65,13 @@ def test_desktop_rating_and_revocation_without_model_or_actions(tmp_path, monkey
     monkeypatch.setattr(commands, '_provider', lambda: pytest.fail('No model call'))
     monkeypatch.setattr(commands, '_core', lambda: pytest.fail('No agent actions'))
     saved = commands.execute('ginger.answer.rate', dict(report=report(), points=10, feedback='Верно'))
+    assert saved['rating_active'] is True
     directory = tmp_path / 'ginger-answer-ratings'
     assert len(active_answer_ratings(directory)) == 1
-    commands.execute('ginger.answer.revoke', dict(answer_id=saved['answer_id'], feedback='Отзываю'))
+    revoked = commands.execute('ginger.answer.revoke', dict(answer_id=saved['answer_id'], feedback='Отзываю'))
+    assert revoked['rating_active'] is False
+    repeated = commands.execute('ginger.answer.rate', dict(report=report(), points=10, feedback='Верно'))
+    assert repeated == {'ok': True, 'answer_id': saved['answer_id'], 'rating_active': False}
     assert active_answer_ratings(directory) == []
     assert list(tmp_path.iterdir()) == [directory]
 

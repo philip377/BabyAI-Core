@@ -9,7 +9,7 @@ public sealed partial class MainWindow
     private async void GingerNavigationButton_Click(object sender, RoutedEventArgs e)
     {
         if (_gingerDialogOpen || _busy || _gingerRunning) return;
-        InvalidateGingerChatMatch();
+        InvalidateGingerChatContext();
         _gingerDialogOpen = true;
         GingerDesktopSession? session = null;
         GingerDesktopObservation? observation = null;
@@ -252,9 +252,12 @@ public sealed partial class MainWindow
             ratingBusy = true; rateAnswer.IsEnabled = askTeacher.IsEnabled = false;
             try
             {
-                answerId = await _bridge.RateGingerAnswerAsync(ratedReport.Value, points, feedback.Text.Trim());
-                revokeAnswer.IsEnabled = true;
-                Log($"Оценка ответа {points}/10 сохранена. Веса модели и разрешения Ginger не изменены.");
+                var receipt = await _bridge.RateGingerAnswerReviewAsync(ratedReport.Value, points, feedback.Text.Trim());
+                answerId = receipt.AnswerId;
+                revokeAnswer.IsEnabled = receipt.Active;
+                Log(receipt.Active
+                    ? $"Оценка ответа {points}/10 сохранена. Веса модели и разрешения Ginger не изменены."
+                    : "Эта оценка ранее отозвана и остаётся исключённой. Повторное сохранение её не восстановило.");
             }
             catch (Exception ex) { Log("Не удалось сохранить оценку: " + ex.Message); rateAnswer.IsEnabled = true; }
             finally { ratingBusy = false; askTeacher.IsEnabled = true; }

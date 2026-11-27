@@ -229,7 +229,7 @@ public sealed partial class MainWindow : Window
         if (message.Length == 0)
             return;
 
-        InvalidateGingerChatMatch();
+        InvalidateGingerChatContext();
         if (GingerChatIntent.IsStart(message))
         {
             await RunGingerFromChatAsync(message);
@@ -460,6 +460,7 @@ public sealed partial class MainWindow : Window
     private void SetBusy(bool busy, bool canStop = false)
     {
         _busy = busy;
+        UpdateGingerChatReviewControls();
         SendButton.IsEnabled = !busy;
         NewChatButton.IsEnabled = !busy;
         GingerNavigationButton.IsEnabled = !busy;

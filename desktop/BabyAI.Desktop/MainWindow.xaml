@@ -427,6 +427,20 @@
                                                 Click="GingerChatReject_Click" />
                                     </StackPanel>
                                 </Border>
+                                <Expander x:Name="GingerChatReviewCard" Visibility="Collapsed"
+                                          Header="Оценить ответ UNIX" HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Stretch">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock x:Name="GingerChatReviewSource" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                        <ComboBox x:Name="GingerChatScore" Header="Оценка ответа от 0 до 10"
+                                                  PlaceholderText="Выбери оценку" HorizontalAlignment="Stretch" />
+                                        <TextBox x:Name="GingerChatFeedback" Header="Пояснение к оценке / причина отзыва"
+                                                 MaxLength="4000" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" MaxHeight="160" />
+                                        <Button x:Name="GingerChatRateButton" Content="Сохранить оценку ответа" Click="GingerChatRate_Click" />
+                                        <Button x:Name="GingerChatRevokeRatingButton" Content="Отозвать оценку" Click="GingerChatRevokeRating_Click" />
+                                        <TextBlock x:Name="GingerChatRatingStatus" TextWrapping="Wrap" FontSize="12" AutomationProperties.LiveSetting="Polite" />
+                                    </StackPanel>
+                                </Expander>
                             </StackPanel>
                         </ScrollViewer>
                     </Border>

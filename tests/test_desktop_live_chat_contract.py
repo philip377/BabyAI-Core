@@ -1,4 +1,15 @@
 from pathlib import Path
+import xml.etree.ElementTree as ET
+
+
+def test_ginger_review_and_confirmation_belong_to_conversation_not_sidebar() -> None:
+    root = Path(__file__).resolve().parents[1]
+    tree = ET.parse(root / "desktop" / "BabyAI.Desktop" / "MainWindow.xaml")
+    name = "{http://schemas.microsoft.com/winfx/2006/xaml}Name"
+    conversation = next(item for item in tree.iter() if item.get(name) == "ConversationScroller")
+    children = {item.get(name) for item in conversation.iter()}
+    assert {"GingerChatConfirmationCard", "GingerChatReviewCard", "GingerChatScore",
+            "GingerChatRateButton", "GingerChatRevokeRatingButton"} <= children
 
 
 def test_desktop_live_chat_exposes_transcript_runtime_and_stop_controls() -> None:
