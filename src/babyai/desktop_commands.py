@@ -274,6 +274,11 @@ class DesktopCommands:
             active = not (directory / (record["answer_id"] + ".revoked.json")).exists()
             return {"ok": True, "answer_id": record["answer_id"], "rating_active": active}
 
+        if command == "ginger.intent.preview":
+            from .ginger_chat_intent import review_intent
+            return {"ok": True, "command": command,
+                    **review_intent(self._provider(), payload.get("message"))}
+
         if command in {"ginger.teach.preview", "ginger.recognize.preview"}:
             from .ginger_teacher import consult
             return {"ok": True, "command": command,

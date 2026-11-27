@@ -13,6 +13,7 @@ foreach (var message in new[] { "не продолжай сопоставлен�
     Require(!GingerChatIntent.IsStart(message), "Unsafe routing: " + message);
 
 var source = new GingerChatItem("Supplier", "123", 2, "Product", false, []);
+await IntentTests.Run();
 var stages = new List<GingerChatStage>();
 int reads = 0, filters = 0, comparisons = 0;
 void Report(GingerChatStage stage, string _) => stages.Add(stage);

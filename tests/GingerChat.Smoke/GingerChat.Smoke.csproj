@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatFlow.cs" Link="GingerChatFlow.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatIntent.cs" Link="GingerChatIntent.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatMatchGate.cs" Link="GingerChatMatchGate.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatAnswerReview.cs" Link="GingerChatAnswerReview.cs" /></ItemGroup>
   <ItemGroup>

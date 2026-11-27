@@ -230,11 +230,8 @@ public sealed partial class MainWindow : Window
             return;
 
         InvalidateGingerChatContext();
-        if (GingerChatIntent.IsStart(message))
-        {
-            await RunGingerFromChatAsync(message);
+        if (await TryRouteGingerFromChatAsync(message))
             return;
-        }
 
         _chatCancellation?.Dispose();
         var chatCancellation = new CancellationTokenSource();

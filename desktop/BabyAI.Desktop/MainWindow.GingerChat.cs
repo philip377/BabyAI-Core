@@ -36,7 +36,90 @@ public sealed partial class MainWindow
         animation.Begin();
     }
 
-    private async Task RunGingerFromChatAsync(string message)
+    private async Task<bool> TryRouteGingerFromChatAsync(string message)
+    {
+        if (GingerChatIntent.IsStart(message))
+        {
+            await RunGingerFromChatAsync(message);
+            return true;
+        }
+        if (!GingerChatIntent.MayNeedReview(message)) return false;
+        if (_gingerRunning || _gingerDialogOpen || _agentsDialogOpen ||
+            ApprovalCard.Visibility == Visibility.Visible)
+        {
+            ReplyText.Text = "Сначала заверши текущее действие или закрой окно агента.";
+            return true;
+        }
+
+        StopVoiceListening(updateUi: false);
+        _chatCancellation?.Dispose();
+        using var cancellation = new CancellationTokenSource();
+        _chatCancellation = cancellation;
+        var generation = Interlocked.Increment(ref _chatGeneration);
+        var selectedChat = _selectedChatId;
+        string? chatId = null;
+        var route = GingerChatRoute.Other;
+        string? reply = null;
+        SetBusy(true, canStop: true);
+        ApplyState(OrbState.Thinking);
+        CoreStatusText.Text = "Core: понимаю задание";
+        ShowGingerChatStep("Понимаю задание. Компьютером пока не управляю…", true);
+        try
+        {
+            chatId = (await _bridge.NavigationAsync("chat.current")).GetProperty("active_chat_id").GetString();
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(chatId))
+                throw new InvalidDataException("Не удалось определить текущий чат.");
+            route = await GingerChatIntent.ResolveAsync(message, _bridge.PreviewGingerIntentAsync, cancellation.Token);
+            var currentChat = (await _bridge.NavigationAsync("chat.current")).GetProperty("active_chat_id").GetString();
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (generation != Volatile.Read(ref _chatGeneration) || selectedChat != _selectedChatId || chatId != currentChat)
+                throw new OperationCanceledException("Чат изменился; результат разбора не применяется.");
+            if (route == GingerChatRoute.Clarify)
+                reply = "Задание требует уточнения. Сейчас из чата можно подготовить кандидатов для текущей " +
+                    "выделенной строки Ginger. Выбор другого товара, поставщика или количества строк ещё не поддержан. " +
+                    "Работа с Ginger не запускалась.";
+        }
+        catch (OperationCanceledException)
+        {
+            reply = "Разбор задания остановлен. Ginger не запущен.";
+        }
+        catch (Exception ex)
+        {
+            reply = "Не удалось разобрать задание. Ginger не запущен. " + ex.Message;
+            StartupDiagnostics.Log("Ginger chat intent failed", ex);
+        }
+        finally
+        {
+            if (ReferenceEquals(_chatCancellation, cancellation)) _chatCancellation = null;
+            ShowGingerChatStep(reply ?? "Разбор задания завершён.", false);
+            CoreStatusText.Text = "Core: подключён";
+            ApplyState(OrbState.Idle);
+            SetBusy(false);
+        }
+        if (reply is not null)
+        {
+            // A failed, unclear or cancelled interpretation never falls through
+            // to the general agent with a half-understood executable request.
+            if (selectedChat != _selectedChatId) return true;
+            AppendConversation("Вы", message);
+            AppendConversation("UNIX", reply);
+            MessageBox.Text = string.Empty;
+            SetBusy(true);
+            try
+            {
+                if (chatId is not null) await _bridge.RecordGingerChatAsync(chatId, message, reply);
+            }
+            catch (Exception ex) { StartupDiagnostics.Log("Ginger intent history failed", ex); }
+            finally { SetBusy(false); }
+            return true;
+        }
+        if (route == GingerChatRoute.Other) return false;
+        await RunGingerFromChatAsync(message, expectedChatId: chatId);
+        return true;
+    }
+
+    private async Task RunGingerFromChatAsync(string message, string? expectedChatId = null)
     {
         if (_busy || _gingerRunning || _gingerDialogOpen || _agentsDialogOpen) return;
         if (ApprovalCard.Visibility == Visibility.Visible)
@@ -92,6 +175,8 @@ public sealed partial class MainWindow
         {
             chatId = (await _bridge.NavigationAsync("chat.current")).GetProperty("active_chat_id").GetString();
             cancellation.Token.ThrowIfCancellationRequested();
+            if (expectedChatId is not null && chatId != expectedChatId)
+                throw new OperationCanceledException("Чат изменился после разбора задания.");
             session = new GingerDesktopSession();
             var flow = new GingerChatFlow(
                 async token =>

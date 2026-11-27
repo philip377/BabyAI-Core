@@ -1,18 +1,7 @@
-using System.Text.RegularExpressions;
-
 namespace BabyAI.Desktop;
 
 internal enum GingerChatStage { Started, Reading, Filtering, Comparing, Review, Empty, Cancelled, Failed }
 internal sealed record GingerChatItem(string Supplier, string Document, int Position, string Title, bool Linked, string[] Candidates);
-
-// Only explicit requests from the chat input enter this path. Model output and
-// Ginger text never route tasks or grant permission to match a product.
-internal static class GingerChatIntent
-{
-    public static bool IsStart(string message) => message.Length <= 200 && Regex.IsMatch(message.Trim(),
-        @"\A(?:(?:unix|юникс)[,\s]+)?(?:пожалуйста[,\s]+)?(?:надо бы |давай )?(?:продолжи(?:ть|м)?|начни|начать|запусти|запустить|возобнови)\s+сопоставление(?:\s+(?:в\s+)?(?:ginger|джинджер))?(?:[,\s]+пожалуйста)?[.!]*\z",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-}
 
 internal sealed class GingerChatFlow(
     Func<CancellationToken, Task<GingerChatItem>> read,
