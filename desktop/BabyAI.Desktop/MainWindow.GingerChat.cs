@@ -190,6 +190,7 @@ public sealed partial class MainWindow
                 text.AppendLine();
             }
         text.Append(FormatGingerIdentityEvidence(result));
+        text.Append(FormatGingerVolumeEvidence(result));
         return text.ToString().TrimEnd();
     }
 
@@ -205,6 +206,27 @@ public sealed partial class MainWindow
         {
             text.AppendLine(item.GetProperty("candidate").GetString());
             text.AppendLine(Fields(item.GetProperty("candidate_fields")) + ". " + item.GetProperty("reason").GetString());
+        }
+        return text.ToString();
+    }
+
+    private static string FormatGingerVolumeEvidence(JsonElement result)
+    {
+        if (!result.TryGetProperty("volume_evidence", out var evidence)) return "";
+        static string Measure(JsonElement value)
+        {
+            var quotes = string.Join(", ", value.GetProperty("evidence").EnumerateArray()
+                .Select(item => "«" + item.GetString() + "»"));
+            var ml = value.GetProperty("millilitres").GetString();
+            return (quotes.Length == 0 ? "Явный объём не прочитан" : quotes)
+                + (ml is null ? ". " + value.GetProperty("reason").GetString() : " → " + ml + " мл");
+        }
+        var text = new StringBuilder("\nПроверка указанных объёмов:\n");
+        text.AppendLine("В прайсе: " + Measure(evidence.GetProperty("source_measure")));
+        foreach (var item in evidence.GetProperty("candidates").EnumerateArray())
+        {
+            text.AppendLine(item.GetProperty("candidate").GetString());
+            text.AppendLine(Measure(item.GetProperty("measure")) + ". " + item.GetProperty("reason").GetString());
         }
         return text.ToString();
     }

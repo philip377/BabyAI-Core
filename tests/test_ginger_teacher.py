@@ -9,6 +9,8 @@ def isolate_identity_review(monkeypatch):
     # Grounding and extraction are tested in test_ginger_identity_evidence.
     monkeypatch.setattr('babyai.ginger_teacher.review_identity', lambda provider, source, candidates:
         dict(source=source, candidates=[dict(candidate=c, identity='match') for c in candidates], can_match=False))
+    monkeypatch.setattr('babyai.ginger_teacher.review_volume', lambda source, candidates:
+        dict(source=source, candidates=[dict(candidate=c, volume='match') for c in candidates], can_match=False))
 
 
 class Model:
@@ -172,3 +174,30 @@ def test_full_name_conflict_excludes_only_that_candidate(monkeypatch):
     result = consult(ComparisonModel([{}, {}]), payload(), recognize=True)
     assert result['candidate'] == 'A'
     assert result['comparisons'][1]['attributes']['identity'] == 'conflict'
+
+
+@pytest.mark.parametrize('source,candidates,model_answers,selected,volumes', [
+    ('Acme Bloom EDP 100ml', ['Acme BLOOM EDP 100ml', 'Acme BLOOM EDP 50ml'],
+     [{}, {}], 'Acme BLOOM EDP 100ml', ['match', 'conflict']),
+    ('Acme Bloom EDP 2x30ml', ['Acme BLOOM EDP 60ml'], [{}], None, ['unknown']),
+    ('Acme Bloom EDP', ['Acme BLOOM EDP 100ml'], [{}], None, ['unknown']),
+    ('Acme Bloom EDP 100ml', ['Acme BLOOM EDP 100ml'], [{'volume': 'unknown'}], None, ['unknown']),
+    ('Acme Bloom EDP 100ml', ['Acme BLOOM EDP 100ml'], [{'volume': 'conflict'}], None, ['conflict']),
+    ('Acme Bloom EDP 100ml', ['Acme BLOOM EDP 100ml', 'Acme BLOOM EDP'],
+     [{}, {}], None, ['match', 'unknown']),
+    ('Acme Bloom EDP 100ml', ['Acme BLOOM EDP 100ml', 'Acme BLOOM EDP'],
+     [{}, {'volume': 'conflict'}], None, ['match', 'unknown']),
+    ('Acme Bloom EDP 2x30ml', ['Acme BLOOM EDP 60ml'], [{'volume': 'conflict'}], None, ['unknown']),
+])
+def test_explicit_volume_guards_model_proposals(monkeypatch, source, candidates, model_answers, selected, volumes):
+    from babyai.ginger_volume_evidence import review_volume
+    monkeypatch.setattr('babyai.ginger_teacher.review_volume', review_volume)
+    result = consult(ComparisonModel(model_answers), payload() | dict(source=source, candidates=candidates), recognize=True)
+    assert result['candidate'] == selected
+    assert [c['attributes']['volume'] for c in result['comparisons']] == volumes
+    assert result['volume_evidence']['can_match'] is False
+
+
+def test_volume_review_does_not_change_confirmed_lesson_path(monkeypatch):
+    monkeypatch.setattr('babyai.ginger_teacher.review_volume', lambda *_: pytest.fail('Lesson path unchanged'))
+    assert consult(Model(), payload())['candidate'] == 'A'

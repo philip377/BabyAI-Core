@@ -1,6 +1,7 @@
 """Read-only model consultation. Its output never authorizes desktop actions."""
 import json
 from .ginger_identity_evidence import review_identity
+from .ginger_volume_evidence import review_volume
 
 
 def _recognize(provider, supplier, source, candidates):
@@ -10,6 +11,7 @@ def _recognize(provider, supplier, source, candidates):
     if len(candidates) > 10:
         raise ValueError("Для сравнения моделью сузьте поиск до 10 кандидатов.")
     identity_review = review_identity(provider, source, candidates)
+    volume_review = review_volume(source, candidates)
     fields = {"identity", "volume", "concentration", "tester", "variant"}
     comparisons = []
     for index, candidate in enumerate(candidates):
@@ -45,6 +47,16 @@ def _recognize(provider, supplier, source, candidates):
             attributes['identity'] = 'conflict'
         elif identity == 'unknown' and attributes['identity'] != 'conflict':
             attributes['identity'] = 'unknown'
+        # A model must not turn a multipack, absent size or different explicit
+        # measure into a single equal bottle. Matching measures cannot resolve
+        # any uncertainty/conflict from the independent model comparison.
+        volume = volume_review['candidates'][index]['volume']
+        if volume == 'conflict':
+            attributes['volume'] = 'conflict'
+        elif volume == 'unknown':
+            # Unsupported notation cannot prove a difference either. Retaining
+            # that conflict could wrongly eliminate a plausible alternative.
+            attributes['volume'] = 'unknown'
         status = ("conflict" if "conflict" in attributes.values() else
                   "unknown" if "unknown" in attributes.values() else "match")
         comparisons.append(dict(index=index, candidate=candidate,
@@ -57,7 +69,8 @@ def _recognize(provider, supplier, source, candidates):
                 candidate=selected,
                 explanation=("Найден один соответствующий кандидат; остальные имеют различия."
                              if unique else "Однозначный выбор не подтверждён: нужна ручная проверка."),
-                comparisons=comparisons, identity_evidence=identity_review)
+                comparisons=comparisons, identity_evidence=identity_review,
+                volume_evidence=volume_review)
 
 
 def consult(provider, payload, *, recognize=False):
