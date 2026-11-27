@@ -3,6 +3,14 @@ import pytest
 from babyai.ginger_teacher import consult
 
 
+@pytest.fixture(autouse=True)
+def isolate_identity_review(monkeypatch):
+    # These tests exercise attribute aggregation and the desktop bridge.
+    # Grounding and extraction are tested in test_ginger_identity_evidence.
+    monkeypatch.setattr('babyai.ginger_teacher.review_identity', lambda provider, source, candidates:
+        dict(source=source, candidates=[dict(candidate=c, identity='match') for c in candidates], can_match=False))
+
+
 class Model:
     def __init__(self, candidate="A"):
         self.candidate = candidate
@@ -142,3 +150,25 @@ def test_recognition_does_not_accept_duplicate_matches():
 def test_recognition_rejects_invalid_attribute(value):
     with pytest.raises(ValueError):
         consult(ComparisonModel([{'volume': value}]), payload(), recognize=True)
+
+
+@pytest.mark.parametrize('narrow,original,expected', [
+    ('conflict', 'match', 'conflict'), ('unknown', 'match', 'unknown'),
+    ('match', 'unknown', 'unknown'), ('match', 'conflict', 'conflict'),
+    ('unknown', 'conflict', 'conflict'),
+])
+def test_identity_review_never_promotes_uncertain_or_conflicting_attributes(monkeypatch, narrow, original, expected):
+    evidence = dict(source='source', candidates=[dict(candidate='A', identity=narrow)], can_match=False)
+    monkeypatch.setattr('babyai.ginger_teacher.review_identity', lambda *_: evidence)
+    result = consult(ComparisonModel([{'identity': original}]), payload() | {'candidates': ['A']}, recognize=True)
+    assert result['candidate'] is None
+    assert result['comparisons'][0]['attributes']['identity'] == expected
+    assert result['identity_evidence'] == evidence
+
+
+def test_full_name_conflict_excludes_only_that_candidate(monkeypatch):
+    monkeypatch.setattr('babyai.ginger_teacher.review_identity', lambda *_:
+        dict(candidates=[dict(identity='match'), dict(identity='conflict')], can_match=False))
+    result = consult(ComparisonModel([{}, {}]), payload(), recognize=True)
+    assert result['candidate'] == 'A'
+    assert result['comparisons'][1]['attributes']['identity'] == 'conflict'

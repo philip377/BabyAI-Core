@@ -222,6 +222,7 @@ public sealed partial class MainWindow
                         lessonPreview.Text += "\n" + comparison.GetProperty("candidate").GetString() + " — " + string.Join("; ", details);
                     }
                 }
+                lessonPreview.Text += FormatGingerIdentityEvidence(result);
                 if (candidate is not null && before.Candidates.Count(c => c == candidate) == 1) candidates.SelectedItem = candidate;
                 ratedReport = JsonSerializer.SerializeToElement(new {
                     request = new { supplier = before.Supplier, source = before.Title, lesson = text, candidates = before.Candidates },

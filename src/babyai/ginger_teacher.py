@@ -1,5 +1,6 @@
 """Read-only model consultation. Its output never authorizes desktop actions."""
 import json
+from .ginger_identity_evidence import review_identity
 
 
 def _recognize(provider, supplier, source, candidates):
@@ -8,6 +9,7 @@ def _recognize(provider, supplier, source, candidates):
 
     if len(candidates) > 10:
         raise ValueError("Для сравнения моделью сузьте поиск до 10 кандидатов.")
+    identity_review = review_identity(provider, source, candidates)
     fields = {"identity", "volume", "concentration", "tester", "variant"}
     comparisons = []
     for index, candidate in enumerate(candidates):
@@ -36,6 +38,13 @@ def _recognize(provider, supplier, source, candidates):
                 or any(not isinstance(v, str) or v not in {"match", "conflict", "unknown"}
                        for v in attributes.values())):
             raise ValueError("Модель не сравнила все характеристики кандидата.")
+        # The narrow review can reveal a missed name difference or uncertainty.
+        # It never promotes an unknown/conflicting attribute to a match.
+        identity = identity_review['candidates'][index]['identity']
+        if identity == 'conflict':
+            attributes['identity'] = 'conflict'
+        elif identity == 'unknown' and attributes['identity'] != 'conflict':
+            attributes['identity'] = 'unknown'
         status = ("conflict" if "conflict" in attributes.values() else
                   "unknown" if "unknown" in attributes.values() else "match")
         comparisons.append(dict(index=index, candidate=candidate,
@@ -48,7 +57,7 @@ def _recognize(provider, supplier, source, candidates):
                 candidate=selected,
                 explanation=("Найден один соответствующий кандидат; остальные имеют различия."
                              if unique else "Однозначный выбор не подтверждён: нужна ручная проверка."),
-                comparisons=comparisons)
+                comparisons=comparisons, identity_evidence=identity_review)
 
 
 def consult(provider, payload, *, recognize=False):

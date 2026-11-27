@@ -189,6 +189,23 @@ public sealed partial class MainWindow
                 }
                 text.AppendLine();
             }
+        text.Append(FormatGingerIdentityEvidence(result));
         return text.ToString().TrimEnd();
+    }
+
+    private static string FormatGingerIdentityEvidence(JsonElement result)
+    {
+        if (!result.TryGetProperty("identity_evidence", out var evidence)) return "";
+        static string Fields(JsonElement value) => value.ValueKind == JsonValueKind.Object
+            ? $"бренд «{value.GetProperty("brand").GetString()}»; аромат «{value.GetProperty("fragrance").GetString()}»"
+            : "бренд и полное название не удалось выделить";
+        var text = new StringBuilder("\nРазбор названий моделью — проверь выделенные слова:\n");
+        text.AppendLine("В прайсе: " + Fields(evidence.GetProperty("source_fields")));
+        foreach (var item in evidence.GetProperty("candidates").EnumerateArray())
+        {
+            text.AppendLine(item.GetProperty("candidate").GetString());
+            text.AppendLine(Fields(item.GetProperty("candidate_fields")) + ". " + item.GetProperty("reason").GetString());
+        }
+        return text.ToString();
     }
 }
