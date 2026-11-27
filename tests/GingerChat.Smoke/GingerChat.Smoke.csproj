@@ -7,6 +7,7 @@
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatIntent.cs" Link="GingerChatIntent.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerBottleResearch.cs" Link="GingerBottleResearch.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatMatchGate.cs" Link="GingerChatMatchGate.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerTaskNotification.cs" Link="GingerTaskNotification.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatAnswerReview.cs" Link="GingerChatAnswerReview.cs" /></ItemGroup>
   <ItemGroup>
     <Compile Include="../../desktop/BabyAI.Desktop/GingerChatLessonReview.cs" Link="GingerChatLessonReview.cs" />

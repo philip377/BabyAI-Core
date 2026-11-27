@@ -187,3 +187,4 @@ await RejectBeforeWrite(frozenGate, mutable);
 Console.WriteLine("Ginger chat confirmation: one write, fresh identity, chat scope, expiry, prior claim, cancellation and verified result guards passed.");
 await ReviewTests.Run();
 await LessonTests.Run();
+await NotificationTests.Run();

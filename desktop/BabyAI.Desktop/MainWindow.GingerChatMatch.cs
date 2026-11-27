@@ -55,6 +55,8 @@ public sealed partial class MainWindow
         var turn = CreateConversationTurn("UNIX", transcript.ToString());
         GingerDesktopSession? session = null;
         OverlappedPresenter? minimized = null;
+        var matchVerified = false;
+        var matchCancelled = false;
         void Report(string text, bool active)
         {
             transcript.AppendLine(text);
@@ -89,6 +91,7 @@ public sealed partial class MainWindow
                 (stage, text) =>
                 {
                     var verified = stage == GingerChatMatchStage.Verified;
+                    if (verified) matchVerified = true;
                     Report(text, !verified);
                     SetGingerPhase(verified ? GingerCompanionPhase.Completed : GingerCompanionPhase.Checking);
                     ApplyState(verified ? OrbState.Done : OrbState.Executing);
@@ -97,6 +100,7 @@ public sealed partial class MainWindow
         }
         catch (OperationCanceledException)
         {
+            matchCancelled = true;
             Report("Остановлено. Эта попытка не повторяется; продолжение требует нового чтения Ginger.", false);
             SetGingerPhase(GingerCompanionPhase.Cancelled);
             ApplyState(OrbState.Idle);
@@ -126,6 +130,7 @@ public sealed partial class MainWindow
                 StartupDiagnostics.Log("Ginger chat match history failed", ex);
             }
             SetBusy(false);
+            NotifyGingerOutcome(GingerTaskNotification.ForMatch(matchVerified, matchCancelled), pending.ChatId);
         }
     }
 

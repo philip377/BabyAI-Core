@@ -143,6 +143,7 @@ public sealed partial class MainWindow
         string? proposedCandidate = null;
         GingerChatAnswerReview? review = null;
         string? chatId = null;
+        var notificationKind = GingerNotificationKind.Failed;
         static GingerChatItem Item(GingerDesktopObservation value) => new(
             value.Supplier, value.Document, value.Position, value.Title, value.Linked, value.Candidates);
         void Report(GingerChatStage stage, string text)
@@ -219,9 +220,12 @@ public sealed partial class MainWindow
                 transcript.AppendLine("Здесь можно оценить ответ или объяснить правило поставщика. Перед сохранением урока проверь понимание модели в блоке «Объяснить UNIX».");
             ReplaceConversationTurn(turn, "UNIX", transcript.ToString());
             session.Record(proposal);
+            notificationKind = GingerTaskNotification.ForPreparation(
+                observation?.Linked == true, _gingerChatConfirmation is not null);
         }
         catch (OperationCanceledException)
         {
+            notificationKind = GingerNotificationKind.Cancelled;
             InvalidateGingerChatContext();
             if (!transcript.ToString().Contains("Остановлено.", StringComparison.Ordinal))
                 Report(GingerChatStage.Cancelled, "Остановлено. Агент не продолжает работу.");
@@ -254,6 +258,7 @@ public sealed partial class MainWindow
                 StartupDiagnostics.Log("Ginger chat history failed", ex);
             }
             SetBusy(false);
+            NotifyGingerOutcome(notificationKind, chatId);
         }
     }
 

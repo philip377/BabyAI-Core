@@ -110,6 +110,7 @@ public sealed partial class MainWindow
         GingerChatLessonPreview.Text = "Разбираю объяснение на показанном примере…";
         var message = "Проверяю объяснение поставщика на показанном примере Ginger.";
         var result = "";
+        var notificationKind = GingerNotificationKind.Failed;
         try
         {
             var chatId = (await _bridge.NavigationAsync("chat.current")).GetProperty("active_chat_id").GetString() ?? "";
@@ -120,8 +121,13 @@ public sealed partial class MainWindow
                 "\nВсе объяснения, использованные при проверке:\n" + report.GetProperty("request").GetProperty("lesson").GetString() +
                 "\nПроверь понимание. Если всё верно, отдельно сохрани урок. Для сопоставления пары снова попроси продолжить сопоставление.";
             ShowGingerChatReview(new GingerChatAnswerReview(lesson.ChatId, report));
+            notificationKind = GingerNotificationKind.LessonReady;
         }
-        catch (OperationCanceledException) { lesson.DiscardDraft(); result = "Разбор объяснения остановлен. Урок не сохранён."; }
+        catch (OperationCanceledException)
+        {
+            notificationKind = GingerNotificationKind.Cancelled;
+            lesson.DiscardDraft(); result = "Разбор объяснения остановлен. Урок не сохранён.";
+        }
         catch (Exception ex)
         {
             lesson.DiscardDraft();
@@ -133,6 +139,7 @@ public sealed partial class MainWindow
             _chatCancellation = null;
             GingerChatLessonPreview.Text = result;
             await FinishGingerChatLessonAsync(lesson, message, result);
+            NotifyGingerOutcome(notificationKind, lesson.ChatId);
         }
     }
 

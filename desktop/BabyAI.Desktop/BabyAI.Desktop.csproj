@@ -22,6 +22,8 @@
     <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />
   </ItemGroup>
 
+  <Import Project="WindowsAppRuntimeInsights.targets" />
+
   <!-- Bundle the previously validated read-only CPU OCR probe with the
        desktop application. It is launched only by the explicit Ginger UI
        button, never on startup or from untrusted model-generated commands. -->

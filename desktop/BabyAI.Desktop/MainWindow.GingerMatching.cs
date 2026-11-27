@@ -168,9 +168,11 @@ public sealed partial class MainWindow
             File.WriteAllText(Path.Combine(session!.DirectoryPath, "manual-review.json"), JsonSerializer.Serialize(pending.Select(p => p.Data).ToArray()));
             Log($"Строка {observation.Position} оставлена для ручной проверки. Сопоставление не выполнялось.");
         }
-        async Task Execute(Func<CancellationToken, Task> action)
+        async Task<GingerNotificationKind?> Execute(Func<CancellationToken, Task> action,
+            Func<GingerNotificationKind>? successKind = null, bool notify = true)
         {
-            if (_gingerRunning || teaching || ratingBusy || fatal) return;
+            if (_gingerRunning || teaching || ratingBusy || fatal) return null;
+            var outcome = GingerNotificationKind.Failed;
             _gingerRunning = true;
             _gingerCancellation = new CancellationTokenSource();
             Update(); SetGingerCaptureMode(true); SetGingerPhase(GingerCompanionPhase.Reading);
@@ -178,10 +180,12 @@ public sealed partial class MainWindow
             {
                 session ??= new GingerDesktopSession();
                 await action(_gingerCancellation.Token);
+                outcome = successKind?.Invoke() ?? GingerNotificationKind.ReadReady;
                 SetGingerPhase(GingerCompanionPhase.Completed);
             }
             catch (OperationCanceledException)
             {
+                outcome = GingerNotificationKind.Cancelled;
                 // Navigation may have reached Ginger before cancellation. Never
                 // reuse the previous row or filter snapshot after an unknown outcome.
                 fatal = true;
@@ -193,6 +197,7 @@ public sealed partial class MainWindow
             }
             catch (Exception ex)
             {
+                outcome = GingerNotificationKind.Failed;
                 fatal = true;
                 Log("Проход остановлен. Требуется проверка наблюдений; повтор действия не выполнен. " + ex.Message);
                 if (session is not null) Log("Журнал и снимки данных: " + session.DirectoryPath);
@@ -203,7 +208,9 @@ public sealed partial class MainWindow
             {
                 SetGingerCaptureMode(false); _gingerRunning = false;
                 _gingerCancellation.Dispose(); _gingerCancellation = null; Update();
+                if (notify) NotifyGingerOutcome(outcome);
             }
+            return outcome;
         }
         async Task Next(CancellationToken token)
         {
@@ -224,7 +231,8 @@ public sealed partial class MainWindow
         async Task ReadCurrentPrice(bool prepare = true)
         {
             permit.IsChecked = false;
-            await Execute(async token => { observation = await session!.ObserveAsync(token, prepare: prepare); Log("Прайс прочитан. Полные названия доступны выше. " + session.DirectoryPath); });
+            await Execute(async token => { observation = await session!.ObserveAsync(token, prepare: prepare); Log("Прайс прочитан. Полные названия доступны выше. " + session.DirectoryPath); },
+                () => observation?.Linked == true ? GingerNotificationKind.AlreadyLinked : GingerNotificationKind.ReadReady);
         }
         reason.TextChanged += (_, _) => InvalidateLessonDraft();
         lessonPicker.SelectionChanged += (_, _) =>
@@ -258,13 +266,16 @@ public sealed partial class MainWindow
                 lessonPreview.Text = "Кандидатов пока нет. Подготавливаю поиск по словам слева…";
                 Log("Перед запросом модели проверяю звёздочки слов и перечитываю кандидатов. Сопоставление не выполняется.");
                 var searchSource = observation;
-                await Execute(async token => observation = await session!.PrepareFiltersAsync(searchSource, token));
+                // Preparation belongs to this proposal request, so only its final outcome notifies.
+                var preparationOutcome = await Execute(async token => observation = await session!.PrepareFiltersAsync(searchSource, token), notify: false);
                 if (fatal || observation is null || observation.Candidates.Length == 0)
                 {
                     lessonPreview.Text = fatal
                         ? "Подготовка поиска остановлена. Причина указана в журнале; автоматического повтора нет."
                         : "После подготовки фильтров кандидатов нет. Нужна ручная проверка поиска; модель не запрашивалась.";
                     Log(lessonPreview.Text);
+                    NotifyGingerOutcome(preparationOutcome is GingerNotificationKind.Cancelled or GingerNotificationKind.Failed
+                        ? preparationOutcome.Value : GingerNotificationKind.ManualReview);
                     return;
                 }
             }
@@ -288,7 +299,12 @@ public sealed partial class MainWindow
                 text = GingerLearning.ComposeLanguageLessons(proposedLesson is null ? expectedLessons
                     : WithLesson(expectedLessons, proposedLesson));
             }
-            catch (Exception ex) { InvalidateLessonDraft(); Log("Не удалось подготовить объяснения: " + ex.Message); return; }
+            catch (Exception ex)
+            {
+                InvalidateLessonDraft(); Log("Не удалось подготовить объяснения: " + ex.Message);
+                NotifyGingerOutcome(GingerNotificationKind.Failed);
+                return;
+            }
             var previewCancellation = new CancellationTokenSource();
             teachingCancellation = previewCancellation;
             ratedReport = null; answerId = null; rateAnswer.IsEnabled = revokeAnswer.IsEnabled = false;
@@ -299,6 +315,7 @@ public sealed partial class MainWindow
             candidates.SelectedIndex = -1;
             candidates.IsEnabled = approve.IsEnabled = false;
             lessonPreview.Text = text.Length == 0 ? "Модель сравнивает кандидатов по отдельности…" : "Модель разбирает объяснение…";
+            var outcome = GingerNotificationKind.Failed;
             try
             {
                 var result = await _bridge.PreviewGingerLessonAsync(before.Supplier, before.Title, text,
@@ -346,9 +363,14 @@ public sealed partial class MainWindow
                 });
                 rateAnswer.IsEnabled = true;
                 Log("Получено предложение модели. Сопоставление не выполнялось. Проверь понимание и выбранную пару отдельно.");
+                outcome = draftLesson is not null ? GingerNotificationKind.LessonReady
+                    : before.Linked ? GingerNotificationKind.AlreadyLinked
+                    : candidate is null ? GingerNotificationKind.ManualReview
+                    : GingerNotificationKind.PairReady;
             }
             catch (OperationCanceledException)
             {
+                outcome = GingerNotificationKind.Cancelled;
                 InvalidateLessonDraft();
                 lessonPreview.Text = "Разбор урока остановлен. Предложение не принято.";
                 Log("Разбор урока отменён. Урок не сохранён, кандидат не выбран.");
@@ -362,6 +384,7 @@ public sealed partial class MainWindow
                 diagnostics.IsEnabled = true; stop.IsEnabled = false;
                 candidates.IsEnabled = approve.IsEnabled = true;
                 UpdateLessonControls();
+                NotifyGingerOutcome(outcome);
             }
         };
         rateAnswer.Click += async (_, _) =>
@@ -480,12 +503,13 @@ public sealed partial class MainWindow
             {
                 session!.Record("Режим: ручное подтверждение выбранной пары пользователем.");
                 observation = await MatchWithoutOverlay(before, chosen, token);
+                Log("Сопоставление проверено в Ginger.");
                 learning.Teach(new(before.Supplier, before.Title, chosen, explanation, allow, DateTimeOffset.UtcNow));
                 pending.RemoveAll(p => p.Position == before.Position);
-                Log("Сопоставление проверено в Ginger. Решение сохранено" + (allow ? " для повторного применения." : " без разрешения автоматического повторения."));
-            });
+                Log("Решение сохранено" + (allow ? " для повторного применения." : " без разрешения автоматического повторения."));
+            }, () => GingerNotificationKind.Matched);
         };
-        skip.Click += async (_, _) => await Execute(async token => { QueueCurrent(); await Next(token); });
+        skip.Click += async (_, _) => { await Execute(async token => { QueueCurrent(); await Next(token); }); };
         review.Click += async (_, _) =>
         {
             if (queue.SelectedItem is not GingerDesktopObservation chosen) return;
@@ -568,7 +592,8 @@ public sealed partial class MainWindow
                 }
                 Log($"{(lessonCandidate is null ? "Проход завершён" : "Проход приостановлен для проверки пары")}. На ручной проверке: {pending.Count}. Документ Ginger оставлен открытым.");
                 if (session is not null) Log("Результаты: " + session.DirectoryPath);
-            });
+            }, () => lessonCandidate is not null ? GingerNotificationKind.PairReady
+                : pending.Count > 0 ? GingerNotificationKind.ManualReview : GingerNotificationKind.RunFinished);
             if (!fatal && lessonCandidate is not null) candidates.SelectedItem = lessonCandidate;
         };
         stop.Click += (_, _) => { _gingerCancellation?.Cancel(); if (teaching) teachingCancellation?.Cancel(); Log("Останавливаю перед следующим действием. Если сопоставление уже отправлено, сначала проверю его результат."); };

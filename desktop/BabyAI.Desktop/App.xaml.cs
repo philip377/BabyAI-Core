@@ -8,6 +8,7 @@ public partial class App : Application
     private Window? _window;
 
     internal MainWindow? MainWindow => _window as MainWindow;
+    internal WindowsAppNotifications GingerNotifications { get; } = new();
 
     public App()
     {
@@ -25,11 +26,17 @@ public partial class App : Application
         }
     }
 
-    protected override void OnLaunched(LaunchActivatedEventArgs args)
+    protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
         StartupDiagnostics.Log("OnLaunched entered");
         try
         {
+            if (!await GingerNotifications.PrepareLaunchAsync())
+            {
+                GingerNotifications.Dispose();
+                Exit();
+                return;
+            }
             InstalledRuntimeBootstrap.ApplyToCurrentProcess();
             StartupDiagnostics.Log("Installed runtime bootstrap applied");
 
@@ -49,6 +56,8 @@ public partial class App : Application
                 _window = new CompatibilityFallbackWindow(ex);
             }
 
+            _window.Closed += (_, _) => GingerNotifications.Dispose();
+            GingerNotifications.Initialize(OpenNotificationChat);
             _window.Activate();
             StartupDiagnostics.Log(_window is MainWindow
                 ? "MainWindow activated"
@@ -56,8 +65,22 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
+            GingerNotifications.Dispose();
             StartupDiagnostics.ShowFatal("Desktop launch failed", ex);
             throw;
         }
+    }
+
+    private void OpenNotificationChat(string? chatId)
+    {
+        try
+        {
+            // WindowsAppNotifications dispatches this callback onto the existing UI thread.
+            if (_window is MainWindow mainWindow)
+                mainWindow.OpenGingerNotificationChat(chatId);
+            else
+                _window?.Activate();
+        }
+        catch (Exception ex) { StartupDiagnostics.Log("Notification chat navigation failed", ex); }
     }
 }
