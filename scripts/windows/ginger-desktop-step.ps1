@@ -50,7 +50,13 @@ if($Operation -eq 'Prepare') {
  } while($true)
  $afterDocument=[GingerMenuAccess]::ReadPriceDocument($window,$ownerId)
  if($afterDocument.Number -ne $document.Number -or $afterDocument.Supplier -ne $document.Supplier){throw 'Document changed during preparation'}
- [GingerMenuAccess]::RequireSameProductRows($rows,[GingerMenuAccess]::ReadProductRows($window,$ownerId),$true)
+ Write-ReadStage 'prepared_table'
+ $preparedRows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)
+ [GingerMenuAccess]::RequireSameProductRows($rows,$preparedRows,$true)
+ # This is already the fresh, double-read snapshot after preparation. No input
+ # occurs before the search-context read, so a second immediate copy adds delay
+ # without crossing another input boundary. The final table recheck stays below.
+ $rows=$preparedRows
 }
 if($Operation -in @('Select','Filter')) {
  if(-not $ConfirmNavigation -or -not $ExpectedDirectory){throw 'Confirmed observation required'}
@@ -68,7 +74,7 @@ if($Operation -in @('Select','Filter')) {
 }
 # Observe already has a full double-read snapshot and has issued no input since it.
 # Navigation/filter operations must obtain a new snapshot after their input.
-if($Operation -ne 'Observe'){Write-ReadStage 'table_after_input';$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)}
+if($Operation -in @('Select','Filter')){Write-ReadStage 'table_after_input';$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)}
 $searchDeadline=[Diagnostics.Stopwatch]::StartNew()
 $busyObservationRetried=$false
 do {

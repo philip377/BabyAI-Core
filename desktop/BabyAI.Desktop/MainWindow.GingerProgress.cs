@@ -241,14 +241,16 @@ internal sealed class GingerProgressTurn
         _changed?.Invoke(this, false);
     }
 
-    internal void Finish(string summary, string details)
+    internal void Finish(string summary, string details, string? failureStatus = null)
     {
         StopAnimation();
         _finished = true;
         // If no terminal event arrived, stop the indicator without claiming the
         // unfinished step succeeded. Normal success reports Review/Completed.
         if (_current is { State: GingerProgressState.Running } current)
-            SetState(current, GingerProgressState.Failed, "не завершено");
+            SetState(current, GingerProgressState.Failed, failureStatus ?? "не завершено");
+        else if (_current is { State: GingerProgressState.Failed } failed && !string.IsNullOrWhiteSpace(failureStatus))
+            SetState(failed, GingerProgressState.Failed, failureStatus);
         _summary.Text = string.IsNullOrWhiteSpace(summary) ? "Работа Ginger завершена." : summary.Trim();
         _summary.Visibility = Visibility.Visible;
         _details.Text = GingerProgressTranscript.LimitDetails(string.IsNullOrWhiteSpace(details) ? _journal : details.Trim());

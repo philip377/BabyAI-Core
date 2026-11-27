@@ -18,6 +18,7 @@ await IntentBindingTests.Run();
 DeferredRowsTests.Run();
 DeferredSelectionTests.Run();
 await ScanFlowTests.Run();
+await OutcomeTextTests.Run();
 ProgressTranscriptTests.Run();
 BottleTests.Run();
 var stages = new List<GingerChatStage>();

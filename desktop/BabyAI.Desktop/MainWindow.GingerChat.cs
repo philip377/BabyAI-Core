@@ -137,6 +137,7 @@ public sealed partial class MainWindow
         var transcript = new StringBuilder();
         GingerProgressTurn? progress = null;
         var summary = "Подготовка остановлена. Подробности доступны ниже.";
+        string? failureStatus = null;
         var deferred = new List<GingerDeferredRow>();
         GingerDesktopSession? session = null;
         GingerDesktopObservation? observation = null;
@@ -278,17 +279,28 @@ public sealed partial class MainWindow
                 if (deferred.Count > 0) summary += $" Отложено без кандидатов: {deferred.Count}.";
             }
         }
+        catch (TimeoutException ex)
+        {
+            notificationKind = GingerNotificationKind.Failed;
+            summary = GingerChatOutcomeText.TimedOut(deferred.Count);
+            failureStatus = "время ожидания истекло";
+            InvalidateGingerChatContext();
+            Report(GingerChatStage.Failed, "Время ожидания текущего шага истекло: " + ex.Message + " " +
+                GingerChatOutcomeText.Deferred(deferred.Count) + " Отправленные действия не повторяются.");
+            StartupDiagnostics.Log("Ginger chat step timed out", ex);
+        }
         catch (OperationCanceledException)
         {
             notificationKind = GingerNotificationKind.Cancelled;
-            summary = "Работа остановлена. Отложенные позиции сохранены.";
+            summary = GingerChatOutcomeText.Cancelled(cancellation.IsCancellationRequested, deferred.Count);
+            failureStatus = cancellation.IsCancellationRequested ? "остановлено пользователем" : "прервано";
             InvalidateGingerChatContext();
-            if (!transcript.ToString().Contains("Остановлено.", StringComparison.Ordinal))
-                Report(GingerChatStage.Cancelled, "Остановлено. Агент не продолжает работу.");
+            Report(GingerChatStage.Cancelled, summary + " Отправленные действия не повторяются.");
         }
         catch (Exception ex)
         {
-            summary = "Работа остановлена из-за ошибки. Автоматического повтора нет; подробности ниже.";
+            summary = GingerChatOutcomeText.Failed(deferred.Count);
+            failureStatus = "ошибка";
             InvalidateGingerChatContext();
             // Also handles failure to acquire the session, before the flow starts.
             if (!transcript.ToString().Contains("Процесс остановлен:", StringComparison.Ordinal))
@@ -326,7 +338,7 @@ public sealed partial class MainWindow
                 var savedTranscript = summary + "\n\n" + details;
                 try
                 {
-                    progress?.Finish(summary, details);
+                    progress?.Finish(summary, details, failureStatus);
                     if (progress is not null) savedTranscript = progress.Transcript;
                 }
                 catch (Exception ex) { StartupDiagnostics.Log("Ginger chat final display failed", ex); }

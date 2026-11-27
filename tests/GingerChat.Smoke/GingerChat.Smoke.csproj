@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatFlow.cs" Link="GingerChatFlow.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatScanFlow.cs" Link="GingerChatScanFlow.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerChatOutcomeText.cs" Link="GingerChatOutcomeText.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerProgressTranscript.cs" Link="GingerProgressTranscript.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerDeferredRows.cs" Link="GingerDeferredRows.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../desktop/BabyAI.Desktop/GingerDeferredSelection.cs" Link="GingerDeferredSelection.cs" /></ItemGroup>

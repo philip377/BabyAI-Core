@@ -16,6 +16,7 @@ internal sealed class GingerChatScanFlow(
 {
     public async Task<GingerChatScanResult> RunAsync(CancellationToken token)
     {
+        var deferred = 0;
         try
         {
             token.ThrowIfCancellationRequested();
@@ -26,7 +27,6 @@ internal sealed class GingerChatScanFlow(
             Validate(row);
             var start = row;
             var seen = new HashSet<int>();
-            var deferred = 0;
             var linked = 0;
             while (true)
             {
@@ -82,7 +82,8 @@ internal sealed class GingerChatScanFlow(
         }
         catch (OperationCanceledException)
         {
-            report(GingerChatStage.Cancelled, "Остановлено. Отложенные позиции сохранены; отправленные действия не повторяются.");
+            report(GingerChatStage.Cancelled, GingerChatOutcomeText.Cancelled(token.IsCancellationRequested, deferred) +
+                " Отправленные действия не повторяются.");
             throw;
         }
         catch (Exception ex)

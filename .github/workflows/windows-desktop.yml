@@ -35,6 +35,9 @@ jobs:
       - name: Test bounded Ginger search observation without input
         shell: powershell
         run: ./tests/ginger-search-wait-smoke.ps1
+      - name: Test Ginger preparation snapshots and post-input reads without desktop access
+        shell: powershell
+        run: ./tests/ginger-desktop-prepare-smoke.ps1
       - name: Test Ginger panel loading without repeating navigation
         shell: powershell
         run: ./tests/ginger-panel-wait-smoke.ps1

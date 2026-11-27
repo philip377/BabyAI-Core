@@ -61,7 +61,10 @@ internal sealed class GingerDesktopSession : IDisposable
             if (position.HasValue) args.AddRange(["-Operation", "Select", "-Position", position.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
             else if (word is not null) args.AddRange(["-Operation", "Filter", "-Word", word, "-Enabled"]);
         }
-        var json = await GingerDiagnostics.RunAsync(Command("ginger-desktop-step.ps1", args.ToArray()), TimeSpan.FromSeconds(60), token, DirectoryPath);
+        // Preparation and the two complete candidate contexts can exceed a minute
+        // on the user's price list. Keep a finite budget and immediate user Stop;
+        // a deadline is a failure, never an instruction to retry navigation.
+        var json = await GingerDiagnostics.RunAsync(Command("ginger-desktop-step.ps1", args.ToArray()), TimeSpan.FromSeconds(120), token, DirectoryPath);
         using var document = JsonDocument.Parse(json);
         var observed = new GingerDesktopObservation(folder, document.RootElement.Clone());
         if (observed.Position < 1 || observed.Position > observed.Count || observed.Count > 500 || observed.Candidates.Length > 256)

@@ -49,10 +49,10 @@ internal static class GingerDiagnostics
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
             catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or
-                System.ComponentModel.Win32Exception or JsonException or OperationCanceledException)
+                System.ComponentModel.Win32Exception or JsonException or OperationCanceledException or TimeoutException)
             {
                 result = null;
-                status = ex is OperationCanceledException ? "timeout" : "failed";
+                status = ex is TimeoutException ? "timeout" : "failed";
                 log(status == "timeout" ? "Один способ чтения не ответил за 30 секунд; пробую следующий."
                     : "Один способ чтения недоступен; продолжаю диагностику.");
             }
@@ -79,8 +79,9 @@ internal static class GingerDiagnostics
 
     internal static async Task<string> RunAsync(ProcessStartInfo info, TimeSpan timeout, CancellationToken token, string? failureDirectory = null)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        deadline.CancelAfter(timeout);
+        token.ThrowIfCancellationRequested();
+        using var timeoutCancellation = new CancellationTokenSource(timeout);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCancellation.Token);
         using var process = new Process { StartInfo = info };
         if (!process.Start())
             throw new InvalidOperationException("Probe did not start");
@@ -120,6 +121,19 @@ internal static class GingerDiagnostics
                 throw new InvalidOperationException(reason);
             }
             return await stdout;
+        }
+        catch (OperationCanceledException ex) when (!token.IsCancellationRequested && timeoutCancellation.IsCancellationRequested)
+        {
+            if (failureDirectory is not null)
+            {
+                Directory.CreateDirectory(failureDirectory);
+                await File.WriteAllTextAsync(Path.Combine(failureDirectory, "subprocess-failure-" + Guid.NewGuid().ToString("N") + ".json"),
+                    JsonSerializer.Serialize(new { status = "timeout", timeout_ms = timeout.TotalMilliseconds,
+                        process_id = process.Id }, new JsonSerializerOptions { WriteIndented = true }),
+                    Encoding.UTF8, CancellationToken.None);
+            }
+            throw new TimeoutException($"Драйвер Ginger не завершил проверку за {timeout.TotalSeconds:0.#} с. " +
+                "Результат не подтверждён; автоматического повтора нет.", ex);
         }
         finally
         {
