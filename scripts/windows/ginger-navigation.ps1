@@ -30,6 +30,10 @@ public sealed class GingerCandidateLimitException : InvalidOperationException {
         ObservedCount=count;
     }
 }
+// A transient read state, never evidence of an empty list or permission to replay input.
+public sealed class GingerSearchPendingException : InvalidOperationException {
+    public GingerSearchPendingException(string message) : base(message) { }
+}
 public sealed class GingerMenuNode {
     public IAccessible Owner;
     public object Child;
@@ -1165,15 +1169,17 @@ public static class GingerMenuAccess {
         }
         if(productPanel==0) throw new InvalidOperationException("Candidate panel missing");
         if(productPanel==words.PanelHandle) throw new InvalidOperationException("Search and product panels must be distinct");
-        if(productRows<=256) throw new InvalidOperationException("Candidate list is within the read limit; complete observation required");
         GingerSelectedProduct afterSource=ReadSelectedProductOnce(root,process);
         RequireSameSelectedProduct(words.Source,afterSource);
         if(ListCount(new IntPtr(productPanel),process)!=productRows)
             throw new InvalidOperationException("Candidate count changed during filter-only observation");
         RequireWindow(root,process);
         words.Source=afterSource;
+        // The list can shrink after the full reader reports overflow. Validate the
+        // source/count/window first, then request a fresh full read, not a filter.
+        if(productRows<=256) throw new GingerSearchPendingException("Candidate list is within the read limit; complete observation required");
         bool lexical=SearchWordsDescribeSource(Array.ConvertAll(words.Candidates,row=>row.Title),afterSource.Title);
-        if(!lexical) throw new InvalidOperationException("Search words do not describe selected source");
+        if(!lexical) throw new GingerSearchPendingException("Search words do not describe selected source");
         return new GingerFilterOnlyContext {SearchWords=words,ProductPanelHandle=productPanel,
             ProductRows=productRows,QueryWordsMatchSource=lexical};
     }

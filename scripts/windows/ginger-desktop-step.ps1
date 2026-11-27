@@ -81,6 +81,7 @@ if($Operation -in @('Select','Filter')) {
 if($Operation -in @('Select','Filter')){Write-ReadStage 'table_after_input';$rows=[GingerMenuAccess]::ReadProductRows($window,$ownerId)}
 $searchDeadline=[Diagnostics.Stopwatch]::StartNew()
 $busyObservationRetried=$false
+$pendingObservationRetried=$false
 do {
  Write-ReadStage 'search_pair'
  # A product overflow permits only a separate, verified filter-only context.
@@ -96,6 +97,20 @@ do {
    $filterOnly=$true
   }
  } catch {
+  if($_.Exception.GetBaseException() -is [GingerSearchPendingException]) {
+   # Discard the partial context. A stale query or a newly bounded product list
+   # permits another observation only, never another Select/Filter/Prepare input.
+   Write-ReadStage 'table_recheck'
+   [GingerMenuAccess]::RequireSameProductRows($rows,[GingerMenuAccess]::ReadProductRows($window,$ownerId),$true)
+   # A full read on a large price can already take over ten seconds. Permit
+   # exactly one fresh read rather than expiring before the first retry. The
+   # desktop session's 120-second process deadline still bounds the operation.
+   if($pendingObservationRetried){throw 'Ginger search did not settle after one additional observation; no input retry'}
+   $pendingObservationRetried=$true
+   Write-ReadStage 'search_pending'
+   Start-Sleep -Milliseconds 200
+   continue
+  }
   if($_.Exception.GetBaseException() -isnot [GingerUiBusyException]){throw}
   if($busyObservationRetried -or $searchDeadline.Elapsed.TotalSeconds -ge 10){throw}
   $busyObservationRetried=$true

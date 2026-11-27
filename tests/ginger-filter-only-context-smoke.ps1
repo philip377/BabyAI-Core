@@ -19,6 +19,7 @@ function Definition([string]$Signature) {
 }
 $classes=@(
  'public sealed class GingerCandidateLimitException',
+ 'public sealed class GingerSearchPendingException',
  'public sealed class GingerSelectedProduct',
  'public sealed class GingerCandidateSnapshot',
  'public sealed class GingerSearchContext',
@@ -88,6 +89,7 @@ public static class GingerMenuAccess {
    if(Mode=="description_between")row.DescriptionText="changed";
    if(Mode=="bounds_between")row.Bounds[0]=5;
   }
+  if(Mode=="valid_words_between" && WordReads>1)row.Title="ALPHA";
   return new GingerCandidateSnapshot {Source=Source(false),PanelHandle=10,Candidates=new[]{row}};
  }
  private static GingerCandidateSnapshot ReadCandidatesOnce(IntPtr root,uint process,bool searchWords=false,GingerSelectedProduct adjacentSource=null) {
@@ -135,11 +137,22 @@ public static class GingerMenuAccess {
   Reset(mode);
   try {ReadFilterOnlyContext(IntPtr.Zero,7,0);}
   catch(InvalidOperationException error) {
+   Check(!(error is GingerSearchPendingException),mode+": hard conflict became retryable");
    Check(error.Message.Contains(expected),mode+": unexpected rejection "+error.Message);
    Check(ProductReads==0,mode+": product contents were enumerated");
    return;
   }
   throw new Exception(mode+": invalid context accepted");
+ }
+ private static void Pending(string mode,string expected,long count) {
+  Reset(mode);NativeProductCount=count;
+  try {ReadFilterOnlyContext(IntPtr.Zero,7,0);}
+  catch(GingerSearchPendingException error) {
+   Check(error.Message.Contains(expected),mode+": unexpected pending reason "+error.Message);
+   Check(ProductReads==0 && WindowChecks>0,mode+": pending bypassed source/count/window checks or read product contents");
+   return;
+  }
+  throw new Exception(mode+": pending search published a context");
  }
  private static GingerFilterOnlyContext Context() {
   return new GingerFilterOnlyContext {SearchWords=Words(),ProductPanelHandle=20,ProductRows=278,QueryWordsMatchSource=true};
@@ -156,10 +169,7 @@ public static class GingerMenuAccess {
    Check(ReadFilterOnlyContext(IntPtr.Zero,7,0).ProductRows==count && ProductReads==0,"Overflow count must not allocate/read product rows");
   }
   foreach(long count in new long[]{0,1,256}) {
-   Reset("");NativeProductCount=count;
-   bool rejected=false;
-   try{ReadFilterOnlyContext(IntPtr.Zero,7,0);}catch(InvalidOperationException error){rejected=error.Message.Contains("complete observation required");}
-   Check(rejected,"A bounded list must require the complete reader");
+   Pending("","complete observation required",count);
   }
   Reject("duplicate","Ambiguous candidate panels");
   Reject("missing","Candidate panel missing");
@@ -167,17 +177,27 @@ public static class GingerMenuAccess {
   Reject("dual_headers","Ambiguous matching panel");
   Reject("count_during","count changed");
   Reject("count_between","metadata changed");
-  Reject("bounded_between","complete observation required");
+  Pending("bounded_between","complete observation required",278);
   Reject("panel_between","metadata changed");
   Reject("source_after","Selected product changed");
   foreach(string mode in new[]{"document_between","supplier_between","row_between","table_between","price_between","linked_between"})
    Reject(mode,"Selected product changed");
-  Reject("word_between","do not describe");
-  Reject("stale_query","do not describe");
+  Pending("word_between","do not describe",278);
+  Pending("stale_query","do not describe",278);
+  Reject("valid_words_between","Candidate rows changed");
   foreach(string mode in new[]{"state_between","description_between","bounds_between"})Reject(mode,"Candidate rows changed");
   Reject("owner_changed","count unavailable");
   Reject("count_unavailable","count unavailable");
   Reject("window_changed","Window changed");
+  // A new bounded count must not hide an independently changed source/window.
+  foreach(string mode in new[]{"source_after","window_changed"}) {
+   Reset(mode);NativeProductCount=2;
+   bool rejected=false;
+   try{ReadFilterOnlyContext(IntPtr.Zero,7,0);}
+   catch(GingerSearchPendingException){throw new Exception(mode+": bounded count hid a hard conflict");}
+   catch(InvalidOperationException){rejected=true;}
+   Check(rejected,"Bounded-list transition bypassed a hard guard");
+  }
   Reset("");
   foreach(var change in new Action<GingerFilterOnlyContext>[] {
    c=>c.CanMatch=true,c=>c.SearchCompletionVerified=true,c=>c.QueryWordsMatchSource=false,

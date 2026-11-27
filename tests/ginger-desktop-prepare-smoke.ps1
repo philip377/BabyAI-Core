@@ -7,6 +7,9 @@ using System;
 using System.Collections.Generic;
 public class GingerUiBusyException : Exception { }
 public class GingerCandidateLimitException : Exception { }
+public class GingerSearchPendingException : InvalidOperationException {
+ public GingerSearchPendingException(string message) : base(message) { }
+}
 public class GingerProductRow {
  public int Snapshot { get; set; }
  public long Table { get; set; }
@@ -22,12 +25,15 @@ public static class GingerMenuAccess {
  public static int FirstSearchAtRowRead, ConflictRead, SelectionConflictRead;
  public static bool ChangeDocument;
  public static bool Overflow, FilterContextConflict;
+ public static string Pending;
+ public static bool PendingThenOverflow,RepeatPending;
  public static int FilterContextReads;
  public static List<string> Guards=new List<string>();
  public static void Reset() {
   RowReads=DocumentReads=SearchReads=OpenInputs=SelectInputs=FilterInputs=FirstSearchAtRowRead=0;
   ConflictRead=SelectionConflictRead=0; ChangeDocument=false; Guards.Clear();
   Overflow=FilterContextConflict=false; FilterContextReads=0;
+  Pending="";PendingThenOverflow=RepeatPending=false;
  }
  public static GingerProductRow[] ReadProductRows(IntPtr window,uint owner) {
   RowReads++;
@@ -62,13 +68,15 @@ public static class GingerMenuAccess {
   if(pause!=700) throw new Exception("Settling pause removed");
   SearchReads++;
   if(SearchReads==1) FirstSearchAtRowRead=RowReads;
-  if(Overflow) throw new GingerCandidateLimitException();
+  if(Overflow || (Pending!="" && (SearchReads==1 || PendingThenOverflow || RepeatPending))) throw new GingerCandidateLimitException();
   return new PrepareSearchContext();
  }
  public static PrepareFilterContext ReadFilterOnlyContext(IntPtr window,uint owner,int pause) {
   if(pause!=700) throw new Exception("Filter settling pause removed");
   FilterContextReads++;
   if(FilterContextConflict) throw new Exception("Filter context changed");
+  if(Pending!="" && (FilterContextReads==1 || RepeatPending))
+   throw new GingerSearchPendingException(Pending=="stale"?"Search words do not describe selected source":"Candidate list is within the read limit; complete observation required");
   return new PrepareFilterContext();
  }
 }
@@ -92,13 +100,17 @@ function Invoke-PrepareFixture {
  param([string]$Operation,[int]$ConflictRead=0,[int]$SelectionConflictRead=0,
   [bool]$ChangeDocument=$false,[bool]$ConfirmNavigation=$true,
   [int]$ExpectedProcess=7,[long]$ExpectedTable=42,[string]$ExpectedFailure='',
-  [bool]$Overflow=$false,[bool]$FilterContextConflict=$false,[bool]$PreviousFilterOnly=$false,[bool]$AmbiguousContext=$false)
+  [bool]$Overflow=$false,[bool]$FilterContextConflict=$false,[bool]$PreviousFilterOnly=$false,[bool]$AmbiguousContext=$false,
+  [string]$Pending='',[bool]$PendingThenOverflow=$false,[bool]$RepeatPending=$false)
  [GingerMenuAccess]::Reset()
  [GingerMenuAccess]::ConflictRead=$ConflictRead
  [GingerMenuAccess]::SelectionConflictRead=$SelectionConflictRead
  [GingerMenuAccess]::ChangeDocument=$ChangeDocument
  [GingerMenuAccess]::Overflow=$Overflow
  [GingerMenuAccess]::FilterContextConflict=$FilterContextConflict
+ [GingerMenuAccess]::Pending=$Pending
+ [GingerMenuAccess]::PendingThenOverflow=$PendingThenOverflow
+ [GingerMenuAccess]::RepeatPending=$RepeatPending
  $script:caseNumber++
  $caseRoot=Join-Path $fixtureRoot $script:caseNumber
  $OutputDirectory=Join-Path $caseRoot 'output'
@@ -117,7 +129,7 @@ function Invoke-PrepareFixture {
  $window=[IntPtr]::Zero; $ownerId=[uint32]7; $Position=2; $Word='needle'; $Enabled=$true
  $stages=New-Object 'System.Collections.Generic.List[string]'
  function Write-ReadStage([string]$Stage) {
-  Require ($Stage -in @('prepared_table','table_after_input','search_pair','table_recheck','verified','search_busy','search_filters_only')) 'Unexpected read stage'
+  Require ($Stage -in @('prepared_table','table_after_input','search_pair','table_recheck','verified','search_busy','search_filters_only','search_pending')) 'Unexpected read stage'
   $stages.Add($Stage)
  }
  $failed=$false
@@ -130,13 +142,16 @@ function Invoke-PrepareFixture {
  $saved=$null
  if($failed) {
   Require (-not (Test-Path -LiteralPath $beforePath)) 'Conflict produced an accepted snapshot'
+  Require (-not (Test-Path -LiteralPath (Join-Path $OutputDirectory 'search-context.json'))) 'Conflict published a complete context'
+  Require (-not (Test-Path -LiteralPath (Join-Path $OutputDirectory 'filter-context.json'))) 'Conflict published an incomplete context'
   Require (-not $stages.Contains('verified')) 'Conflict reached verified stage'
  } else {
   $saved=Get-Content -LiteralPath $beforePath -Raw -Encoding UTF8 | ConvertFrom-Json
   Require ($saved.process_id -eq $ownerId) 'Saved snapshot process changed'
   Require ($stages.Contains('verified')) 'Final verification did not run'
-  Require ((Test-Path -LiteralPath (Join-Path $OutputDirectory 'search-context.json')) -eq (-not $Overflow)) 'Overflow must not publish a full search context'
-  Require ((Test-Path -LiteralPath (Join-Path $OutputDirectory 'filter-context.json')) -eq $Overflow) 'Filter-only context not published separately'
+  $finalOverflow=$Overflow -or $PendingThenOverflow
+  Require ((Test-Path -LiteralPath (Join-Path $OutputDirectory 'search-context.json')) -eq (-not $finalOverflow)) 'Only a complete final observation may publish a full search context'
+  Require ((Test-Path -LiteralPath (Join-Path $OutputDirectory 'filter-context.json')) -eq $finalOverflow) 'Filter-only context not published separately'
  }
  [pscustomobject]@{Saved=$saved;Stages=$stages.ToArray();Rows=[GingerMenuAccess]::RowReads;
   Documents=[GingerMenuAccess]::DocumentReads;Searches=[GingerMenuAccess]::SearchReads;
@@ -196,7 +211,26 @@ try {
  Require ($overflowConflict.Selects -eq 1 -and $overflowConflict.FilterContexts -eq 1) 'Overflow conflict repeated selection'
  $filterConflict=Invoke-PrepareFixture -Operation Select -Overflow $true -FilterContextConflict $true -ExpectedFailure 'Filter context changed'
  Require ($filterConflict.Selects -eq 1 -and $filterConflict.Searches -eq 1 -and $filterConflict.FilterContexts -eq 1) 'Filter-only conflict repeated input or observation'
- "PASS: $script:caseNumber production Prepare/Select/Filter/Observe cases including typed overflow; no real UI"
+ foreach($operation in @('Select','Filter')) {
+  foreach($pending in @('stale','bounded')) {
+   foreach($remainWide in @($false,$true)) {
+    $settled=Invoke-PrepareFixture -Operation $operation -Pending $pending -PendingThenOverflow $remainWide -PreviousFilterOnly ($operation -eq 'Filter')
+    Require ($settled.Selects -eq [int]($operation -eq 'Select') -and $settled.Filters -eq [int]($operation -eq 'Filter') -and $settled.Opens -eq 0) "$operation repeated input after $pending observation"
+    Require ($settled.Searches -eq 2 -and $settled.FilterContexts -eq (1+[int]$remainWide) -and $settled.Rows -eq 4) "$operation did not re-observe the pending search exactly once"
+    Require (($settled.Guards -join ',') -eq '0:1,2:3,2:4' -and $settled.Saved.rows[0].Snapshot -eq 2) "$operation lost original selection/table guards around pending retry"
+    Require (@($settled.Stages | Where-Object {$_ -eq 'search_pending'}).Count -eq 1) "$operation failed to report the pending observation"
+   }
+   $beforeRetry=Invoke-PrepareFixture -Operation $operation -Pending $pending -ConflictRead 3 -ExpectedFailure 'Table changed'
+   Require ($beforeRetry.Searches -eq 1 -and $beforeRetry.Rows -eq 3 -and $beforeRetry.Selects+$beforeRetry.Filters -eq 1) "$operation repeated reading/input after a table conflict at pending boundary"
+   $selectionBeforeRetry=Invoke-PrepareFixture -Operation $operation -Pending $pending -SelectionConflictRead 3 -ExpectedFailure 'Selection changed'
+   Require ($selectionBeforeRetry.Searches -eq 1 -and $selectionBeforeRetry.Selects+$selectionBeforeRetry.Filters -eq 1) "$operation accepted changed selection during pending observation"
+   $afterRetry=Invoke-PrepareFixture -Operation $operation -Pending $pending -ConflictRead 4 -ExpectedFailure 'Table changed'
+   Require ($afterRetry.Searches -eq 2 -and $afterRetry.Rows -eq 4 -and $afterRetry.Selects+$afterRetry.Filters -eq 1) "$operation skipped the final table guard after pending retry"
+   $neverReady=Invoke-PrepareFixture -Operation $operation -Pending $pending -RepeatPending $true -ExpectedFailure 'Ginger search did not settle after one additional observation; no input retry'
+   Require ($neverReady.Searches -eq 2 -and $neverReady.FilterContexts -eq 2 -and $neverReady.Selects+$neverReady.Filters -eq 1) "$operation exceeded one pending retry or repeated input"
+  }
+ }
+ "PASS: $script:caseNumber production Prepare/Select/Filter/Observe cases including pending overflow transitions; no real UI"
 } finally {
  $cleanupPath=[IO.Path]::GetFullPath($fixtureRoot)
  $cleanupPrefix=$temporaryRoot+[IO.Path]::DirectorySeparatorChar+'babyai-ginger-prepare-'
