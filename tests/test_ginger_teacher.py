@@ -11,6 +11,10 @@ def isolate_identity_review(monkeypatch):
         dict(source=source, candidates=[dict(candidate=c, identity='match') for c in candidates], can_match=False))
     monkeypatch.setattr('babyai.ginger_teacher.review_volume', lambda source, candidates:
         dict(source=source, candidates=[dict(candidate=c, volume='match') for c in candidates], can_match=False))
+    # Pair evidence has its own parser/semantic input tests. These tests cover
+    # consultation aggregation and rejection without another candidate search.
+    monkeypatch.setattr('babyai.ginger_teacher.review_lesson_candidate', lambda *args:
+        dict(attributes=dict.fromkeys(['identity', 'volume', 'concentration', 'tester', 'variant'], 'match'), can_match=False))
 
 
 class Model:
@@ -33,6 +37,46 @@ def test_model_receives_lesson_and_observation():
     assert consult(model, payload())["candidate"] == "A"
     assert "user explanation" in model.prompt
     assert "supplier" in model.prompt
+
+
+def test_separate_explanations_reach_model_together_without_rewriting():
+    model = Model()
+    rules = "1. Метка Z9 означает тестер.\n\n2. Метка K4 означает парфюмерную воду EDP."
+    request = payload() | {"lesson": rules}
+    consult(model, request)
+    received = json.loads(model.prompt.rsplit('\n', 1)[1])
+    assert received == request
+
+
+@pytest.mark.parametrize('field', ['identity', 'volume', 'concentration', 'tester', 'variant'])
+@pytest.mark.parametrize('verdict', ['conflict', 'unknown'])
+def test_lesson_pair_check_can_only_reject_the_existing_proposal(monkeypatch, field, verdict):
+    checked = []
+    def check(provider, supplier, source, lesson, candidate):
+        checked.append((supplier, source, lesson, candidate))
+        attributes = dict.fromkeys(['identity', 'volume', 'concentration', 'tester', 'variant'], 'match')
+        attributes[field] = verdict
+        return dict(attributes=attributes, can_match=False)
+    monkeypatch.setattr('babyai.ginger_teacher.review_lesson_candidate', check)
+    result = consult(Model('A'), payload())
+    assert result['candidate'] is None
+    assert result['lesson_evidence']['attributes'][field] == verdict
+    assert checked == [('supplier', 'source', 'user explanation', 'A')]
+    assert 'ручная проверка' in result['explanation']
+
+
+def test_absent_lesson_candidate_does_not_start_pair_verification(monkeypatch):
+    monkeypatch.setattr('babyai.ginger_teacher.review_lesson_candidate',
+                        lambda *args: pytest.fail('No candidate to verify'))
+    assert consult(Model(None), payload())['candidate'] is None
+
+
+def test_invalid_lesson_pair_verification_cannot_release_original_proposal(monkeypatch):
+    def malformed(*args):
+        raise ValueError('Malformed verification')
+    monkeypatch.setattr('babyai.ginger_teacher.review_lesson_candidate', malformed)
+    with pytest.raises(ValueError, match='Malformed'):
+        consult(Model('A'), payload())
 
 
 @pytest.mark.parametrize("candidate", ["invented", 1, {}, []])
@@ -198,6 +242,6 @@ def test_explicit_volume_guards_model_proposals(monkeypatch, source, candidates,
     assert result['volume_evidence']['can_match'] is False
 
 
-def test_volume_review_does_not_change_confirmed_lesson_path(monkeypatch):
-    monkeypatch.setattr('babyai.ginger_teacher.review_volume', lambda *_: pytest.fail('Lesson path unchanged'))
+def test_lesson_proposal_uses_its_own_pair_review_not_unlearned_attribute_pass(monkeypatch):
+    monkeypatch.setattr('babyai.ginger_teacher.review_volume', lambda *_: pytest.fail('Use the lesson-aware pair review'))
     assert consult(Model(), payload())['candidate'] == 'A'

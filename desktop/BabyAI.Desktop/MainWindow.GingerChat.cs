@@ -193,8 +193,8 @@ public sealed partial class MainWindow
                 async (item, token) =>
                 {
                     SetGingerCaptureMode(false);
-                    var saved = new GingerLearning().ReadLanguageLesson(item.Supplier);
-                    var lesson = saved is { Enabled: true } ? saved.Text : "";
+                    var lessons = new GingerLearning().ReadLanguageLessons(item.Supplier);
+                    var lesson = GingerLearning.ComposeLanguageLessons(lessons);
                     var result = await _bridge.PreviewGingerLessonAsync(item.Supplier, item.Title,
                         lesson, item.Candidates, token);
                     token.ThrowIfCancellationRequested();

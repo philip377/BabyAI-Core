@@ -26,6 +26,103 @@ learning.Teach(new("lesson-supplier", "blocked source", "candidate", "отзыв
 Check(learning.LessonForReview("lesson-supplier", "blocked source") is null, "model review cannot bypass exact pair revocation");
 learning.SaveLanguageLesson(learning.ReadLanguageLesson("lesson-supplier")! with { Enabled = false });
 Check(learning.LessonForReview("lesson-supplier", "new source") is null, "revoked lesson unavailable to automatic pass review");
+var multiple = new GingerLearning(Path.Combine(root, "multiple-lessons"));
+var firstLesson = new GingerLearning.LanguageLesson("Альянс", "Немного подмят означает тестер.",
+    "Обозначение поставщика относится к тестеру.", true, DateTimeOffset.UtcNow, Guid.NewGuid().ToString("N"));
+var secondLesson = new GingerLearning.LanguageLesson("Альянс", "Название аромата в нашем каталоге записано заглавными буквами.",
+    "Регистр названия не означает другой аромат.", true, DateTimeOffset.UtcNow, Guid.NewGuid().ToString("N"));
+multiple.SaveLanguageLessonIfUnchanged(firstLesson, Array.Empty<GingerLearning.LanguageLesson>());
+var firstBundle = multiple.ReadLanguageLessons("Альянс");
+Check(GingerLearning.ComposeLanguageLessons(firstBundle) == firstLesson.Text, "single lesson keeps exact original text");
+multiple.SaveLanguageLessonIfUnchanged(secondLesson, firstBundle);
+var bothLessons = multiple.ReadLanguageLessons("Альянс");
+Check(bothLessons.SequenceEqual(new[] { firstLesson, secondLesson }), "independent lessons accumulate in publication order");
+var combined = GingerLearning.ComposeLanguageLessons(bothLessons);
+Check(combined == "1. " + firstLesson.Text + "\n\n2. " + secondLesson.Text,
+    "active lesson context includes both explanations without replacing the first");
+Check(multiple.LessonForReview("Альянс", "Новая позиция")?.Text == combined,
+    "review receives complete supplier lesson context");
+Check(multiple.ReadLanguageLessons("Другой поставщик").Count == 0
+    && multiple.LessonForReview("Другой поставщик", "Новая позиция") is null,
+    "lesson bundle never crosses supplier");
+multiple.Teach(new("Альянс", "Запрещённая пара", "Кандидат", "Запрет пользователя", false, DateTimeOffset.UtcNow));
+Check(multiple.LessonForReview("Альянс", "Запрещённая пара") is null,
+    "combined lesson context cannot bypass explicit pair veto");
+var revokedFirst = firstLesson with { Enabled = false, RecordedAt = DateTimeOffset.UtcNow };
+multiple.SaveLanguageLessonIfUnchanged(revokedFirst, bothLessons);
+var afterRevoke = multiple.ReadLanguageLessons("Альянс");
+Check(afterRevoke.SequenceEqual(new[] { revokedFirst, secondLesson })
+    && GingerLearning.ComposeLanguageLessons(afterRevoke) == secondLesson.Text,
+    "one lesson revoked independently while another remains active and order remains stable");
+Check(multiple.LessonForReview("Альянс", "Новая позиция")?.Text == secondLesson.Text,
+    "revoked lesson excluded from review context");
+try
+{
+    multiple.SaveLanguageLessonIfUnchanged(secondLesson with { Text = "Изменение из устаревшего окна" }, bothLessons);
+    throw new Exception("stale supplier bundle accepted");
+}
+catch (InvalidOperationException) { }
+Check(multiple.ReadLanguageLessons("Альянс").SequenceEqual(afterRevoke),
+    "change to another lesson invalidates the entire stale editor bundle without data loss");
+try
+{
+    multiple.SaveLanguageLessonIfUnchanged(secondLesson with { LessonId = Guid.NewGuid().ToString("N"), Text = " " + secondLesson.Text + " " }, afterRevoke);
+    throw new Exception("duplicate active lesson accepted");
+}
+catch (InvalidDataException) { }
+Check(multiple.ReadLanguageLessons("Альянс").SequenceEqual(afterRevoke),
+    "duplicate active text cannot grow memory under a new identity");
+var otherSupplier = secondLesson with { Supplier = "Другой поставщик", LessonId = Guid.NewGuid().ToString("N") };
+multiple.SaveLanguageLessonIfUnchanged(otherSupplier, Array.Empty<GingerLearning.LanguageLesson>());
+Check(multiple.ReadLanguageLessons("Другой поставщик").Single() == otherSupplier,
+    "same explanation may be explicitly taught to another supplier");
+try
+{
+    GingerLearning.ComposeLanguageLessons(new[] { secondLesson, otherSupplier });
+    throw new Exception("mixed supplier context accepted");
+}
+catch (InvalidDataException) { }
+Check(new GingerLearning(Path.Combine(root, "multiple-lessons")).ReadLanguageLessons("Альянс").SequenceEqual(afterRevoke),
+    "all lesson identities and independent revocation survive restart");
+
+var legacyDirectory = Path.Combine(root, "legacy-lessons");
+var legacyFolder = Path.Combine(legacyDirectory, "language-lessons");
+Directory.CreateDirectory(legacyFolder);
+// These are the old on-disk shape, deliberately without a LessonId field.
+File.WriteAllText(Path.Combine(legacyFolder, "0001.json"), JsonSerializer.Serialize(new
+    { Supplier = "Старый поставщик", Text = "Устаревшее объяснение", Understanding = "Первое понимание", Enabled = true, RecordedAt = DateTimeOffset.UtcNow }));
+File.WriteAllText(Path.Combine(legacyFolder, "0002.json"), JsonSerializer.Serialize(new
+    { Supplier = "Старый поставщик", Text = "Последнее старое объяснение", Understanding = "Исправленное понимание", Enabled = false, RecordedAt = DateTimeOffset.UtcNow }));
+var legacyLearning = new GingerLearning(legacyDirectory);
+var legacyBundle = legacyLearning.ReadLanguageLessons("Старый поставщик");
+Check(legacyBundle.Count == 1 && legacyBundle[0].LessonId == "legacy" && !legacyBundle[0].Enabled
+    && legacyBundle[0].Text == "Последнее старое объяснение" && GingerLearning.ComposeLanguageLessons(legacyBundle) == "",
+    "old history migrates as one latest lesson and never reactivates superseded text");
+var additionalLegacyLesson = firstLesson with { Supplier = "Старый поставщик", LessonId = Guid.NewGuid().ToString("N") };
+legacyLearning.SaveLanguageLessonIfUnchanged(additionalLegacyLesson, legacyBundle);
+Check(legacyLearning.ReadLanguageLessons("Старый поставщик").Count == 2
+    && legacyLearning.LessonForReview("Старый поставщик", "Новая строка")?.Text == additionalLegacyLesson.Text,
+    "new separate lesson coexists with revoked legacy history without reviving it");
+
+var bounded = new GingerLearning(Path.Combine(root, "bounded-lessons"));
+var longLesson = firstLesson with { Text = new string('а', 4000), LessonId = Guid.NewGuid().ToString("N") };
+bounded.SaveLanguageLessonIfUnchanged(longLesson, Array.Empty<GingerLearning.LanguageLesson>());
+var boundedBefore = bounded.ReadLanguageLessons("Альянс");
+var boundedFiles = Directory.GetFiles(Path.Combine(root, "bounded-lessons", "language-lessons"), "*.json");
+try
+{
+    bounded.SaveLanguageLessonIfUnchanged(secondLesson, boundedBefore);
+    throw new Exception("oversized combined context accepted");
+}
+catch (InvalidDataException ex) { Check(ex.Message.Contains("4000"), "context limit provides actionable explanation"); }
+Check(bounded.ReadLanguageLessons("Альянс").SequenceEqual(boundedBefore)
+    && Directory.GetFiles(Path.Combine(root, "bounded-lessons", "language-lessons"), "*.json").SequenceEqual(boundedFiles)
+    && GingerLearning.ComposeLanguageLessons(boundedBefore).Length == 4000,
+    "context overflow preserves every published record and never truncates existing explanation");
+bounded.SaveLanguageLessonIfUnchanged(longLesson with { Enabled = false }, boundedBefore);
+bounded.SaveLanguageLessonIfUnchanged(secondLesson, bounded.ReadLanguageLessons("Альянс"));
+Check(GingerLearning.ComposeLanguageLessons(bounded.ReadLanguageLessons("Альянс")) == secondLesson.Text,
+    "disabled lesson does not consume active context budget");
 var volumeFirst = "Acme Bloom (муж) 30ml EDP";
 var concentrationFirst = "Acme Bloom (муж) edp 30 мл";
 Check(learning.AutomaticCandidate("supplier", volumeFirst, [concentrationFirst]) == concentrationFirst,

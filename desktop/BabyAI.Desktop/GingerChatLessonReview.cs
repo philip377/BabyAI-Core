@@ -14,7 +14,9 @@ internal sealed class GingerChatLessonReview
     public string ChatId { get; }
     public string Supplier { get; }
     public string Source { get; }
-    public GingerLearning.LanguageLesson? Saved { get; private set; }
+    public IReadOnlyList<GingerLearning.LanguageLesson> Lessons { get; private set; }
+    public string? SelectedLessonId { get; private set; }
+    public GingerLearning.LanguageLesson? Saved => Lessons.SingleOrDefault(lesson => lesson.LessonId == SelectedLessonId);
     public GingerLearning.LanguageLesson? Draft { get; private set; }
     public bool CanPreview => !_closed && _working == 0;
     public bool CanSave => CanPreview && Draft is not null;
@@ -29,11 +31,36 @@ internal sealed class GingerChatLessonReview
         ChatId = chatId; Supplier = item.Supplier; Source = item.Title;
         _candidates = item.Candidates.ToArray();
         _learning = learning;
-        Saved = learning.ReadLanguageLesson(Supplier);
+        Lessons = learning.ReadLanguageLessons(Supplier);
     }
 
     public void Invalidate() { _closed = true; DiscardDraft(); }
     public void DiscardDraft() { Interlocked.Increment(ref _revision); Draft = null; }
+
+    public void SelectLesson(string? lessonId)
+    {
+        Enter();
+        try
+        {
+            RequireContext(ChatId);
+            if (lessonId is not null && !Lessons.Any(lesson => lesson.LessonId == lessonId))
+                throw new InvalidOperationException("Выбранный урок отсутствует в этом просмотре.");
+            SelectedLessonId = lessonId;
+            DiscardDraft();
+        }
+        finally { Volatile.Write(ref _working, 0); }
+    }
+
+    private GingerLearning.LanguageLesson[] WithLesson(GingerLearning.LanguageLesson lesson)
+        => Lessons.Any(item => item.LessonId == lesson.LessonId)
+            ? Lessons.Select(item => item.LessonId == lesson.LessonId ? lesson : item).ToArray()
+            : Lessons.Append(lesson).ToArray();
+
+    private void RequireUnchangedLessons()
+    {
+        if (!Lessons.SequenceEqual(_learning.ReadLanguageLessons(Supplier)))
+            throw new InvalidOperationException("Уроки поставщика изменены в другом окне. Заново прочитай прайс и проверь объяснение.");
+    }
 
     private void RequireContext(string chatId)
     {
@@ -60,12 +87,19 @@ internal sealed class GingerChatLessonReview
             text = text.Trim();
             if (text.Length is < 1 or > 4000)
                 throw new InvalidDataException("Напиши объяснение до 4000 символов.");
+            RequireUnchangedLessons();
+            var lessonId = SelectedLessonId ?? Guid.NewGuid().ToString("N");
+            if (Lessons.Any(item => item.Enabled && item.LessonId != lessonId && item.Text.Trim() == text))
+                throw new InvalidDataException("Такое объяснение уже действует. Выбери его в списке для изменения.");
+            var draft = new GingerLearning.LanguageLesson(Supplier, text, "Проверка понимания", true, DateTimeOffset.UtcNow, lessonId);
+            var combined = GingerLearning.ComposeLanguageLessons(WithLesson(draft));
             token.ThrowIfCancellationRequested();
-            var result = (await preview(Supplier, Source, text, _candidates.ToArray(), token)).Clone();
+            var result = (await preview(Supplier, Source, combined, _candidates.ToArray(), token)).Clone();
             token.ThrowIfCancellationRequested();
             RequireContext(chatId);
             if (revision != _revision)
                 throw new InvalidOperationException("Объяснение изменено во время проверки. Проверь его заново.");
+            RequireUnchangedLessons();
             if (result.TryGetProperty("error", out _))
                 throw new InvalidDataException("Модель не завершила проверку объяснения.");
             var understanding = result.GetProperty("understanding").GetString();
@@ -75,9 +109,9 @@ internal sealed class GingerChatLessonReview
                 || string.IsNullOrWhiteSpace(explanation) || explanation.Length > 4000
                 || (candidate is not null && _candidates.Count(c => c == candidate) != 1))
                 throw new InvalidDataException("Модель вернула непроверяемое понимание урока или кандидата.");
-            Draft = new(Supplier, text, understanding, true, DateTimeOffset.UtcNow);
+            Draft = draft with { Understanding = understanding };
             return JsonSerializer.SerializeToElement(new {
-                request = new { supplier = Supplier, source = Source, lesson = text, candidates = _candidates }, result
+                request = new { supplier = Supplier, source = Source, lesson = combined, candidates = _candidates }, result
             });
         }
         finally { Volatile.Write(ref _working, 0); }
@@ -92,8 +126,10 @@ internal sealed class GingerChatLessonReview
             if (Draft is not { } draft || draft.Text != currentText.Trim())
                 throw new InvalidOperationException("Объяснение изменено. Сначала снова проверь понимание модели.");
             var saved = draft with { RecordedAt = DateTimeOffset.UtcNow };
-            _learning.SaveLanguageLessonIfUnchanged(saved, Saved);
-            Saved = saved; Draft = null;
+            _learning.SaveLanguageLessonIfUnchanged(saved, Lessons);
+            Lessons = Array.AsReadOnly(WithLesson(saved));
+            SelectedLessonId = saved.LessonId;
+            Draft = null;
         }
         finally { Volatile.Write(ref _working, 0); }
     }
@@ -107,8 +143,9 @@ internal sealed class GingerChatLessonReview
             if (Saved is not { Enabled: true } saved)
                 throw new InvalidOperationException("У поставщика нет действующего урока для отзыва.");
             var revoked = saved with { Enabled = false, RecordedAt = DateTimeOffset.UtcNow };
-            _learning.SaveLanguageLessonIfUnchanged(revoked, saved);
-            Saved = revoked; Draft = null;
+            _learning.SaveLanguageLessonIfUnchanged(revoked, Lessons);
+            Lessons = Array.AsReadOnly(WithLesson(revoked));
+            Draft = null;
         }
         finally { Volatile.Write(ref _working, 0); }
     }

@@ -6,6 +6,7 @@ namespace BabyAI.Desktop;
 public sealed partial class MainWindow
 {
     private GingerChatLessonReview? _gingerChatLesson;
+    private bool _updatingGingerLessons;
 
     private void InvalidateGingerChatLesson()
     {
@@ -19,9 +20,10 @@ public sealed partial class MainWindow
         _gingerChatLesson?.Invalidate();
         _gingerChatLesson = lesson;
         GingerChatLessonSource.Text = $"Поставщик: {lesson.Supplier}\nПример из прайса: {lesson.Source}";
-        GingerChatLessonText.Text = lesson.Saved is { Enabled: true } saved ? saved.Text : "";
+        PopulateGingerChatLessons();
+        GingerChatLessonText.Text = "";
         GingerChatLessonPreview.Text = "";
-        GingerChatLessonStatus.Text = "Напиши объяснение и проверь, как UNIX его понял на показанном примере.";
+        GingerChatLessonStatus.Text = "Добавь объяснение или выбери сохранённое. Проверь понимание на показанном примере перед сохранением.";
         GingerChatLessonCard.IsExpanded = false;
         GingerChatLessonCard.Visibility = Visibility.Visible;
         UpdateGingerChatSavedLesson();
@@ -30,14 +32,56 @@ public sealed partial class MainWindow
 
     private void UpdateGingerChatSavedLesson()
     {
+        var activeCount = _gingerChatLesson?.Lessons.Count(lesson => lesson.Enabled) ?? 0;
         GingerChatSavedLesson.Text = _gingerChatLesson?.Saved is { } saved
-            ? (saved.Enabled ? "Действующий урок: " : "Отозванный урок: ") + saved.Text + "\nПроверенное понимание: " + saved.Understanding
-            : "Сохранённого урока пока нет.";
+            ? $"Действующих объяснений: {activeCount}.\n" + (saved.Enabled ? "Выбран действующий урок: " : "Выбран отозванный урок: ") + saved.Text + "\nПонимание при проверке: " + saved.Understanding
+            : $"Действующих объяснений: {activeCount}. Новое объяснение будет добавлено отдельно; прежние сохранятся.";
+    }
+
+    private void PopulateGingerChatLessons()
+    {
+        _updatingGingerLessons = true;
+        try
+        {
+            GingerChatLessonSelector.Items.Clear();
+            GingerChatLessonSelector.Items.Add(new ComboBoxItem { Content = "Новое объяснение", Tag = null });
+            if (_gingerChatLesson is not { } review) return;
+            foreach (var lesson in review.Lessons)
+            {
+                var title = lesson.Text.Replace('\r', ' ').Replace('\n', ' ');
+                if (title.Length > 100) title = title[..100] + "…";
+                GingerChatLessonSelector.Items.Add(new ComboBoxItem {
+                    Content = (lesson.Enabled ? "Действует: " : "Отозван: ") + title, Tag = lesson.LessonId
+                });
+            }
+            GingerChatLessonSelector.SelectedIndex = 0;
+            foreach (ComboBoxItem item in GingerChatLessonSelector.Items)
+                if (item.Tag is string id && id == review.SelectedLessonId)
+                    GingerChatLessonSelector.SelectedItem = item;
+        }
+        finally { _updatingGingerLessons = false; }
+    }
+
+    private void GingerChatLessonSelector_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingGingerLessons || _gingerChatLesson is not { } lesson
+            || GingerChatLessonSelector.SelectedItem is not ComboBoxItem item) return;
+        try
+        {
+            lesson.SelectLesson(item.Tag as string);
+            GingerChatLessonText.Text = lesson.Saved?.Text ?? "";
+            GingerChatLessonPreview.Text = "Проверь понимание вместе с остальными действующими объяснениями.";
+            GingerChatLessonStatus.Text = lesson.Saved is null ? "Новое объяснение." : "Редактируется только выбранный урок.";
+            UpdateGingerChatSavedLesson();
+        }
+        catch (Exception ex) { GingerChatLessonStatus.Text = ex.Message; PopulateGingerChatLessons(); }
+        UpdateGingerChatLessonControls();
     }
 
     private void UpdateGingerChatLessonControls()
     {
         GingerChatLessonText.IsEnabled = !_busy && _gingerChatLesson?.CanPreview == true;
+        GingerChatLessonSelector.IsEnabled = GingerChatLessonText.IsEnabled;
         GingerChatPreviewLessonButton.IsEnabled = GingerChatLessonText.IsEnabled;
         GingerChatSaveLessonButton.IsEnabled = !_busy && _gingerChatLesson?.CanSave == true;
         GingerChatRevokeLessonButton.IsEnabled = !_busy && _gingerChatLesson?.CanRevoke == true;
@@ -73,6 +117,7 @@ public sealed partial class MainWindow
             result = "Понимание готово к проверке.\nПоставщик: " + lesson.Supplier +
                 "\nТвоё объяснение: " + text + "\nПонял так: " + lesson.Draft!.Understanding + "\nПример: " + lesson.Source + "\n" +
                 FormatGingerChatProposal(report.GetProperty("result")) +
+                "\nВсе объяснения, использованные при проверке:\n" + report.GetProperty("request").GetProperty("lesson").GetString() +
                 "\nПроверь понимание. Если всё верно, отдельно сохрани урок. Для сопоставления пары снова попроси продолжить сопоставление.";
             ShowGingerChatReview(new GingerChatAnswerReview(lesson.ChatId, report));
         }
@@ -101,6 +146,7 @@ public sealed partial class MainWindow
         InvalidateGingerChatMatch();
         SetBusy(true);
         ShowGingerChatStep(revoke ? "Отзываю урок…" : "Сохраняю подтверждённый урок…", true);
+        var editingExisting = lesson.Saved is not null;
         var message = revoke ? "Отзываю сохранённый урок поставщика." : "Подтверждаю понимание и сохраняю урок поставщика.";
         var result = "";
         try
@@ -109,11 +155,13 @@ public sealed partial class MainWindow
             if (revoke) lesson.Revoke(chatId);
             else lesson.Save(chatId, GingerChatLessonText.Text);
             result = revoke
-                ? "Урок отозван. При следующих запросах UNIX не будет использовать его как действующее объяснение."
-                : "Урок сохранён. UNIX использует его при следующих предложениях для этого поставщика.";
+                ? "Выбранный урок отозван. Остальные действующие объяснения сохраняются."
+                : (editingExisting ? "Выбранное объяснение обновлено." : "Новое объяснение добавлено отдельно.") +
+                  " UNIX использует все действующие объяснения поставщика вместе.";
             result += "\nПоставщик: " + lesson.Supplier + "\nУрок: " + lesson.Saved!.Text +
                 "\nПонимание: " + lesson.Saved.Understanding +
                 "\nЭто сохранённое знание для запросов к Qwen. Веса модели, отдельные точные пары и разрешения Ginger не изменены.";
+            PopulateGingerChatLessons();
             UpdateGingerChatSavedLesson();
         }
         catch (Exception ex)

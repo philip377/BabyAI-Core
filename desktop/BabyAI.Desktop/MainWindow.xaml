@@ -460,7 +460,9 @@
                                     <StackPanel Spacing="10">
                                         <TextBlock x:Name="GingerChatLessonSource" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                                         <TextBlock x:Name="GingerChatSavedLesson" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                                        <TextBlock Text="Урок применяется к этому поставщику. Новая версия заменит прежнюю: оставь в тексте все нужные правила."
+                                        <ComboBox x:Name="GingerChatLessonSelector" Header="Объяснения поставщика" HorizontalAlignment="Stretch"
+                                                  SelectionChanged="GingerChatLessonSelector_Changed" />
+                                        <TextBlock Text="Новое объяснение добавляется к действующим. Для исправления или отзыва выбери отдельный урок. При проверке UNIX учитывает их вместе."
                                                    TextWrapping="Wrap" FontSize="12" />
                                         <TextBox x:Name="GingerChatLessonText" Header="Твоё объяснение"
                                                  MaxLength="4000" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" MaxHeight="160"
@@ -469,7 +471,7 @@
                                         <TextBox x:Name="GingerChatLessonPreview" Header="Как UNIX понял объяснение"
                                                  IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="200" />
                                         <Button x:Name="GingerChatSaveLessonButton" Content="Понимание верно — сохранить урок" Click="GingerChatSaveLesson_Click" />
-                                        <Button x:Name="GingerChatRevokeLessonButton" Content="Отозвать сохранённый урок" Click="GingerChatRevokeLesson_Click" />
+                                        <Button x:Name="GingerChatRevokeLessonButton" Content="Отозвать выбранный урок" Click="GingerChatRevokeLesson_Click" />
                                         <TextBlock x:Name="GingerChatLessonStatus" TextWrapping="Wrap" FontSize="12" AutomationProperties.LiveSetting="Polite" />
                                     </StackPanel>
                                 </Expander>

@@ -22,6 +22,7 @@ public sealed partial class MainWindow
         var source = new TextBlock { Text = "UNIX подготовит вкладку сопоставления и прочитает текущий прайс Ginger. Сопоставление потребует отдельного разрешения.", TextWrapping = TextWrapping.Wrap, FontSize = 15 };
         var candidates = new ComboBox { Header = "Кандидат из каталога Ginger", HorizontalAlignment = HorizontalAlignment.Stretch };
         var candidateFull = new TextBlock { TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+        var lessonPicker = new ComboBox { Header = "Объяснения этого поставщика", HorizontalAlignment = HorizontalAlignment.Stretch, IsEnabled = false };
         var reason = new TextBox { Header = "Твоё объяснение для обучения", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MaxLength = 4000, PlaceholderText = "Например: у этого поставщика «немного подмят» означает тестер" };
         var lessonPreview = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Header = "Предложение модели и сравнение кандидатов", MaxHeight = 220 };
         var askTeacher = new Button { Content = "Получить предложение модели (урок необязателен)" };
@@ -33,9 +34,17 @@ public sealed partial class MainWindow
         string? answerId = null;
         var ratingBusy = false;
         var confirmLesson = new Button { Content = "Подтверждаю понимание — сохранить урок", IsEnabled = false };
-        var loadLesson = new Button { Content = "Показать сохранённый урок" };
-        var revokeLesson = new Button { Content = "Отозвать урок" };
+        var loadLesson = new Button { Content = "Обновить список объяснений", IsEnabled = false };
+        var revokeLesson = new Button { Content = "Отозвать выбранное объяснение", IsEnabled = false };
         GingerLearning.LanguageLesson? draftLesson = null;
+        GingerLearning.LanguageLesson? selectedLesson = null;
+        IReadOnlyList<GingerLearning.LanguageLesson> lessonSnapshot = Array.Empty<GingerLearning.LanguageLesson>();
+        IReadOnlyList<GingerLearning.LanguageLesson>? draftLessonSnapshot = null;
+        GingerDesktopObservation? draftLessonObservation = null;
+        string? lessonSupplier = null;
+        string? draftSelectedLessonId = null;
+        var refreshingLessons = false;
+        var dialogClosed = false;
         var teaching = false;
         CancellationTokenSource? teachingCancellation = null;
         var remember = new CheckBox { Content = "Разрешить эту точную пару в следующих проходах у этого поставщика" };
@@ -56,7 +65,7 @@ public sealed partial class MainWindow
         panel.Children.Add(source);
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         row.Children.Add(read); row.Children.Add(run); row.Children.Add(stop); panel.Children.Add(row);
-        panel.Children.Add(reason);
+        panel.Children.Add(lessonPicker); panel.Children.Add(reason);
         panel.Children.Add(askTeacher); panel.Children.Add(lessonPreview);
         panel.Children.Add(score); panel.Children.Add(feedback); panel.Children.Add(rateAnswer); panel.Children.Add(revokeAnswer);
         panel.Children.Add(permit); panel.Children.Add(candidates); panel.Children.Add(candidateFull); panel.Children.Add(approve);
@@ -73,13 +82,68 @@ public sealed partial class MainWindow
             if (log.Text.Length > 18000) log.Text = log.Text[^18000..];
             SaveGingerLogLine(text);
         }
+        void InvalidateLessonDraft()
+        {
+            draftLesson = null; draftLessonSnapshot = null; draftLessonObservation = null;
+            draftSelectedLessonId = null; confirmLesson.IsEnabled = false;
+        }
+        void UpdateLessonControls()
+        {
+            var available = observation is not null && !_gingerRunning && !teaching && !ratingBusy && !fatal && !dialogClosed;
+            lessonPicker.IsEnabled = loadLesson.IsEnabled = askTeacher.IsEnabled = reason.IsEnabled = available;
+            revokeLesson.IsEnabled = available && selectedLesson is { Enabled: true };
+            confirmLesson.IsEnabled = available && draftLesson is not null && draftLessonSnapshot is not null
+                && ReferenceEquals(observation, draftLessonObservation) && observation?.Supplier == draftLesson.Supplier
+                && selectedLesson?.LessonId == draftSelectedLessonId && reason.Text.Trim() == draftLesson.Text;
+            diagnostics.IsEnabled = !_gingerRunning && !teaching && !ratingBusy && !dialogClosed;
+        }
+        static IEnumerable<GingerLearning.LanguageLesson> WithLesson(
+            IReadOnlyList<GingerLearning.LanguageLesson> existing, GingerLearning.LanguageLesson replacement)
+            => existing.Any(lesson => lesson.LessonId == replacement.LessonId)
+                ? existing.Select(lesson => lesson.LessonId == replacement.LessonId ? replacement : lesson)
+                : existing.Append(replacement);
+        void RefreshLessons(string? selectedId = null)
+        {
+            InvalidateLessonDraft();
+            refreshingLessons = true;
+            try
+            {
+                var supplier = observation?.Supplier;
+                var saved = supplier is null ? Array.Empty<GingerLearning.LanguageLesson>() : learning.ReadLanguageLessons(supplier).ToArray();
+                var items = new List<ComboBoxItem> { new() { Content = "Новое объяснение" } };
+                foreach (var lesson in saved)
+                {
+                    var label = lesson.Text.Replace('\r', ' ').Replace('\n', ' ');
+                    if (label.Length > 85) label = label[..85] + "…";
+                    items.Add(new ComboBoxItem { Content = (lesson.Enabled ? "" : "[Отозвано] ") + label, Tag = lesson });
+                }
+                lessonSupplier = supplier; lessonSnapshot = saved;
+                selectedLesson = saved.FirstOrDefault(lesson => lesson.LessonId == selectedId);
+                lessonPicker.ItemsSource = items;
+                lessonPicker.SelectedItem = items.FirstOrDefault(item => item.Tag is GingerLearning.LanguageLesson lesson && lesson.LessonId == selectedId) ?? items[0];
+                reason.Text = selectedLesson?.Text ?? "";
+                lessonPreview.Text = selectedLesson is null
+                    ? "Новое объяснение дополнит остальные. Без нового текста модель использует все действующие объяснения поставщика."
+                    : (selectedLesson.Enabled ? "Сохранено: " : "Отозвано: ") + selectedLesson.Understanding;
+                revokeLesson.IsEnabled = selectedLesson is { Enabled: true } && !_gingerRunning && !teaching && !ratingBusy;
+            }
+            catch
+            {
+                lessonSupplier = null; lessonSnapshot = Array.Empty<GingerLearning.LanguageLesson>(); selectedLesson = null;
+                lessonPicker.ItemsSource = null; reason.Text = ""; revokeLesson.IsEnabled = false;
+                throw;
+            }
+            finally { refreshingLessons = false; }
+        }
         void Update()
         {
-            draftLesson = null; confirmLesson.IsEnabled = false;
+            InvalidateLessonDraft();
             ratedReport = null; answerId = null;
             rateAnswer.IsEnabled = revokeAnswer.IsEnabled = false;
             if (observation is not null)
             {
+                if (lessonSupplier != observation.Supplier)
+                    try { RefreshLessons(); } catch (Exception ex) { Log("Не удалось прочитать объяснения: " + ex.Message); }
                 source.Text = $"{observation.Supplier} · документ {observation.Document} · строка {observation.Position}/{observation.Count}\n{observation.Title}\nТовар: {observation.Source.GetProperty("LinkedProductText").GetString()}";
                 candidates.ItemsSource = observation.Candidates;
                 candidates.SelectedIndex = -1;
@@ -94,6 +158,7 @@ public sealed partial class MainWindow
             saveRule.IsEnabled = conditionRule.IsEnabled = observation is not null && !_gingerRunning && !fatal;
             if (observation is not null) conditionRule.IsChecked = learning.HasDentedTesterRule(observation.Supplier);
             permit.IsEnabled = approve.IsEnabled = candidates.IsEnabled = reason.IsEnabled = remember.IsEnabled = !_gingerRunning;
+            UpdateLessonControls();
         }
         void QueueCurrent()
         {
@@ -161,10 +226,33 @@ public sealed partial class MainWindow
             permit.IsChecked = false;
             await Execute(async token => { observation = await session!.ObserveAsync(token, prepare: prepare); Log("Прайс прочитан. Полные названия доступны выше. " + session.DirectoryPath); });
         }
-        reason.TextChanged += (_, _) => { draftLesson = null; confirmLesson.IsEnabled = false; };
+        reason.TextChanged += (_, _) => InvalidateLessonDraft();
+        lessonPicker.SelectionChanged += (_, _) =>
+        {
+            if (refreshingLessons) return;
+            if (teaching || ratingBusy || _gingerRunning || dialogClosed)
+            {
+                // A pending selection event must not leave the visible item different
+                // from the immutable lesson being previewed, rated, or revoked.
+                refreshingLessons = true;
+                try { lessonPicker.SelectedItem = lessonPicker.Items.OfType<ComboBoxItem>()
+                    .FirstOrDefault(item => (item.Tag as GingerLearning.LanguageLesson)?.LessonId == selectedLesson?.LessonId); }
+                finally { refreshingLessons = false; }
+                return;
+            }
+            InvalidateLessonDraft();
+            approve.IsChecked = false;
+            ratedReport = null; answerId = null; rateAnswer.IsEnabled = revokeAnswer.IsEnabled = false;
+            selectedLesson = (lessonPicker.SelectedItem as ComboBoxItem)?.Tag as GingerLearning.LanguageLesson;
+            reason.Text = selectedLesson?.Text ?? "";
+            lessonPreview.Text = selectedLesson is null
+                ? "Новое объяснение дополнит остальные. Без нового текста модель использует все действующие объяснения поставщика."
+                : (selectedLesson.Enabled ? "Сохранено: " : "Отозвано: ") + selectedLesson.Understanding;
+            revokeLesson.IsEnabled = selectedLesson is { Enabled: true } && !fatal;
+        };
         askTeacher.Click += async (_, _) =>
         {
-            if (_gingerRunning || teaching || ratingBusy || observation is null || fatal) return;
+            if (_gingerRunning || teaching || ratingBusy || observation is null || fatal || dialogClosed) return;
             if (observation.Candidates.Length == 0)
             {
                 lessonPreview.Text = "Кандидатов пока нет. Подготавливаю поиск по словам слева…";
@@ -181,17 +269,32 @@ public sealed partial class MainWindow
                 }
             }
             var before = observation;
-            var text = reason.Text.Trim();
+            var enteredText = reason.Text.Trim();
+            var selectedId = selectedLesson?.LessonId;
+            IReadOnlyList<GingerLearning.LanguageLesson> expectedLessons;
+            GingerLearning.LanguageLesson? proposedLesson;
+            string text;
             try
             {
-                if (text.Length == 0) text = learning.ReadLanguageLesson(before.Supplier) is { Enabled: true } saved ? saved.Text : "";
+                if (lessonSupplier != before.Supplier)
+                    throw new InvalidOperationException("Обнови список объяснений этого поставщика перед запросом модели.");
+                expectedLessons = lessonSnapshot.ToArray();
+                if (!learning.ReadLanguageLessons(before.Supplier).SequenceEqual(expectedLessons))
+                    throw new InvalidOperationException("Объяснения изменились. Обнови список и повторно проверь предложение.");
+                var isNewOrChanged = enteredText.Length > 0 && (selectedLesson is null || !selectedLesson.Enabled || enteredText != selectedLesson.Text);
+                proposedLesson = isNewOrChanged
+                    ? new(before.Supplier, enteredText, "Проверка понимания", true, DateTimeOffset.UtcNow, selectedId ?? Guid.NewGuid().ToString("N"))
+                    : null;
+                text = GingerLearning.ComposeLanguageLessons(proposedLesson is null ? expectedLessons
+                    : WithLesson(expectedLessons, proposedLesson));
             }
-            catch (Exception ex) { Log("Не удалось прочитать урок: " + ex.Message); return; }
-            teachingCancellation = new CancellationTokenSource();
+            catch (Exception ex) { InvalidateLessonDraft(); Log("Не удалось подготовить объяснения: " + ex.Message); return; }
+            var previewCancellation = new CancellationTokenSource();
+            teachingCancellation = previewCancellation;
             ratedReport = null; answerId = null; rateAnswer.IsEnabled = revokeAnswer.IsEnabled = false;
             score.SelectedIndex = -1; feedback.Text = "";
-            teaching = true; diagnostics.IsEnabled = false; stop.IsEnabled = true; draftLesson = null; confirmLesson.IsEnabled = false;
-            askTeacher.IsEnabled = loadLesson.IsEnabled = revokeLesson.IsEnabled = reason.IsEnabled = false;
+            teaching = true; diagnostics.IsEnabled = false; stop.IsEnabled = true; InvalidateLessonDraft();
+            askTeacher.IsEnabled = lessonPicker.IsEnabled = loadLesson.IsEnabled = revokeLesson.IsEnabled = reason.IsEnabled = false;
             approve.IsChecked = false;
             candidates.SelectedIndex = -1;
             candidates.IsEnabled = approve.IsEnabled = false;
@@ -199,14 +302,26 @@ public sealed partial class MainWindow
             try
             {
                 var result = await _bridge.PreviewGingerLessonAsync(before.Supplier, before.Title, text,
-                    before.Candidates, teachingCancellation.Token);
-                teachingCancellation.Token.ThrowIfCancellationRequested();
+                    before.Candidates, previewCancellation.Token);
+                previewCancellation.Token.ThrowIfCancellationRequested();
+                if (dialogClosed || !ReferenceEquals(observation, before) || lessonSupplier != before.Supplier || selectedLesson?.LessonId != selectedId || reason.Text.Trim() != enteredText)
+                    throw new InvalidOperationException("Поставщик, пример или объяснение изменились. Запроси новое предложение.");
+                if (!learning.ReadLanguageLessons(before.Supplier).SequenceEqual(expectedLessons))
+                    throw new InvalidOperationException("Объяснения изменились во время проверки. Обнови список и запроси новое предложение.");
                 var understanding = result.GetProperty("understanding").GetString()!;
                 var candidate = result.GetProperty("candidate").GetString();
+                var explanation = result.GetProperty("explanation").GetString();
+                if (string.IsNullOrWhiteSpace(understanding) || understanding.Length > 4000
+                    || string.IsNullOrWhiteSpace(explanation) || explanation.Length > 4000
+                    || (candidate is not null && before.Candidates.Count(item => item == candidate) != 1))
+                    throw new InvalidDataException("Модель вернула непроверяемое понимание объяснения или кандидата.");
                 lessonPreview.Text = understanding + "\nПример: " + before.Title + "\nКандидат: " + (candidate ?? "нужна ручная проверка")
-                    + "\n" + result.GetProperty("explanation").GetString();
+                    + "\n" + explanation;
                 approve.IsChecked = false;
-                draftLesson = text.Length == 0 ? null : new(before.Supplier, text, understanding, true, DateTimeOffset.UtcNow);
+                draftLesson = proposedLesson is null ? null : proposedLesson with { Understanding = understanding };
+                draftLessonSnapshot = draftLesson is null ? null : expectedLessons;
+                draftLessonObservation = draftLesson is null ? null : before;
+                draftSelectedLessonId = selectedId;
                 confirmLesson.IsEnabled = draftLesson is not null;
                 if (result.TryGetProperty("comparisons", out var comparisons))
                 {
@@ -234,24 +349,27 @@ public sealed partial class MainWindow
             }
             catch (OperationCanceledException)
             {
+                InvalidateLessonDraft();
                 lessonPreview.Text = "Разбор урока остановлен. Предложение не принято.";
                 Log("Разбор урока отменён. Урок не сохранён, кандидат не выбран.");
             }
-            catch (Exception ex) { lessonPreview.Text = "Не удалось получить предложение."; Log("Урок не сохранён: " + ex.Message); }
+            catch (Exception ex) { InvalidateLessonDraft(); lessonPreview.Text = "Не удалось получить предложение."; Log("Урок не сохранён: " + ex.Message); }
             finally
             {
-                teachingCancellation.Dispose(); teachingCancellation = null; teaching = false;
+                previewCancellation.Dispose();
+                if (ReferenceEquals(teachingCancellation, previewCancellation)) teachingCancellation = null;
+                teaching = false;
                 diagnostics.IsEnabled = true; stop.IsEnabled = false;
                 candidates.IsEnabled = approve.IsEnabled = true;
-                askTeacher.IsEnabled = loadLesson.IsEnabled = revokeLesson.IsEnabled = reason.IsEnabled = true;
+                UpdateLessonControls();
             }
         };
         rateAnswer.Click += async (_, _) =>
         {
-            if (ratingBusy || teaching || _gingerRunning || ratedReport is null || answerId is not null) return;
+            if (ratingBusy || teaching || _gingerRunning || fatal || dialogClosed || observation is null || ratedReport is null || answerId is not null) return;
             if (score.SelectedItem is not int points || string.IsNullOrWhiteSpace(feedback.Text))
             { Log("Выбери оценку и напиши пояснение к показанному ответу."); return; }
-            ratingBusy = true; rateAnswer.IsEnabled = askTeacher.IsEnabled = false;
+            ratingBusy = true; rateAnswer.IsEnabled = false; UpdateLessonControls();
             try
             {
                 var receipt = await _bridge.RateGingerAnswerReviewAsync(ratedReport.Value, points, feedback.Text.Trim());
@@ -262,47 +380,67 @@ public sealed partial class MainWindow
                     : "Эта оценка ранее отозвана и остаётся исключённой. Повторное сохранение её не восстановило.");
             }
             catch (Exception ex) { Log("Не удалось сохранить оценку: " + ex.Message); rateAnswer.IsEnabled = true; }
-            finally { ratingBusy = false; askTeacher.IsEnabled = true; }
+            finally { ratingBusy = false; UpdateLessonControls(); }
         };
         revokeAnswer.Click += async (_, _) =>
         {
-            if (ratingBusy || teaching || _gingerRunning || answerId is null) return;
+            if (ratingBusy || teaching || _gingerRunning || fatal || dialogClosed || observation is null || answerId is null) return;
             if (string.IsNullOrWhiteSpace(feedback.Text)) { Log("Напиши причину отзыва оценки."); return; }
-            ratingBusy = true; revokeAnswer.IsEnabled = askTeacher.IsEnabled = false;
+            ratingBusy = true; revokeAnswer.IsEnabled = false; UpdateLessonControls();
             try
             {
                 await _bridge.RevokeGingerAnswerAsync(answerId, feedback.Text.Trim());
                 Log("Оценка отозвана; исходный ответ сохранён в истории.");
             }
             catch (Exception ex) { Log("Не удалось отозвать оценку: " + ex.Message); revokeAnswer.IsEnabled = true; }
-            finally { ratingBusy = false; askTeacher.IsEnabled = true; }
+            finally { ratingBusy = false; UpdateLessonControls(); }
         };
         confirmLesson.Click += (_, _) =>
         {
-            if (teaching || _gingerRunning || draftLesson is null || observation?.Supplier != draftLesson.Supplier) return;
-            try { learning.SaveLanguageLesson(draftLesson); confirmLesson.IsEnabled = false; permit.IsChecked = false;
-                Log("Урок сохранён для этого поставщика. Модель использует его при запросе предложения; автоматическое разрешение не выдано."); }
-            catch (Exception ex) { Log("Не удалось сохранить урок: " + ex.Message); }
+            if (teaching || ratingBusy || _gingerRunning) return;
+            if (dialogClosed || draftLesson is null || draftLessonSnapshot is null
+                || !ReferenceEquals(observation, draftLessonObservation) || observation?.Supplier != draftLesson.Supplier
+                || selectedLesson?.LessonId != draftSelectedLessonId || reason.Text.Trim() != draftLesson.Text)
+            { InvalidateLessonDraft(); return; }
+            var lessonToSave = draftLesson with { RecordedAt = DateTimeOffset.UtcNow };
+            var expectedLessons = draftLessonSnapshot;
+            InvalidateLessonDraft();
+            try
+            {
+                var savedId = lessonToSave.LessonId;
+                learning.SaveLanguageLessonIfUnchanged(lessonToSave, expectedLessons);
+                permit.IsChecked = false;
+                RefreshLessons(savedId);
+                Log("Объяснение сохранено отдельно для этого поставщика. Остальные объяснения сохранены; автоматическое разрешение не выдано.");
+            }
+            catch (Exception ex) { InvalidateLessonDraft(); Log("Не удалось сохранить объяснение: " + ex.Message); }
         };
         loadLesson.Click += (_, _) =>
         {
             if (teaching || ratingBusy || _gingerRunning || observation is null) return;
             ratedReport = null; answerId = null; rateAnswer.IsEnabled = revokeAnswer.IsEnabled = false;
-            try { var saved = learning.ReadLanguageLesson(observation.Supplier);
-                if (saved is null) { Log("У этого поставщика пока нет урока."); return; }
-                reason.Text = saved.Text; lessonPreview.Text = (saved.Enabled ? "Сохранён: " : "Отозван: ") + saved.Understanding;
-            } catch (Exception ex) { Log("Не удалось прочитать урок: " + ex.Message); }
+            try
+            {
+                var newExplanation = selectedLesson is null ? reason.Text : null;
+                RefreshLessons(selectedLesson?.LessonId);
+                if (newExplanation is not null) reason.Text = newExplanation;
+                Log($"Объяснения обновлены. Действующих: {lessonSnapshot.Count(lesson => lesson.Enabled)}; отозванных: {lessonSnapshot.Count(lesson => !lesson.Enabled)}.");
+            }
+            catch (Exception ex) { Log("Не удалось прочитать объяснения: " + ex.Message); }
         };
         revokeLesson.Click += (_, _) =>
         {
-            if (teaching || ratingBusy || _gingerRunning || observation is null) return;
+            if (teaching || ratingBusy || _gingerRunning || dialogClosed || observation is null || selectedLesson is not { Enabled: true }
+                || lessonSupplier != observation.Supplier) return;
             ratedReport = null; answerId = null; rateAnswer.IsEnabled = revokeAnswer.IsEnabled = false;
-            try { var saved = learning.ReadLanguageLesson(observation.Supplier);
-                if (saved is null) return;
-                learning.SaveLanguageLesson(saved with { Enabled = false, RecordedAt = DateTimeOffset.UtcNow });
-                draftLesson = null; confirmLesson.IsEnabled = false; reason.Text = ""; lessonPreview.Text = "Урок отозван.";
-                permit.IsChecked = false; Log("Урок отозван. Ранее подтверждённые точные пары сохраняются отдельно.");
-            } catch (Exception ex) { Log("Не удалось отозвать урок: " + ex.Message); }
+            try
+            {
+                var selectedId = selectedLesson.LessonId;
+                learning.SaveLanguageLessonIfUnchanged(selectedLesson with { Enabled = false, RecordedAt = DateTimeOffset.UtcNow }, lessonSnapshot);
+                permit.IsChecked = false; RefreshLessons(selectedId);
+                Log("Выбранное объяснение отозвано. Остальные объяснения и ранее подтверждённые точные пары сохранены.");
+            }
+            catch (Exception ex) { InvalidateLessonDraft(); Log("Не удалось отозвать объяснение: " + ex.Message); }
         };
         read.Click += async (_, _) => await ReadCurrentPrice();
         dialog.Opened += async (_, _) =>
@@ -404,7 +542,6 @@ public sealed partial class MainWindow
                                 {
                                     if (observation.Candidates.Count(c => c == lessonCandidate) != 1)
                                         throw new InvalidDataException("Предложение урока не соответствует единственному кандидату.");
-                                    reason.Text = savedLesson.Text;
                                     permit.IsChecked = false;
                                     Log("Проход приостановлен на предложении по уроку. Проверь кандидата и отдельно подтверди пару; клика в Ginger не было.");
                                     break;
@@ -435,10 +572,11 @@ public sealed partial class MainWindow
             if (!fatal && lessonCandidate is not null) candidates.SelectedItem = lessonCandidate;
         };
         stop.Click += (_, _) => { _gingerCancellation?.Cancel(); if (teaching) teachingCancellation?.Cancel(); Log("Останавливаю перед следующим действием. Если сопоставление уже отправлено, сначала проверю его результат."); };
-        diagnostics.Click += (_, _) => { diagnosticsRequested = true; dialog.Hide(); };
+        diagnostics.Click += (_, _) => { if (_gingerRunning || teaching || ratingBusy || dialogClosed) return; diagnosticsRequested = true; dialog.Hide(); };
         dialog.CloseButtonClick += (_, args) => { if (_gingerRunning || teaching || ratingBusy) { args.Cancel = true; Log(ratingBusy ? "Дождись сохранения оценки." : "Нажми «Стоп» и дождись проверки результата."); } };
+        dialog.Closed += (_, _) => { dialogClosed = true; teachingCancellation?.Cancel(); InvalidateLessonDraft(); };
         try { await dialog.ShowAsync(); }
-        finally { session?.Dispose(); _gingerDialogOpen = false; }
+        finally { dialogClosed = true; teachingCancellation?.Cancel(); InvalidateLessonDraft(); session?.Dispose(); _gingerDialogOpen = false; }
         if (diagnosticsRequested) GingerDiagnosticsNavigationButton_Click(sender, e);
     }
 }
