@@ -1010,7 +1010,11 @@ public static class GingerMenuAccess {
             throw new InvalidOperationException("Incomplete matching double click; outcome unknown, no retry");
     }
     public static GingerCandidateSnapshot ReadSearchWords(IntPtr root,uint process) {
-        GingerCandidateSnapshot first=ReadCandidatesOnce(root,process,true),second=ReadCandidatesOnce(root,process,true);
+        GingerCandidateSnapshot first=ReadCandidatesOnce(root,process,true);
+        // These full panel reads are adjacent: no input, sleep or external callback
+        // intervenes. Reuse only the first read's verified end source as the next
+        // read's start; its own fresh end source and the complete panel comparison stay.
+        GingerCandidateSnapshot second=ReadCandidatesOnce(root,process,true,first.Source);
         RequireSameCandidates(first,second);
         return second;
     }
@@ -1094,7 +1098,9 @@ public static class GingerMenuAccess {
         int hx,hy,hw,hh;hitOwner.accLocation(out hx,out hy,out hw,out hh,hitId);
         if(hx!=b[0] || hy!=b[1] || hw!=b[2] || hh!=b[3] || WindowFromPoint(point)!=panel)
             throw new InvalidOperationException("Search star covered or moved");
-        RequireSameSelectedProduct(fresh.Source,ReadSelectedProduct(root,process));
+        // This fresh double panel read checks the source before/between/after its
+        // reads; RequireSameCandidates also binds that source to fresh. A separate
+        // immediate double source read adds no input boundary or independent guard.
         RequireSameCandidates(fresh,ReadSearchWords(root,process));
         RequireForeground(root,process);
         if(WindowFromPoint(point)!=panel) throw new InvalidOperationException("Search target changed");

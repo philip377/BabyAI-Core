@@ -89,8 +89,14 @@ if($Operation -in @('Select','Filter')) {
     $freshSearch=[GingerMenuAccess]::ReadSearchContext($window,$ownerId,700)
     [GingerMenuAccess]::RequireSameSearchContext([GingerSearchContext]$expected,$freshSearch)
    }
+   Write-ReadStage 'filter_context_verified'
   }
+  # Start does not imply input was sent: SetSearchWord still checks the target.
+  # Verified means the star state was read back, not that product candidates or
+  # a matching pair were verified. The final search/table checks remain below.
+  Write-ReadStage 'filter_word_start'
   [void][GingerMenuAccess]::SetSearchWord($window,$ownerId,[GingerCandidateSnapshot]$expected.SearchWords,$Word,[bool]$Enabled,$true)
+  Write-ReadStage 'filter_word_verified'
  }
  Start-Sleep -Milliseconds 600
 }

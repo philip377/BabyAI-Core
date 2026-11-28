@@ -224,3 +224,112 @@ def test_role_and_word_are_checked_even_when_an_exact_source_span_exists():
         consult_search_word(Script(proposal()), request)
     result = consult_search_word(Script(proposal(role="service")), REQUEST)
     assert result["word"] is None and result["search_evidence"]["source_evidence"]["quote"] == "Quiet"
+
+
+@pytest.mark.parametrize("letter", ["X", "Я", "Ω", "ü"])
+def test_unexplained_single_letter_in_two_contexts_stops_before_choice(letter):
+    request = REQUEST | dict(source=f"Lunora {letter}*name ({letter}) 100ml edt",
+        words=[dict(word=word, search="", checked=checked) for word, checked in
+               [("Lunora", True), (letter, None), ("name", True), ("100", None), ("ml", None), ("edt", True)]])
+    model = Script()
+    result = consult_search_word(model, request)
+    assert result["word"] is None and result["can_match"] is False
+    assert "Одиночная буква" in result["reason"] and "во всех местах" in result["reason"]
+    assert result["reason"] == result["search_evidence"]["blocked_reason"]
+    assert result["search_evidence"]["proposal"] is None
+    assert result["search_evidence"]["source_evidence"] is None and not model.calls
+
+
+@pytest.mark.parametrize("source,terms,allowed", [
+    ("Lunora X*name (X)", ["X*name"], False),
+    ("Lunora X*name (X)", ["(X)"], False),
+    ("Lunora X*name (X)", ["X*name", "(X)"], True),
+    ("Lunora X*name X*name", ["X*name"], True),
+    ("Lunora X*name", ["X*name"], True),
+    ("Lunora X*name (X)", ["X"], True),
+])
+def test_identity_lesson_must_cover_every_single_letter_occurrence(source, terms, allowed):
+    rules = [rule(term, "name", term + " — название аромата.") for term in terms]
+    chosen = proposal("X")
+    result, model = run_with_rules(rules, chosen, source=source,
+                                  words=[dict(word="X", search="", checked=False)])
+    assert result["search_evidence"]["definitions"] == rules
+    if allowed:
+        assert result["word"] == "X" and len(model.calls) == 2
+        assert model.calls[1]["eligible_words"] == ["X"]
+        assert result["search_evidence"]["proposal"] == chosen
+    else:
+        assert result["word"] is None and len(model.calls) == 1
+        assert "во всех местах" in result["reason"]
+        assert result["search_evidence"]["proposal"] is None
+
+
+@pytest.mark.parametrize("role", ["brand", "name", "variant"])
+@pytest.mark.parametrize("letter,source", [("X", "Lunora X 50ml"), ("я", "Lunora Я 50ml")])
+def test_real_single_letter_identity_with_explicit_lesson_is_preserved(role, letter, source):
+    rules = [rule(letter, role, letter + " — явное обозначение идентичности товара.")]
+    result, model = run_with_rules(rules, proposal(letter, role), source=source,
+                                  words=[dict(word=letter, search="", checked=None)])
+    assert result["word"] == letter and len(model.calls) == 2
+    assert result["search_evidence"]["source_evidence"]["quote"] in source
+
+
+@pytest.mark.parametrize("role", ["brand", "name", "variant"])
+def test_model_cannot_restore_an_excluded_single_letter_or_force_a_fallback(role):
+    chosen = proposal("X", role, reason="Это несомненно точное название.")
+    request = REQUEST | dict(source="Lunora X*name (X) Zephra",
+        words=[dict(word=word, search="", checked=False) for word in ["X", "Zephra"]])
+    model = Script(chosen)
+    result = consult_search_word(model, request)
+    assert model.calls[0]["eligible_words"] == ["Zephra"]
+    assert result["word"] is None and "Одиночная буква" in result["reason"]
+    assert result["search_evidence"]["proposal"] == chosen and len(model.calls) == 1
+
+
+@pytest.mark.parametrize("word", ["*", "--", "()", "…", "_", "🧪"])
+@pytest.mark.parametrize("role", ["brand", "name", "variant"])
+def test_punctuation_only_cannot_be_identity_even_with_an_identity_lesson(word, role):
+    rules = [rule(word, role, word + " — название.")]
+    chosen = proposal(word, role)
+    result, model = run_with_rules(rules, chosen, source="Lunora Zephra " + word,
+        words=[dict(word=item, search="", checked=False) for item in [word, "Zephra"]])
+    assert model.calls[1]["eligible_words"] == ["Zephra"]
+    assert result["word"] is None and "только из знаков" in result["reason"]
+    assert result["search_evidence"]["proposal"] == chosen and len(model.calls) == 2
+
+
+def test_only_punctuation_gives_a_clear_refusal_without_choice():
+    model = Script()
+    result = consult_search_word(model, REQUEST | dict(source="Lunora --",
+        words=[dict(word="--", search="", checked=False)]))
+    assert result["word"] is None and "только из знаков" in result["reason"]
+    assert result["search_evidence"]["proposal"] is None and not model.calls
+
+
+@pytest.mark.parametrize("word", ["H24", "No.5", "X*name", "X Name", "Étoile du soir"])
+def test_complete_alphanumeric_and_multiword_names_do_not_need_single_letter_exception(word):
+    model = Script(proposal(word))
+    result = consult_search_word(model, REQUEST | dict(source="Lunora " + word + " 50ml",
+        words=[dict(word=word, search="", checked=False)]))
+    assert result["word"] == word and model.calls[0]["eligible_words"] == [word]
+    assert len(model.calls) == 1
+
+
+@pytest.mark.parametrize("role", ["gender", "service", "packaging"])
+def test_single_letter_identity_coverage_cannot_override_a_nonidentity_occurrence(role):
+    rules = [rule("X*name", "name", "X*name — название."),
+             rule("(X)", role, "(X) — дополнительная характеристика, не название.")]
+    chosen = proposal("X")
+    result, model = run_with_rules(rules, chosen, source="Lunora X*name (X) Zephra",
+        words=[dict(word=word, search="", checked=False) for word in ["X", "Zephra"]])
+    assert result["word"] is None and "Из урока извлечена роль" in result["reason"]
+    assert model.calls[1]["eligible_words"] == ["Zephra"]
+    assert result["search_evidence"]["proposal"] == chosen
+
+
+def test_single_letter_identity_and_gender_definitions_still_conflict_before_choice():
+    rules = [rule("X", "name", "X — название."), rule("X", "gender", "X — пол товара.")]
+    result, model = run_with_rules(rules, source="Lunora X",
+                                  words=[dict(word="X", search="", checked=False)])
+    assert result["word"] is None and "несовместимые роли" in result["reason"]
+    assert len(model.calls) == 1 and result["search_evidence"]["proposal"] is None

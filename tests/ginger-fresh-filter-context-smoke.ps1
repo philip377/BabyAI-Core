@@ -112,6 +112,7 @@ public static class GingerMenuAccess {
   if(window!=new IntPtr(7) || owner!=8 || word!="ALDHEYX" || !enabled || !confirmed || words.Candidates.Length!=2)
    throw new Exception("Filter binding changed");
   Inputs++;Events.Add("input");
+  if(Mode=="filter_error")throw new InvalidOperationException("Filter outcome not verified");
  }
 '@ + ($methods -join "`n") + "`n}"
 if($code -match 'DllImport|IAccessible|Get-Process|SendInput'){throw 'Synthetic comparison code includes native access'}
@@ -119,8 +120,9 @@ Add-Type $code
 $source=Get-Content -LiteralPath (Join-Path $PSScriptRoot '../scripts/windows/ginger-desktop-step.ps1') -Raw -Encoding UTF8
 $start=$source.IndexOf('$searchPath=Join-Path $ExpectedDirectory')
 $callEnd=$source.IndexOf('[void][GingerMenuAccess]::SetSearchWord(', $start)
-$end=$source.IndexOf("`n",$callEnd)
-if($start -lt 0 -or $callEnd -le $start -or $end -le $callEnd){throw 'Production pre-filter boundaries missing'}
+$verifiedEnd=$source.IndexOf("Write-ReadStage 'filter_word_verified'", $callEnd)
+$end=$source.IndexOf("`n",$verifiedEnd)
+if($start -lt 0 -or $callEnd -le $start -or $verifiedEnd -le $callEnd -or $end -le $verifiedEnd){throw 'Production pre-filter boundaries missing'}
 $fragmentText=$source.Substring($start,$end-$start)
 if($fragmentText -match 'Get-Process|Add-Type|ActivateForRead|Start-Process|Invoke-Expression|RestoreProductSelection'){
  throw 'Production test fragment unexpectedly includes desktop setup/navigation'
@@ -150,15 +152,19 @@ function Invoke-FilterFixture {
  if($Ambiguous){[GingerMenuAccess]::ExpectedFilter() | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $ExpectedDirectory 'filter-context.json') -Encoding UTF8}
  $window=[IntPtr]7;$ownerId=[uint32]8;$Word='ALDHEYX';$Enabled=$true
  $stages=New-Object 'System.Collections.Generic.List[string]'
- function Write-ReadStage([string]$Stage) {Require ($Stage -eq 'filter_context_recheck') 'Unexpected pre-input stage';$stages.Add($Stage)}
+ function Write-ReadStage([string]$Stage) {
+  Require ($Stage -in @('filter_context_recheck','filter_context_verified','filter_word_start','filter_word_verified')) 'Unexpected filter stage'
+  $stages.Add($Stage)
+ }
  $failure=$null
  try {& $fragment} catch {$failure=$_}
  Require (($null -ne $failure) -eq $ShouldFail) "Unexpected $Mode outcome: $failure"
- Require ([GingerMenuAccess]::Inputs -eq [int](-not $ShouldFail)) "$Mode sent input on failure or repeated input"
+ Require ([GingerMenuAccess]::Inputs -eq [int]((-not $ShouldFail) -or $Mode -eq 'filter_error')) "$Mode sent input before failed validation or repeated input"
+ Require (($stages -contains 'filter_word_verified') -eq (-not $ShouldFail)) "$Mode reported an unverified filter as complete"
  Require ([GingerMenuAccess]::FullReads -le 1 -and [GingerMenuAccess]::FilterReads -le 1) "$Mode retried a pre-input read"
  Require ([GingerMenuAccess]::FullReads+[GingerMenuAccess]::FilterReads -le 1) "$Mode switched context types before input"
  if($RequireFreshFilterContext -and -not $ShouldFail) {
-  Require (($stages -join ',') -eq 'filter_context_recheck') 'Fresh context guard missing'
+  Require (($stages -join ',') -eq 'filter_context_recheck,filter_context_verified,filter_word_start,filter_word_verified') 'Fresh context or filter verification stage missing'
   $reader=if($FilterOnly){'overflow'}else{'full'}
   Require (([GingerMenuAccess]::Events -join ',') -eq ($reader+',input')) 'Input preceded fresh context verification'
  }
@@ -175,6 +181,7 @@ try {
  foreach($filterOnly in @($false,$true)) {
   Invoke-FilterFixture -FilterOnly $filterOnly
   Invoke-FilterFixture -FilterOnly $filterOnly -RequireFreshFilterContext $false -Mode product_count
+  Invoke-FilterFixture -FilterOnly $filterOnly -Mode filter_error -ShouldFail $true
   foreach($mode in @('product_count','product_panel','word_title','word_search','word_checked','word_panel',
     'source_table','source_position','source_document','source_supplier','source_title','source_price','source_linked',
     'lexical','expected_stale','read_error')) {

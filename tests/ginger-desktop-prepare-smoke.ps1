@@ -130,7 +130,7 @@ function Invoke-PrepareFixture {
  $RequireFreshFilterContext=$false
  $stages=New-Object 'System.Collections.Generic.List[string]'
  function Write-ReadStage([string]$Stage) {
-  Require ($Stage -in @('prepared_table','table_after_input','search_pair','table_recheck','verified','search_busy','search_filters_only','search_pending')) 'Unexpected read stage'
+  Require ($Stage -in @('prepared_table','filter_word_start','filter_word_verified','table_after_input','search_pair','table_recheck','verified','search_busy','search_filters_only','search_pending')) 'Unexpected read stage'
   $stages.Add($Stage)
  }
  $failed=$false
@@ -173,7 +173,8 @@ try {
   $result=Invoke-PrepareFixture -Operation $operation
   Require ($result.Rows -eq 3 -and $result.SearchAtRow -eq 2 -and $result.Saved.rows[0].Snapshot -eq 2) "$operation must read fresh rows after input"
   Require (($result.Guards -join ',') -eq '0:1,2:3') "$operation removed an expected/final table guard"
-  Require (($result.Stages -join ',') -eq 'table_after_input,search_pair,table_recheck,verified') "$operation omitted its post-input stage"
+  $expectedStages=if($operation -eq 'Filter'){'filter_word_start,filter_word_verified,table_after_input,search_pair,table_recheck,verified'}else{'table_after_input,search_pair,table_recheck,verified'}
+  Require (($result.Stages -join ',') -eq $expectedStages) "$operation omitted its post-input stage"
   Require ($result.Opens -eq 0 -and $result.Selects -eq [int]($operation -eq 'Select') -and $result.Filters -eq [int]($operation -eq 'Filter')) "$operation repeated or mixed input"
  }
  $observed=Invoke-PrepareFixture -Operation Observe

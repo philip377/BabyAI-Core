@@ -75,6 +75,9 @@ jobs:
       - name: Test Ginger filter-only context without desktop access
         shell: powershell
         run: ./tests/ginger-filter-only-context-smoke.ps1
+      - name: Test bounded search-word reads without desktop access
+        shell: powershell
+        run: ./tests/ginger-search-word-read-smoke.ps1
       - name: Test Ginger panel loading without repeating navigation
         shell: powershell
         run: ./tests/ginger-panel-wait-smoke.ps1
