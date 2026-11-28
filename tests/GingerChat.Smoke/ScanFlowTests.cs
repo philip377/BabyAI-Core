@@ -18,11 +18,13 @@ internal static class ScanFlowTests
         private readonly string _root = Path.Combine(Path.GetTempPath(), "BabyAI-ScanFlow-" + Guid.NewGuid().ToString("N"));
         internal readonly List<string> Calls = [];
         internal readonly List<GingerChatStage> Stages = [];
+        internal readonly List<string> Reports = [];
         internal Func<GingerChatScanRow, GingerChatScanRow>? FilterResult;
         internal Func<GingerChatScanRow, GingerChatScanRow>? NextResult;
         internal Action<GingerChatScanRow>? BeforeSave;
         internal Action<GingerChatScanRow>? AfterSave;
         internal Action<GingerChatItem>? OnCompare;
+        internal Func<GingerChatItem, GingerChatComparison>? CompareResult;
         internal Action<GingerChatStage>? OnReport;
         internal GingerDeferredRows Store => new(_root);
 
@@ -39,13 +41,18 @@ internal static class ScanFlowTests
                 Calls.Add("next:" + row.Item.Position);
                 Check(Calls.Count < 2_100, "Unbounded scan loop");
                 Check(row.Item.Position < row.Count, "Navigation wrapped at end of price");
+                if (!row.Item.Linked)
+                    Check(Store.Read().Any(saved => saved.Position == row.Item.Position && saved.Title == row.Item.Title),
+                        "Navigation preceded the durable reminder");
                 return Task.FromResult(NextResult?.Invoke(row) ?? rows.Single(next => next.Item.Position == row.Item.Position + 1));
             },
             (row, _) =>
             {
                 Calls.Add("save:" + row.Item.Position);
                 BeforeSave?.Invoke(row);
-                var saved = Store.Add(row.Item, "scan-chat", row.ObservationDirectory);
+                var saved = row.Item.Candidates.Length == 0
+                    ? Store.Add(row.Item, "scan-chat", row.ObservationDirectory)
+                    : Store.AddManualReview(row.Item, "scan-chat", row.ObservationDirectory);
                 Check(Store.Read().Any(entry => entry.Id == saved.Id && entry.Title == row.Item.Title &&
                     entry.ObservationDirectory == row.ObservationDirectory), "Deferral was not durable before returning");
                 AfterSave?.Invoke(row);
@@ -55,9 +62,11 @@ internal static class ScanFlowTests
             {
                 Calls.Add("compare:" + item.Position);
                 OnCompare?.Invoke(item);
-                return Task.FromResult("proposal for " + item.Position);
+                return Task.FromResult(CompareResult is null
+                    ? new GingerChatComparison("proposal for " + item.Position, item.Candidates[0])
+                    : CompareResult(item));
             },
-            (stage, _) => { Stages.Add(stage); OnReport?.Invoke(stage); }).RunAsync(token);
+            (stage, text) => { Stages.Add(stage); Reports.Add(text); OnReport?.Invoke(stage); }).RunAsync(token);
 
         public void Dispose()
         {
@@ -85,11 +94,180 @@ internal static class ScanFlowTests
     internal static async Task Run()
     {
         await CheckSuccessfulScan();
+        await CheckManualReviewScan();
+        await CheckManualReviewFailures();
+        await CheckInvalidComparisons();
+        await CheckFullPriceBound();
         await CheckEndAndLinkedRows();
         await CheckFailuresAndStop();
         await CheckChangedObservations();
         CheckNavigationOnlyContract();
-        Console.WriteLine("Ginger scan: durable deferral before next, bounded forward-only traversal, failures, Stop, changed observations and no matching writer passed; Ginger was not started.");
+        Console.WriteLine("Ginger scan: empty and manual-review durable deferral before next, exact typed choices, full explanations, 500-row bound, failures, Stop, changed observations and no matching writer passed; Ginger was not started.");
+    }
+
+    private static async Task CheckManualReviewScan()
+    {
+        using (var scan = new Harness(Row(1, 3, false, "First", "Second"), Row(2, 3, false, "Pair"), Row(3, 3)))
+        {
+            scan.CompareResult = item => item.Position == 1
+                ? new("No unique candidate: volume remains unknown.", null) : new("The next row has one proposal.", "Pair");
+            var result = await scan.Run();
+            Check(scan.Calls.SequenceEqual(["read", "compare:1", "save:1", "next:1", "compare:2"]),
+                "Manual-review row did not save before advancing exactly once");
+            Check(result.Row.Item.Position == 2 && result.Proposal == "The next row has one proposal." &&
+                result.DeferredCount == 1 && !result.ReachedEnd, "Manual-review explanation replaced the final pair");
+            var saved = scan.Store.Read().Single();
+            Check(saved.Position == 1 && saved.Reason == GingerDeferredRows.ManualReviewReason,
+                "Manual-review row was persisted as an empty result");
+            Check(scan.Reports.Any(text => text.Contains("No unique candidate: volume remains unknown.", StringComparison.Ordinal)) &&
+                scan.Stages.Count(stage => stage == GingerChatStage.Review) == 1,
+                "The full deferred explanation was lost or shown as a final pair");
+        }
+        using (var scan = new Harness(Row(1, 2, false, "Possible"), Row(2, 2)))
+        {
+            scan.CompareResult = _ => new("Uncertain tester status.", null);
+            var result = await scan.Run();
+            Check(scan.Calls.SequenceEqual(["read", "compare:1", "save:1", "next:1", "filter:2", "save:2"]),
+                "Mixed manual-review and empty traversal repeated or omitted a step");
+            Check(result.ReachedEnd && result.Proposal is null && result.DeferredCount == 2 && result.AlreadyLinkedCount == 0,
+                "End retained a stale proposal or lost mixed deferral counts");
+            var saved = scan.Store.Read().OrderBy(row => row.Position).ToArray();
+            Check(saved[0].Reason == GingerDeferredRows.ManualReviewReason && saved[1].Reason == GingerDeferredRows.NoCandidatesReason,
+                "Mixed deferral reasons did not survive persistence");
+            Check(!scan.Reports.Last().Contains("без кандидатов", StringComparison.Ordinal),
+                "Mixed end summary described every saved row as empty");
+        }
+        using (var scan = new Harness(Row(1, 2, false, "Possible"), Row(2, 2, true)))
+        {
+            scan.CompareResult = _ => new("Manual review needed.", null);
+            var result = await scan.Run();
+            Check(result.ReachedEnd && result.Proposal is null && result.DeferredCount == 1 && result.AlreadyLinkedCount == 1,
+                "A linked final row exposed an earlier manual-review proposal");
+            Check(scan.Calls.SequenceEqual(["read", "compare:1", "save:1", "next:1"]),
+                "A linked final row was filtered, compared or deferred");
+        }
+        using (var scan = new Harness(Row(3, 3, false, "Possible")))
+        {
+            var proposal = new string('x', 999_990) + "final-tail";
+            scan.CompareResult = _ => new(proposal, null);
+            var result = await scan.Run();
+            Check(result.ReachedEnd && result.Proposal is null && result.DeferredCount == 1 &&
+                scan.Calls.SequenceEqual(["read", "compare:3", "save:3"]), "Final manual-review row wrapped or was omitted");
+            Check(scan.Reports.Any(text => text.EndsWith(proposal, StringComparison.Ordinal)),
+                "Full bounded proposal was truncated before reaching the journal callback");
+        }
+    }
+
+    private static async Task CheckManualReviewFailures()
+    {
+        using (var scan = new Harness(Row(1, 2, false, "Possible"), Row(2, 2)))
+        {
+            scan.CompareResult = _ => new("Needs review.", null);
+            scan.BeforeSave = _ => throw new IOException("Disk full");
+            await Refuses<IOException>(scan);
+            Check(scan.Calls.SequenceEqual(["read", "compare:1", "save:1"]) && scan.Store.Read().Count == 0,
+                "Failed manual-review save permitted navigation");
+        }
+        using (var stop = new CancellationTokenSource())
+        using (var scan = new Harness(Row(1, 2, false, "Possible"), Row(2, 2)))
+        {
+            scan.CompareResult = _ => new("Needs review.", null);
+            scan.AfterSave = _ => stop.Cancel();
+            await Refuses<OperationCanceledException>(scan, stop.Token);
+            Check(scan.Calls.SequenceEqual(["read", "compare:1", "save:1"]) && scan.Store.Read().Count == 1 &&
+                scan.Reports.Last().Contains(GingerChatOutcomeText.Deferred(1), StringComparison.Ordinal),
+                "Stop after manual-review save navigated or lost the durable count");
+        }
+        using (var stop = new CancellationTokenSource())
+        using (var scan = new Harness(Row(1, 2, false, "Possible"), Row(2, 2)))
+        {
+            scan.CompareResult = _ => new("Late uncertain answer.", null);
+            scan.OnCompare = _ => stop.Cancel();
+            await Refuses<OperationCanceledException>(scan, stop.Token);
+            Check(scan.Calls.SequenceEqual(["read", "compare:1"]) && scan.Store.Read().Count == 0,
+                "Cancelled comparison was deferred as a valid unknown");
+        }
+        using (var scan = new Harness(Row(1, 2, false, "Possible"), Row(2, 2)))
+        {
+            scan.CompareResult = _ => new("Needs review.", null);
+            scan.NextResult = _ => throw new IOException("Navigation result uncertain");
+            await Refuses<IOException>(scan);
+            Check(scan.Calls.SequenceEqual(["read", "compare:1", "save:1", "next:1"]) && scan.Store.Read().Count == 1,
+                "Uncertain next after manual review replayed input or lost the reminder");
+        }
+        using (var scan = new Harness(Row(1, 1, false, "Possible")))
+        {
+            scan.CompareResult = _ => throw new TimeoutException("Model deadline");
+            await Refuses<TimeoutException>(scan);
+            Check(scan.Calls.SequenceEqual(["read", "compare:1"]) && scan.Store.Read().Count == 0,
+                "Model timeout became a manual-review result");
+        }
+        using (var scan = new Harness(Row(1, 1, false, "Possible")))
+        {
+            scan.CompareResult = _ => throw new IOException("Model transport failed");
+            await Refuses<IOException>(scan);
+            Check(scan.Calls.SequenceEqual(["read", "compare:1"]) && scan.Store.Read().Count == 0,
+                "Model transport error became a manual-review result");
+        }
+        using (var scan = new Harness(Row(1, 1, false, "Possible")))
+        {
+            scan.CompareResult = _ => throw new OperationCanceledException("Unknown interruption");
+            await Refuses<OperationCanceledException>(scan);
+            Check(scan.Calls.SequenceEqual(["read", "compare:1"]) && scan.Store.Read().Count == 0,
+                "External interruption became a manual-review result");
+        }
+        Func<GingerChatScanRow, GingerChatScanRow>[] changes = [
+            row => row with { ProcessId = 999 }, row => row with { TableHandle = 999 },
+            row => row with { Count = 3 },
+            row => row with { Item = row.Item with { Supplier = "Other supplier" } },
+            row => row with { Item = row.Item with { Document = "Other document" } },
+            row => row with { Item = row.Item with { Position = 1 } },
+        ];
+        foreach (var change in changes)
+        {
+            using var scan = new Harness(Row(1, 2, false, "Possible"), Row(2, 2, false, "Pair"));
+            scan.CompareResult = _ => new("Needs review.", null);
+            scan.NextResult = _ => change(Row(2, 2, false, "Pair"));
+            await Refuses<InvalidDataException>(scan);
+            Check(scan.Calls.SequenceEqual(["read", "compare:1", "save:1", "next:1"]) && scan.Store.Read().Count == 1,
+                "Changed navigation result after manual review reached another comparison");
+        }
+    }
+
+    private static async Task CheckInvalidComparisons()
+    {
+        GingerChatComparison?[] invalid = [null, new(null!, null), new("", null), new(" \t\r\n", null),
+            new(new string('x', 1_000_001), null), new("Proposal", ""), new("Proposal", " "),
+            new("Proposal", "Not in candidates"), new("Proposal", "candidate"), new("Proposal", " Candidate "),
+            new("Proposal", "null")];
+        foreach (var answer in invalid)
+        {
+            using var scan = new Harness(Row(1, 2, false, "Candidate"), Row(2, 2));
+            scan.CompareResult = _ => answer!;
+            await Refuses<InvalidDataException>(scan);
+            Check(scan.Calls.SequenceEqual(["read", "compare:1"]) && scan.Store.Read().Count == 0,
+                "Invalid comparison was saved or navigated");
+        }
+        using (var scan = new Harness(Row(1, 2, false, "Candidate", "Candidate"), Row(2, 2)))
+        {
+            scan.CompareResult = _ => new("Proposal", "Candidate");
+            await Refuses<InvalidDataException>(scan);
+            Check(scan.Calls.SequenceEqual(["read", "compare:1"]) && scan.Store.Read().Count == 0,
+                "Duplicate exact candidate was treated as a unique pair or an uncertain result");
+        }
+    }
+
+    private static async Task CheckFullPriceBound()
+    {
+        using var scan = new Harness(Enumerable.Range(1, 500).Select(position => Row(position, 500, false, "Possible")).ToArray());
+        scan.CompareResult = item => new("Review row " + item.Position, null);
+        var result = await scan.Run();
+        Check(result.ReachedEnd && result.Proposal is null && result.Row.Item.Position == 500 && result.DeferredCount == 500 &&
+            scan.Store.Read().Count == 500, "Maximum price did not finish with all reminders durable");
+        Check(scan.Calls.Count(call => call.StartsWith("compare:", StringComparison.Ordinal)) == 500 &&
+            scan.Calls.Count(call => call.StartsWith("save:", StringComparison.Ordinal)) == 500 &&
+            scan.Calls.Count(call => call.StartsWith("next:", StringComparison.Ordinal)) == 499,
+            "Maximum price repeated comparison, save or final navigation");
     }
 
     private static async Task CheckSuccessfulScan()

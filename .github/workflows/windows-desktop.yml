@@ -32,6 +32,12 @@ jobs:
       - name: Test saved-row lesson routing and chat isolation without desktop input
         shell: pwsh
         run: dotnet run --project tests/GingerDeferredLessonRouting.Smoke/GingerDeferredLessonRouting.Smoke.csproj -c Release
+      - name: Test durable comparison evidence before deferral without desktop input
+        shell: pwsh
+        run: dotnet run --project tests/GingerComparisonEvidence.Smoke/GingerComparisonEvidence.Smoke.csproj -c Release
+      - name: Test real chat scan orchestration and skipped-row context isolation
+        shell: pwsh
+        run: dotnet run --project tests/GingerChatScanRouting.Smoke/GingerChatScanRouting.Smoke.csproj -c Release
       - name: Test bounded Ginger filter preparation and incomplete observation guards
         shell: pwsh
         run: dotnet run --project tests/GingerDesktopSession.Smoke/GingerDesktopSession.Smoke.csproj -c Release

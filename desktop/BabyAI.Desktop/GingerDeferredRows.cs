@@ -14,6 +14,7 @@ internal sealed class GingerDeferredRows
     internal const int MaxRows = 10_000;
     internal const int MaxEntryBytes = 65_536;
     internal const string NoCandidatesReason = "Кандидатов после подготовки фильтров нет. Нужна ручная проверка.";
+    internal const string ManualReviewReason = "Однозначный кандидат не подтверждён. Нужна ручная проверка.";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly string[] Fields = ["Id", "ChatId", "Supplier", "Document", "Position", "Title",
         "Reason", "ObservationDirectory", "CreatedAt"];
@@ -34,11 +35,25 @@ internal sealed class GingerDeferredRows
         ArgumentNullException.ThrowIfNull(item);
         if (item.Linked || item.Candidates is null || item.Candidates.Length != 0)
             throw new InvalidDataException("Отложить можно только несопоставленную строку без кандидатов.");
+        return Append(item, chatId, observationDirectory, NoCandidatesReason);
+    }
+
+    internal GingerDeferredRow AddManualReview(GingerChatItem item, string chatId, string observationDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (item.Linked || item.Candidates is null || item.Candidates.Length is < 1 or > 256 ||
+            item.Candidates.Any(string.IsNullOrWhiteSpace))
+            throw new InvalidDataException("Для ручного разбора нужна несопоставленная строка с непустым списком до 256 кандидатов.");
+        return Append(item, chatId, observationDirectory, ManualReviewReason);
+    }
+
+    private GingerDeferredRow Append(GingerChatItem item, string chatId, string observationDirectory, string reason)
+    {
         ValidateIdentity(item.Supplier, item.Document, item.Position, item.Title);
         ValidateChatId(chatId);
         ValidateObservationDirectory(observationDirectory);
         var row = new GingerDeferredRow(CreateId(item.Supplier, item.Document, item.Position, item.Title),
-            chatId, item.Supplier, item.Document, item.Position, item.Title, NoCandidatesReason,
+            chatId, item.Supplier, item.Document, item.Position, item.Title, reason,
             observationDirectory, DateTimeOffset.UtcNow);
 
         Directory.CreateDirectory(_root);
@@ -147,7 +162,8 @@ internal sealed class GingerDeferredRows
                 ValidateObservationDirectory(row.ObservationDirectory);
                 if (!IsId(row.Id) || row.Id != Path.GetFileNameWithoutExtension(path) ||
                     row.Id != CreateId(row.Supplier, row.Document, row.Position, row.Title) ||
-                    row.Reason != NoCandidatesReason || row.CreatedAt == default || row.CreatedAt.Offset != TimeSpan.Zero)
+                    (row.Reason != NoCandidatesReason && row.Reason != ManualReviewReason) ||
+                    row.CreatedAt == default || row.CreatedAt.Offset != TimeSpan.Zero)
                     throw new InvalidDataException("Не совпадает содержимое записи отложенной строки.");
                 result.Add(row);
             }

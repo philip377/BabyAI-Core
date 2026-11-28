@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../desktop/BabyAI.Desktop/MainWindow.GingerChat.cs" Link="MainWindow.GingerChat.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerChatFlow.cs" Link="GingerChatFlow.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerChatScanFlow.cs" Link="GingerChatScanFlow.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerChatOutcomeText.cs" Link="GingerChatOutcomeText.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerDeferredRows.cs" Link="GingerDeferredRows.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerChatComparisonEvidence.cs" Link="GingerChatComparisonEvidence.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerChatAnswerReview.cs" Link="GingerChatAnswerReview.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerChatLessonReview.cs" Link="GingerChatLessonReview.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerLearning.cs" Link="GingerLearning.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerChatIntent.cs" Link="GingerChatIntent.cs" />
+    <Compile Include="../../desktop/BabyAI.Desktop/GingerTaskNotification.cs" Link="GingerTaskNotification.cs" />
+  </ItemGroup>
+</Project>

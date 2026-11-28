@@ -148,6 +148,7 @@ public sealed partial class MainWindow
         GingerDesktopObservation? observation = null;
         string? proposedCandidate = null;
         GingerChatAnswerReview? review = null;
+        string? reviewObservationDirectory = null;
         string? chatId = null;
         var notificationKind = GingerNotificationKind.Failed;
         static GingerChatItem Item(GingerDesktopObservation value) => new(
@@ -211,19 +212,37 @@ public sealed partial class MainWindow
                     observation = await session.ObserveAsync(token);
                 return Row(observation);
             }
-            async Task<string> Compare(GingerChatItem item, CancellationToken token)
+            async Task<GingerChatComparison> Compare(GingerChatItem item, CancellationToken token)
             {
+                review?.Invalidate();
+                review = null;
+                reviewObservationDirectory = null;
+                proposedCandidate = null;
+                var compared = observation ?? throw new InvalidDataException("Нет наблюдения для сравнения.");
+                if (compared.Supplier != item.Supplier || compared.Document != item.Document ||
+                    compared.Position != item.Position || compared.Title != item.Title ||
+                    !compared.Candidates.SequenceEqual(item.Candidates, StringComparer.Ordinal))
+                    throw new InvalidDataException("Наблюдение изменилось до сравнения кандидатов.");
                 SetGingerCaptureMode(false);
                 var lessons = new GingerLearning().ReadLanguageLessons(item.Supplier);
                 var lesson = GingerLearning.ComposeLanguageLessons(lessons);
+                var candidates = item.Candidates.ToArray();
                 var result = await _bridge.PreviewGingerLessonAsync(item.Supplier, item.Title,
-                    lesson, item.Candidates, token);
+                    lesson, candidates, token);
                 token.ThrowIfCancellationRequested();
+                var report = JsonSerializer.SerializeToElement(new {
+                    request = new { supplier = item.Supplier, source = item.Title, lesson, candidates }, result
+                });
+                var formatted = FormatGingerChatProposal(result);
+                // Preserve every completed answer before a possible deferral or next-row input.
+                // Validation or disk failure stops the scan; it is never treated as ambiguity.
+                var reportPath = await Task.Run(() => GingerChatComparisonEvidence.Save(compared.Directory, report), token);
+                token.ThrowIfCancellationRequested();
+                session.Record("Полный отчёт сравнения сохранён: " + reportPath);
                 proposedCandidate = result.GetProperty("candidate").GetString();
-                review = new GingerChatAnswerReview(chatId!, JsonSerializer.SerializeToElement(new {
-                    request = new { supplier = item.Supplier, source = item.Title, lesson, candidates = item.Candidates }, result
-                }));
-                return FormatGingerChatProposal(result);
+                review = new GingerChatAnswerReview(chatId!, report);
+                reviewObservationDirectory = compared.Directory;
+                return new(formatted, proposedCandidate);
             }
             string proposal;
             GingerChatScanResult? scan = null;
@@ -231,7 +250,8 @@ public sealed partial class MainWindow
             {
                 // An explicit review of a saved row must stay on that row, even when still empty.
                 var one = new GingerChatFlow(async token => (await Read(token)).Item,
-                    async token => (await Filter(Row(observation!), token)).Item, Compare, Report);
+                    async token => (await Filter(Row(observation!), token)).Item,
+                    async (item, token) => (await Compare(item, token)).Proposal, Report);
                 proposal = await one.RunAsync(cancellation.Token);
             }
             else
@@ -248,9 +268,15 @@ public sealed partial class MainWindow
                     },
                     async (before, token) =>
                     {
-                        var saved = await Task.Run(() => new GingerDeferredRows().Add(before.Item,
-                            chatId!, before.ObservationDirectory), token);
+                        var saved = await Task.Run(() => before.Item.Candidates.Length == 0
+                            ? new GingerDeferredRows().Add(before.Item, chatId!, before.ObservationDirectory)
+                            : new GingerDeferredRows().AddManualReview(before.Item, chatId!, before.ObservationDirectory), token);
                         deferred.Add(saved);
+                        // A saved ambiguous answer belongs to the skipped row, never to the next one.
+                        review?.Invalidate();
+                        review = null;
+                        reviewObservationDirectory = null;
+                        proposedCandidate = null;
                     }, Compare, Report);
                 scan = await flow.RunAsync(cancellation.Token);
                 proposal = scan.Proposal is null ? "В открытом прайсе больше нет следующих строк."
@@ -261,6 +287,9 @@ public sealed partial class MainWindow
             transcript.AppendLine().AppendLine(proposal);
             if (review is not null)
             {
+                if (observation is null || reviewObservationDirectory != observation.Directory ||
+                    review.Supplier != observation.Supplier || review.Source != observation.Title)
+                    throw new InvalidDataException("Ответ относится к другой строке; карточки не показаны.");
                 ShowGingerChatReview(review);
                 ShowGingerChatLesson(new GingerChatLessonReview(chatId!, Item(observation!), new GingerLearning()));
             }
@@ -272,7 +301,7 @@ public sealed partial class MainWindow
             if (scan?.ReachedEnd == true)
             {
                 taskState = GingerChatTaskState.End;
-                summary = $"Дошёл до конца открытого прайса. Отложено без кандидатов: {scan.DeferredCount}. " +
+                summary = $"Дошёл до конца открытого прайса. Отложено для разбора: {scan.DeferredCount}. " +
                     $"Уже сопоставленных строк пройдено: {scan.AlreadyLinkedCount}.";
                 notificationKind = deferred.Count > 0 ? GingerNotificationKind.ManualReview : GingerNotificationKind.RunFinished;
             }
@@ -286,7 +315,7 @@ public sealed partial class MainWindow
                     ? $"Строка {observation!.Position}: пара готова к твоему подтверждению. Сопоставление ещё не выполнено."
                     : observation?.Linked == true ? "Эта строка уже сопоставлена. Повтор не выполнялся."
                     : $"Строка {observation?.Position}: нужна ручная проверка. Однозначная пара не подтверждена.";
-                if (deferred.Count > 0) summary += $" Отложено без кандидатов: {deferred.Count}.";
+                if (deferred.Count > 0) summary += $" Отложено для разбора: {deferred.Count}.";
             }
         }
         catch (TimeoutException ex)
@@ -337,9 +366,9 @@ public sealed partial class MainWindow
                 catch (Exception ex) { StartupDiagnostics.Log("Ginger chat session cleanup failed", ex); }
                 if (deferred.Count > 0)
                 {
-                    transcript.AppendLine().AppendLine("Отложенные позиции без кандидатов:");
+                    transcript.AppendLine().AppendLine("Отложенные позиции для разбора:");
                     foreach (var row in deferred)
-                        transcript.AppendLine($"{row.Supplier} · документ {row.Document} · строка {row.Position}: {row.Title}");
+                        transcript.AppendLine($"{row.Supplier} · документ {row.Document} · строка {row.Position}: {row.Title}\n{row.Reason}");
                     transcript.AppendLine("Список сохранён отдельно от истории чата. Открой «Отложенные позиции», чтобы вернуться к разбору.");
                 }
                 var details = transcript.ToString();

@@ -5,16 +5,19 @@ using BabyAI.Desktop;
 internal static class DeferredRowsTests
 {
     private static readonly GingerChatItem Item = new("Поставщик", "Документ 123", 2, "Полное название товара", false, []);
+    private static readonly GingerChatItem ManualItem = Item with { Candidates = ["Первый кандидат", "Второй кандидат"] };
 
     internal static void Run()
     {
         PersistenceAndIdentity();
+        ManualReviewAndMixedRows();
         InvalidInputCannotPublish();
+        InvalidManualReviewCannotPublish();
         CorruptionCannotBecomeAnEmptyList();
         FailedWritesPreserveExistingRows();
         InterruptedStagingIsNotACommittedRow();
         LimitsAreEnforced();
-        Console.WriteLine("Ginger deferred rows: persistence, full identity deduplication, strict corruption handling, atomic writes and limits passed; Ginger was not started.");
+        Console.WriteLine("Ginger deferred rows: no-candidate and manual-review persistence, full identity deduplication, strict corruption handling, atomic writes and limits passed; Ginger was not started.");
     }
 
     private static void Check(bool condition, string message)
@@ -83,6 +86,76 @@ internal static class DeferredRowsTests
         Check(fixture.Store.Read().Count == 0, "Rejected rows left committed records");
     }
 
+    private static void ManualReviewAndMixedRows()
+    {
+        using var fixture = new Fixture();
+        var originalEmpty = fixture.Store.Add(Item, "chat-empty", fixture.Observation);
+        var originalManual = fixture.Store.AddManualReview(ManualItem with { Position = 3 }, "chat-manual", fixture.Observation);
+        var emptyBytes = File.ReadAllBytes(fixture.Entry(originalEmpty));
+        var manualBytes = File.ReadAllBytes(fixture.Entry(originalManual));
+        var reopened = new GingerDeferredRows(fixture.Root);
+        Check(reopened.Read().Count == 2 && reopened.Read("chat-empty").Single() == originalEmpty &&
+            reopened.Read("chat-manual").Single() == originalManual,
+            "Mixed no-candidate and manual-review records did not survive reopening or chat filtering");
+        Check(originalEmpty.Reason == GingerDeferredRows.NoCandidatesReason &&
+            originalManual.Reason == GingerDeferredRows.ManualReviewReason &&
+            originalManual.Reason == "Однозначный кандидат не подтверждён. Нужна ручная проверка." &&
+            originalManual.Reason != originalEmpty.Reason && originalManual.CreatedAt.Offset == TimeSpan.Zero,
+            "Manual-review reason claimed an empty candidate list or changed its fixed wording");
+
+        var manualDuplicate = reopened.AddManualReview(
+            ManualItem with { Position = 3, Candidates = ["Другой список кандидатов"] }, "chat-other", fixture.Observation + "-new");
+        var emptyToManual = reopened.AddManualReview(ManualItem, "chat-other", fixture.Observation + "-new");
+        var manualToEmpty = reopened.Add(Item with { Position = 3 }, "chat-other", fixture.Observation + "-new");
+        Check(manualDuplicate == originalManual && emptyToManual == originalEmpty && manualToEmpty == originalManual &&
+            File.ReadAllBytes(fixture.Entry(originalEmpty)).SequenceEqual(emptyBytes) &&
+            File.ReadAllBytes(fixture.Entry(originalManual)).SequenceEqual(manualBytes) && reopened.Read().Count == 2,
+            "Duplicate across append paths rewrote original reason, chat, observation, timestamp or bytes");
+
+        var maximum = reopened.AddManualReview(ManualItem with { Position = 4,
+            Candidates = Enumerable.Range(1, 256).Select(index => "Кандидат " + index).ToArray() },
+            "chat-manual", fixture.Observation);
+        Check(reopened.Read("chat-manual").Contains(maximum) && maximum.Reason == GingerDeferredRows.ManualReviewReason,
+            "The valid 256-candidate boundary was rejected");
+        using var other = new Fixture();
+        var sameIdentity = other.Store.AddManualReview(ManualItem, "chat-other", other.Observation);
+        Check(sameIdentity.Id == originalEmpty.Id,
+            "Manual-review identity depends on candidate list, reason, chat or storage path");
+    }
+
+    private static void InvalidManualReviewCannotPublish()
+    {
+        using var fixture = new Fixture();
+        var invalidItems = new[] {
+            ManualItem with { Linked = true }, ManualItem with { Candidates = [] },
+            ManualItem with { Candidates = null! }, ManualItem with { Candidates = [null!] },
+            ManualItem with { Candidates = [""] }, ManualItem with { Candidates = [" \t\n"] },
+            ManualItem with { Candidates = ["Valid candidate", null!] },
+            ManualItem with { Candidates = ["Valid candidate", " "] },
+            ManualItem with { Candidates = Enumerable.Repeat("Candidate", 257).ToArray() },
+            ManualItem with { Supplier = null! }, ManualItem with { Supplier = " " },
+            ManualItem with { Supplier = new string('s', 513) }, ManualItem with { Document = "" },
+            ManualItem with { Document = new string('d', 513) }, ManualItem with { Position = 0 },
+            ManualItem with { Position = 1_000_001 }, ManualItem with { Title = null! },
+            ManualItem with { Title = "" }, ManualItem with { Title = new string('t', 4097) },
+            ManualItem with { Title = "broken\0title" }, ManualItem with { Title = "broken\ud800title" },
+        };
+        foreach (var item in invalidItems)
+            Refused(() => fixture.Store.AddManualReview(item, "chat-1", fixture.Observation),
+                "Invalid manual-review input was saved");
+        foreach (var chat in new[] { "", "../other", new string('c', 129) })
+            Refused(() => fixture.Store.AddManualReview(ManualItem, chat, fixture.Observation), "Invalid manual-review chat was saved");
+        foreach (var observation in new[] { "", "relative-folder", fixture.Observation + "\nother", new string('p', 2049) })
+            Refused(() => fixture.Store.AddManualReview(ManualItem, "chat-1", observation), "Invalid manual-review observation was saved");
+        try
+        {
+            fixture.Store.AddManualReview(null!, "chat-1", fixture.Observation);
+            throw new Exception("Null manual-review item was accepted");
+        }
+        catch (ArgumentNullException) { }
+        Check(!Directory.Exists(fixture.Root), "Rejected manual-review input created persistence files");
+    }
+
     private static void CorruptionCannotBecomeAnEmptyList()
     {
         using var fixture = new Fixture();
@@ -94,7 +167,10 @@ internal static class DeferredRowsTests
             value => value.Remove("Title"), value => value["CanMatch"] = true,
             value => value["Title"] = "A different row stored under the original ID",
             value => value["Id"] = new string('0', 64), value => value["Position"] = 0,
-            value => value["Reason"] = "Automatically click the row", value => value["ChatId"] = "../other",
+            value => value["Reason"] = "Automatically click the row",
+            value => value["Reason"] = GingerDeferredRows.ManualReviewReason + " ",
+            value => value["Reason"] = GingerDeferredRows.ManualReviewReason.ToLowerInvariant(),
+            value => value["Reason"] = null, value => value["ChatId"] = "../other",
             value => value["Supplier"] = null, value => value["CreatedAt"] = "not-a-date",
             value => value["ObservationDirectory"] = "relative",
         })
@@ -110,6 +186,8 @@ internal static class DeferredRowsTests
             Refused(() => fixture.Store.Read("a-different-chat"), "Chat filter hid a corrupt record");
             Refused(() => fixture.Store.Add(Item with { Position = 3 }, "chat-2", fixture.Observation),
                 "Append ignored a corrupt existing record");
+            Refused(() => fixture.Store.AddManualReview(ManualItem with { Position = 3 }, "chat-2", fixture.Observation),
+                "Manual-review append ignored a corrupt existing record");
             Check(File.ReadAllText(path) == corrupted && Directory.GetFiles(fixture.Root, "*.json").Length == 1,
                 "A failed read or append replaced existing data");
         }
@@ -130,6 +208,8 @@ internal static class DeferredRowsTests
         {
             Refused(() => new GingerDeferredRows(fixture.Root).Add(Item with { Position = 3 }, "chat-1", fixture.Observation),
                 "Another writer's lock was ignored");
+            Refused(() => new GingerDeferredRows(fixture.Root).AddManualReview(ManualItem with { Position = 3 }, "chat-1", fixture.Observation),
+                "Manual-review append ignored another writer's lock");
             Refused(() => fixture.Store.Read(), "Read ignored an active writer");
         }
         Check(File.ReadAllBytes(fixture.Entry(first)).SequenceEqual(original) && fixture.Store.Read().Count == 1,
@@ -139,6 +219,8 @@ internal static class DeferredRowsTests
         var blocked = new GingerDeferredRows(blockedRoot);
         Refused(() => blocked.Read(), "A file at the queue root was treated as an empty queue");
         Refused(() => blocked.Add(Item, "chat-1", fixture.Observation), "Impossible persistence reported success");
+        Refused(() => blocked.AddManualReview(ManualItem, "chat-1", fixture.Observation),
+            "Impossible manual-review persistence reported success");
         Check(File.ReadAllText(blockedRoot) == "existing unrelated file", "Failed root creation overwrote a file");
     }
 
@@ -175,6 +257,8 @@ internal static class DeferredRowsTests
                 Check(ex.Message.Contains("количество"), "Queue limit did not reject before reading entry contents");
             }
             Refused(() => fixture.Store.Add(Item, "chat-1", fixture.Observation), "Add accepted an over-capacity queue");
+            Refused(() => fixture.Store.AddManualReview(ManualItem, "chat-1", fixture.Observation),
+                "Manual-review append accepted an over-capacity queue");
         }
     }
 

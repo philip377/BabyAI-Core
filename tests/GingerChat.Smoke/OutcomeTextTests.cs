@@ -36,6 +36,7 @@ internal static class OutcomeTextTests
         await CheckInitialInterruption(new OperationCanceledException(), true);
         await CheckStopAfterProcessedRow(linked: false);
         await CheckStopAfterProcessedRow(linked: true);
+        await CheckStopAfterProcessedRow(linked: false, manualReview: true);
         Console.WriteLine("Ginger interruption UX: timeout versus explicit Stop, unclaimed cancellation, zero and durable counts passed; no Ginger or UI was started.");
     }
 
@@ -51,7 +52,7 @@ internal static class OutcomeTextTests
         }, (row, _) => { laterCalls++; return Task.FromResult(row); },
             (row, _) => { laterCalls++; return Task.FromResult(row); },
             (_, _) => { laterCalls++; return Task.CompletedTask; },
-            (_, _) => { laterCalls++; return Task.FromResult("unexpected"); },
+            (_, _) => { laterCalls++; return Task.FromResult(new GingerChatComparison("unexpected", null)); },
             (stage, text) => reports.Add((stage, text)));
         try { await flow.RunAsync(stop.Token); }
         catch (Exception observed) when (ReferenceEquals(observed, failure))
@@ -77,10 +78,11 @@ internal static class OutcomeTextTests
         throw new Exception("Initial interruption was swallowed or converted into another exception");
     }
 
-    private static async Task CheckStopAfterProcessedRow(bool linked)
+    private static async Task CheckStopAfterProcessedRow(bool linked, bool manualReview = false)
     {
         using var stop = new CancellationTokenSource();
-        var row = new GingerChatScanRow(new("Supplier", "Document", 1, "Product", linked, []),
+        var row = new GingerChatScanRow(new("Supplier", "Document", 1, "Product", linked,
+            manualReview ? ["Possible candidate"] : []),
             2, 123, 456, "fresh-observation");
         var durable = 0;
         var nextCalls = 0;
@@ -88,7 +90,7 @@ internal static class OutcomeTextTests
         var flow = new GingerChatScanFlow(_ => Task.FromResult(row), (value, _) => Task.FromResult(value),
             (value, _) => { nextCalls++; return Task.FromResult(value); },
             (_, _) => { durable++; stop.Cancel(); return Task.CompletedTask; },
-            (_, _) => Task.FromResult("unexpected"), (stage, text) =>
+            (_, _) => Task.FromResult(new GingerChatComparison("No unique candidate.", null)), (stage, text) =>
             {
                 reports.Add(text);
                 if (linked && stage == GingerChatStage.Skipping) stop.Cancel();

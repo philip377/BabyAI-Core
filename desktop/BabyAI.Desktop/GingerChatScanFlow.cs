@@ -4,6 +4,7 @@ internal sealed record GingerChatScanRow(GingerChatItem Item, int Count, long Pr
     long TableHandle, string ObservationDirectory);
 internal sealed record GingerChatScanResult(GingerChatScanRow Row, string? Proposal,
     int DeferredCount, int AlreadyLinkedCount, bool ReachedEnd);
+internal sealed record GingerChatComparison(string Proposal, string? Candidate);
 
 // Navigation only. Matching remains behind the separate one-use confirmation gate.
 internal sealed class GingerChatScanFlow(
@@ -11,7 +12,7 @@ internal sealed class GingerChatScanFlow(
     Func<GingerChatScanRow, CancellationToken, Task<GingerChatScanRow>> filter,
     Func<GingerChatScanRow, CancellationToken, Task<GingerChatScanRow>> next,
     Func<GingerChatScanRow, CancellationToken, Task> defer,
-    Func<GingerChatItem, CancellationToken, Task<string>> compare,
+    Func<GingerChatItem, CancellationToken, Task<GingerChatComparison>> compare,
     Action<GingerChatStage, string> report)
 {
     public async Task<GingerChatScanResult> RunAsync(CancellationToken token)
@@ -41,6 +42,7 @@ internal sealed class GingerChatScanFlow(
                 }
                 else
                 {
+                    GingerChatComparison? comparison = null;
                     if (row.Item.Candidates.Length == 0)
                     {
                         report(GingerChatStage.Filtering, $"Строка {row.Item.Position}: проверяю звёздочки слов слева и перечитываю кандидатов.");
@@ -54,20 +56,26 @@ internal sealed class GingerChatScanFlow(
                     if (row.Item.Candidates.Length != 0)
                     {
                         report(GingerChatStage.Comparing, $"Строка {row.Item.Position}: сравниваю кандидатов ({row.Item.Candidates.Length}). Компьютером сейчас не управляю.");
-                        var proposal = await compare(row.Item, token);
+                        comparison = await compare(row.Item, token);
                         token.ThrowIfCancellationRequested();
-                        report(GingerChatStage.Review, "Ответ готов к проверке. Привязка товара ещё не выполнена.");
-                        return new(row, proposal, deferred, linked, false);
+                        comparison = ValidateComparison(comparison, row.Item);
+                        if (comparison.Candidate is not null)
+                        {
+                            report(GingerChatStage.Review, "Ответ готов к проверке. Привязка товара ещё не выполнена.");
+                            return new(row, comparison.Proposal, deferred, linked, false);
+                        }
                     }
                     // The durable inbox must accept this exact observation before any next-row input.
                     await defer(row, token);
                     deferred++;
-                    report(GingerChatStage.Skipping, $"Строка {row.Item.Position}: кандидатов после фильтров нет. Сохранил для разбора: {row.Item.Title}");
+                    report(GingerChatStage.Skipping, comparison is null
+                        ? $"Строка {row.Item.Position}: кандидатов после фильтров нет. Сохранил для разбора: {row.Item.Title}"
+                        : $"Строка {row.Item.Position}: однозначный выбор не подтверждён. Сохранил для ручного разбора: {row.Item.Title}\n{comparison.Proposal}");
                     token.ThrowIfCancellationRequested();
                 }
                 if (row.Item.Position == row.Count)
                 {
-                    report(GingerChatStage.Completed, $"Достигнут конец открытого прайса. Отложено без кандидатов: {deferred}; уже сопоставлено: {linked}.");
+                    report(GingerChatStage.Completed, $"Достигнут конец открытого прайса. Отложено для ручного разбора: {deferred}; уже сопоставлено: {linked}.");
                     return new(row, null, deferred, linked, true);
                 }
                 report(GingerChatStage.Reading, $"Использую компьютер: проверяю текущую строку и перехожу к строке {row.Item.Position + 1} из {row.Count}.");
@@ -91,6 +99,18 @@ internal sealed class GingerChatScanFlow(
             report(GingerChatStage.Failed, "Процесс остановлен: " + ex.Message);
             throw;
         }
+    }
+
+    private static GingerChatComparison ValidateComparison(GingerChatComparison? comparison, GingerChatItem item)
+    {
+        // A missing/invalid answer is an error, never an uncertain choice. The
+        // complete proposal goes to the journal; only its UI rendering is capped.
+        if (comparison is null || string.IsNullOrWhiteSpace(comparison.Proposal) ||
+            comparison.Proposal.Length > 1_000_000 ||
+            (comparison.Candidate is not null && (string.IsNullOrWhiteSpace(comparison.Candidate) ||
+                item.Candidates.Count(candidate => string.Equals(candidate, comparison.Candidate, StringComparison.Ordinal)) != 1)))
+            throw new InvalidDataException("Некорректный ответ сравнения Ginger. Строка не отложена, продолжение остановлено.");
+        return comparison;
     }
 
     private static void Validate(GingerChatScanRow row)
