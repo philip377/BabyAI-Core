@@ -315,6 +315,12 @@ class DesktopCommands:
                                   settings=PublicSearchSettings(self.config.data_dir))
             return {"ok": True, "command": command, **result}
 
+        if command == "ginger.search.word.preview":
+            from .ginger_search_teacher import consult_search_word, validate_search_payload
+            request = validate_search_payload(payload)
+            return {"ok": True, "command": command,
+                    **consult_search_word(self._provider(), request)}
+
         if command == "ginger.teach.source.preview":
             from .ginger_source_teacher import consult_source, validate_source_payload
             request = validate_source_payload(payload)

@@ -225,14 +225,14 @@ internal static class GingerDesktopFilterFlow
         return words.ToArray();
     }
 
-    private static void RequireDisabledWord(GingerDesktopObservation observed, string word)
+    internal static void RequireDisabledWord(GingerDesktopObservation observed, string word)
     {
         var matches = observed.Words.EnumerateArray().Where(row => row.GetProperty("Title").GetString() == word).ToArray();
         if (matches.Length != 1 || matches[0].GetProperty("Checked").ValueKind == JsonValueKind.True)
             throw GingerDesktopObservation.Invalid("фильтр не является уникальным невключённым словом текущей строки");
     }
 
-    private static void RequireFilterTransition(GingerDesktopObservation before, GingerDesktopObservation after, string word)
+    internal static void RequireFilterTransition(GingerDesktopObservation before, GingerDesktopObservation after, string word)
     {
         if (before.Words.GetArrayLength() != after.Words.GetArrayLength()) throw GingerDesktopObservation.Invalid("слова поиска изменились");
         for (int i = 0; i < before.Words.GetArrayLength(); i++)

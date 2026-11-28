@@ -57,12 +57,6 @@ namespace BabyAI.Desktop
     internal enum OrbState { Idle, Thinking, Executing, Error, Done }
     internal enum GingerCompanionPhase { Cancelled, Failed, Completed, Reviewing, Checking, Reading }
     internal enum GingerChatTaskState { Failed, Cancelled, TimedOut, Review, PairReady, Matched, End, AlreadyLinked, Rejected }
-    internal sealed record GingerDesktopObservation(string Supplier, string Document, int Position, int Count,
-        string Title, bool Linked, string[] Candidates, string Directory)
-    {
-        internal JsonElement Data => JsonSerializer.SerializeToElement(new { process_id = 1234L });
-        internal JsonElement Source => JsonSerializer.SerializeToElement(new { TableHandle = 5678L });
-    }
     internal sealed class Scenario
     {
         internal static Scenario? Current;
@@ -73,6 +67,8 @@ namespace BabyAI.Desktop
         internal readonly List<string> Journal = [];
         internal Action<GingerDesktopObservation>? BeforeNext;
         internal int StartReads, FilterReads, Disposals;
+        internal bool UseSearchPlanner;
+        internal int FilterActions;
         internal GingerDeferredRow? Revisit;
         internal GingerDesktopSession? Session;
     }
@@ -81,6 +77,7 @@ namespace BabyAI.Desktop
         private readonly Scenario _scenario = Scenario.Current ?? throw new InvalidOperationException("Missing synthetic scenario");
         internal Action<string>? FilterProgress { get; set; }
         internal int? FilterCandidateTarget { get; init; }
+        internal Func<GingerDesktopObservation, IReadOnlyList<GingerSearchFilterEffect>, CancellationToken, Task<GingerSearchWordDecision>>? ChooseSearchWord { get; set; }
         internal string DirectoryPath => Path.GetDirectoryName(_scenario.Rows[0].Directory)!;
         internal GingerDesktopSession() => _scenario.Session = this;
         internal void Record(string text) => _scenario.Journal.Add(text);
@@ -89,6 +86,13 @@ namespace BabyAI.Desktop
             token.ThrowIfCancellationRequested();
             _scenario.FilterReads++;
             _scenario.FilterInputs.Add(observation);
+            if (_scenario.UseSearchPlanner)
+                return new GingerReasonedFilterFlow().PrepareAsync(observation, ChooseSearchWord!,
+                    (before, refreshToken) => Task.FromResult(before),
+                    (before, word, actionToken) => {
+                        _scenario.FilterActions++;
+                        return Task.FromResult(_scenario.FilterReplies.Dequeue()(before));
+                    }, token, FilterProgress);
             return Task.FromResult(_scenario.FilterReplies.Count == 0 ? observation : _scenario.FilterReplies.Dequeue()(observation));
         }
         internal Task<GingerDesktopObservation> ObserveAsync(CancellationToken token,
@@ -109,8 +113,11 @@ namespace BabyAI.Desktop
         internal readonly Queue<Func<JsonElement>> Replies = [];
         internal readonly List<(string Supplier, string Source, string Lesson, string[] Candidates)> Comparisons = [];
         internal readonly List<(string ChatId, string Message, string Reply)> History = [];
+        internal readonly List<JsonElement> SearchRequests = [];
+        internal Func<JsonElement, JsonElement>? SearchReply;
+        internal string CurrentChat = "chat-current";
         internal Task<JsonElement> NavigationAsync(string command) => command == "chat.current"
-            ? Task.FromResult(JsonSerializer.SerializeToElement(new { active_chat_id = "chat-current" }))
+            ? Task.FromResult(JsonSerializer.SerializeToElement(new { active_chat_id = CurrentChat }))
             : throw new InvalidOperationException("Unexpected navigation: " + command);
         internal Task<JsonElement> PreviewGingerLessonAsync(string supplier, string source, string lesson,
             IEnumerable<string> candidates, CancellationToken token)
@@ -121,6 +128,13 @@ namespace BabyAI.Desktop
         }
         internal Task<JsonElement> PreviewGingerIntentAsync(string message, CancellationToken token) =>
             throw new InvalidOperationException("Intent model is unavailable in this scan test");
+        internal Task<JsonElement> PreviewGingerSearchWordAsync(JsonElement request, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            SearchRequests.Add(request.Clone());
+            return Task.FromResult(SearchReply?.Invoke(request) ??
+                throw new InvalidOperationException("Search model requires an explicit response in this scan test"));
+        }
         internal Task RecordGingerChatAsync(string chatId, string message, string reply)
         {
             History.Add((chatId, message, reply));

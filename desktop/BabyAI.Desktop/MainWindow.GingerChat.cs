@@ -194,6 +194,24 @@ public sealed partial class MainWindow
                 throw new InvalidDataException("Не удалось определить чат для сохранения отложенных строк.");
             session = new GingerDesktopSession { FilterCandidateTarget = GingerChatPreparation.MaxCandidates };
             session.FilterProgress = text => Report(GingerChatStage.Filtering, text);
+            var searchGeneration = Volatile.Read(ref _chatGeneration);
+            var searchSelectedChat = _selectedChatId;
+            async Task RequireSearchRun(CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                var currentChat = (await _bridge.NavigationAsync("chat.current")).GetProperty("active_chat_id").GetString();
+                token.ThrowIfCancellationRequested();
+                if (searchGeneration != Volatile.Read(ref _chatGeneration) || searchSelectedChat != _selectedChatId ||
+                    chatId != currentChat || !ReferenceEquals(_gingerCancellation, cancellation))
+                    throw new OperationCanceledException("Чат или запуск изменился. Выбор звёздочки не применяется.");
+            }
+            var searchPlanner = new GingerSearchWordPlanner(_bridge.PreviewGingerSearchWordAsync,
+                supplier => new GingerLearning().ReadLanguageLessons(supplier), RequireSearchRun, chatId!, taskRunId);
+            session.ChooseSearchWord = async (before, effects, token) =>
+            {
+                Report(GingerChatStage.Filtering, "Qwen выбирает слово для поиска по названию, урокам и результатам предыдущих фильтров…");
+                return await searchPlanner.ChooseAsync(before, effects, token);
+            };
             static GingerChatScanRow Row(GingerDesktopObservation value) => new(Item(value), value.Count,
                 value.Data.GetProperty("process_id").GetInt64(), value.Source.GetProperty("TableHandle").GetInt64(), value.Directory);
             async Task<GingerChatScanRow> Read(CancellationToken token)

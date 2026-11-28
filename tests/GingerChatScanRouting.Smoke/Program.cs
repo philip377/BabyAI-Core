@@ -56,6 +56,7 @@ internal static class ScanRoutingTests
         await BoundedStartsDoNotTouchFilters();
         await BroadThenBoundedUsesFreshObservation();
         await StillBroadCannotCompareDeferOrAdvance();
+        await ModelSearchRoutesThroughChat();
         Check(TestEnvironment.SyntheticRoot is null && Scenario.Current is null, "Fixture isolation leaked");
         Console.WriteLine($"PASS: {_checks} scan-routing integration checks against linked MainWindow/flow/store/evidence/reviews; fake UI/bridge/session, temp data only; no Ginger or model started");
     }
@@ -246,9 +247,9 @@ internal static class ScanRoutingTests
 
     private static GingerDesktopObservation ReplaceCandidates(Fixture fixture, int count)
     {
-        var broad = fixture.Scenario.Rows[0] with {
-            Candidates = Enumerable.Range(1, count).Select(index => "Unfiltered candidate " + index).ToArray()
-        };
+        var before = fixture.Scenario.Rows[0];
+        var broad = Observation(before.Directory, before.Position, before.Count, before.Linked,
+            Enumerable.Range(1, count).Select(index => "Unfiltered candidate " + index).ToArray());
         fixture.Scenario.Rows[0] = broad;
         return broad;
     }
@@ -281,10 +282,8 @@ internal static class ScanRoutingTests
     {
         var directory = Path.Combine(fixture.Root, "filtered-observation");
         Directory.CreateDirectory(directory);
-        return before with {
-            Candidates = Enumerable.Range(1, count).Select(index => "Fresh filtered candidate " + index).ToArray(),
-            Directory = directory
-        };
+        return Observation(directory, before.Position, before.Count, before.Linked,
+            Enumerable.Range(1, count).Select(index => "Fresh filtered candidate " + index).ToArray());
     }
 
     private static async Task BroadThenBoundedUsesFreshObservation()
@@ -382,6 +381,61 @@ internal static class ScanRoutingTests
         }
     }
 
+    private static async Task ModelSearchRoutesThroughChat()
+    {
+        foreach (var mode in new[] { "selected", "manual", "changed-chat", "failed" })
+        {
+            using var fixture = new Fixture(count: 2);
+            var before = ReplaceCandidates(fixture, 20);
+            fixture.Scenario.UseSearchPlanner = true;
+            var afterPath = Path.Combine(fixture.Root, "reasoned-observation");
+            Directory.CreateDirectory(afterPath);
+            var after = Observation(afterPath, before.Position, before.Count, false, ["Chosen candidate"], enabled: true);
+            fixture.Scenario.FilterReplies.Enqueue(_ => after);
+            fixture.Bridge.Replies.Enqueue(() => Result("Chosen candidate"));
+            fixture.Bridge.SearchReply = request => {
+                if (mode == "failed") throw new InvalidDataException("Synthetic model failure");
+                if (mode == "changed-chat") fixture.Bridge.CurrentChat = "another-chat";
+                return JsonSerializer.SerializeToElement(new {
+                    ok = true, command = "ginger.search.word.preview", mode = "search_word",
+                    request_id = request.GetProperty("request_id").GetString(),
+                    word = mode == "manual" ? null : "Synthetic", reason = "Synthetic model rationale", can_match = false
+                });
+            };
+            await fixture.Run();
+            Check(fixture.Bridge.SearchRequests.Count == 1 && fixture.Scenario.FilterReads == 1,
+                "Chat omitted or repeated Qwen search decision");
+            if (mode == "selected")
+            {
+                Check(fixture.Scenario.FilterActions == 1 && fixture.Bridge.Comparisons.Count == 1 &&
+                    ReferenceEquals(fixture.Window.Confirmation?.Observation, after), "Chat did not compare the newly filtered snapshot");
+                Check(fixture.Window.Progress.Transcript.Contains("Synthetic model rationale"), "Chat omitted actual model explanation");
+                Check(Directory.GetFiles(before.Directory, "search-decision-*.json").Length == 1, "Chat omitted search evidence");
+            }
+            else
+            {
+                Check(fixture.Scenario.FilterActions == 0 && fixture.Bridge.Comparisons.Count == 0 &&
+                    fixture.Scenario.NextPositions.Count == 0 && fixture.Store.Read().Count == 0,
+                    "Rejected model search clicked, compared, deferred or advanced");
+                NoCards(fixture);
+            }
+            Released(fixture);
+        }
+    }
+
+    private static GingerDesktopObservation Observation(string directory, int position, int count, bool linked, string[] candidates, bool enabled = false)
+        => new(directory, JsonSerializer.SerializeToElement(new {
+            status = "observed", directory, search_completion_verified = false, process_id = 1234L, row_count = count,
+            source = new {
+                Title = "Synthetic source " + position, Supplier = "Synthetic supplier", DocumentNumber = "Synthetic document",
+                PriceText = "100", LinkedProductText = linked ? "Linked candidate" : "<не указано>",
+                ObservedRowPosition = position, TableHandle = 5678L, IdentityVerified = false, CanMatch = false
+            },
+            words = new[] { new { Title = "Synthetic", DescriptionText = "", Checked = enabled ? (bool?)true : null, StateImage = enabled ? 2 : 0,
+                ObservedPosition = 1, IdentityVerified = false } },
+            candidates = candidates.Select((title, index) => new { Title = title, ObservedPosition = index + 1, IdentityVerified = false })
+        }));
+
     private sealed class Fixture : IDisposable
     {
         private readonly string _temporaryParent = Path.GetFullPath(Path.GetTempPath());
@@ -403,9 +457,8 @@ internal static class ScanRoutingTests
             {
                 var directory = Path.Combine(Root, "observation-" + position);
                 Directory.CreateDirectory(directory);
-                Scenario.Rows.Add(new("Synthetic supplier", "Synthetic document", position, count,
-                    "Synthetic source " + position, linkedLast && position == count,
-                    ["Candidate " + position + "A", "Candidate " + position + "B"], directory));
+                Scenario.Rows.Add(Observation(directory, position, count, linkedLast && position == count,
+                    ["Candidate " + position + "A", "Candidate " + position + "B"]));
             }
             Window = new MainWindow(Bridge);
         }
@@ -414,6 +467,8 @@ internal static class ScanRoutingTests
             await Window.RunAsync(revisit).WaitAsync(TimeSpan.FromSeconds(10));
             Check(Scenario.Session?.FilterCandidateTarget == GingerChatPreparation.MaxCandidates,
                 "Production chat session did not pass its comparison budget into word filtering");
+            Check(Scenario.Session?.ChooseSearchWord is not null,
+                "Production chat session omitted the model search planner");
         }
         public void Dispose()
         {

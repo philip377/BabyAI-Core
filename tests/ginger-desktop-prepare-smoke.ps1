@@ -127,6 +127,7 @@ function Invoke-PrepareFixture {
    ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ExpectedDirectory 'filter-context.json') -Encoding UTF8
  }
  $window=[IntPtr]::Zero; $ownerId=[uint32]7; $Position=2; $Word='needle'; $Enabled=$true
+ $RequireFreshFilterContext=$false
  $stages=New-Object 'System.Collections.Generic.List[string]'
  function Write-ReadStage([string]$Stage) {
   Require ($Stage -in @('prepared_table','table_after_input','search_pair','table_recheck','verified','search_busy','search_filters_only','search_pending')) 'Unexpected read stage'

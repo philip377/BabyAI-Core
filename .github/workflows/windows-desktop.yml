@@ -41,6 +41,13 @@ jobs:
       - name: Test bounded Ginger filter preparation and incomplete observation guards
         shell: pwsh
         run: dotnet run --project tests/GingerDesktopSession.Smoke/GingerDesktopSession.Smoke.csproj -c Release
+      - name: Test adaptive Qwen search decisions and stale input guards without desktop input
+        shell: pwsh
+        run: |
+          dotnet run --project tests/GingerReasonedFilter.Smoke/GingerReasonedFilter.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Adaptive search flow checks failed' }
+          dotnet run --project tests/GingerSearchPlanner.Smoke/GingerSearchPlanner.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Search planner binding checks failed' }
       - name: Test grounded Ginger status and contextual follow-ups without desktop input
         shell: pwsh
         run: |
@@ -62,6 +69,9 @@ jobs:
       - name: Test Ginger preparation snapshots and post-input reads without desktop access
         shell: powershell
         run: ./tests/ginger-desktop-prepare-smoke.ps1
+      - name: Test fresh candidate context before model-selected filters without desktop access
+        shell: powershell
+        run: ./tests/ginger-fresh-filter-context-smoke.ps1
       - name: Test Ginger filter-only context without desktop access
         shell: powershell
         run: ./tests/ginger-filter-only-context-smoke.ps1
@@ -82,7 +92,7 @@ jobs:
         run: python -m pytest tests/test_public_search_settings.py tests/test_ginger_bottle_research.py -q
       - name: Test supplier lesson proposals and independent pair verification without desktop input
         shell: pwsh
-        run: python -m pytest tests/test_ginger_teacher.py tests/test_ginger_source_teacher.py tests/test_ginger_lesson_evidence.py tests/test_ginger_answer_reward.py tests/test_ginger_identity_evidence.py tests/test_ginger_volume_evidence.py tests/test_ginger_marking_evidence.py tests/test_ginger_marking_lessons.py -q
+        run: python -m pytest tests/test_ginger_teacher.py tests/test_ginger_source_teacher.py tests/test_ginger_search_teacher.py tests/test_ginger_lesson_evidence.py tests/test_ginger_answer_reward.py tests/test_ginger_identity_evidence.py tests/test_ginger_volume_evidence.py tests/test_ginger_marking_evidence.py tests/test_ginger_marking_lessons.py -q
       - name: Test persistent Ginger queue controller guards
         # Uses synthetic files and rejects before live UI access.
         shell: pwsh

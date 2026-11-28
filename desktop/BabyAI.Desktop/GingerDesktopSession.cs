@@ -9,6 +9,8 @@ internal sealed class GingerDesktopSession : IDisposable
     public string DirectoryPath { get; }
     public Action<string>? FilterProgress { get; set; }
     public int? FilterCandidateTarget { get; init; }
+    public Func<GingerDesktopObservation, IReadOnlyList<GingerSearchFilterEffect>, CancellationToken, Task<GingerSearchWordDecision>>? ChooseSearchWord { get; set; }
+    private readonly GingerReasonedFilterFlow _reasonedFilters = new();
     public GingerDesktopSession()
     {
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BabyAI");
@@ -34,12 +36,21 @@ internal sealed class GingerDesktopSession : IDisposable
         foreach (var value in new[] { "-NoProfile", "-NonInteractive", "-STA", "-File", path }.Concat(args)) info.ArgumentList.Add(value);
         return info;
     }
-    public Task<GingerDesktopObservation> ObserveAsync(CancellationToken token,
+    public async Task<GingerDesktopObservation> ObserveAsync(CancellationToken token,
         GingerDesktopObservation? previous = null, int? position = null, string? word = null, bool prepare = false,
         bool prepareFiltersOnOverflow = false)
-        => GingerDesktopFilterFlow.ObserveAsync(
+    {
+        if (ChooseSearchWord is not null)
+        {
+            var observed = await ReadOnceAsync(token, previous, position, word, prepare);
+            token.ThrowIfCancellationRequested();
+            if (!prepareFiltersOnOverflow) observed.RequireComplete();
+            return observed.NeedsFilters ? await PrepareFiltersAsync(observed, token) : observed;
+        }
+        return await GingerDesktopFilterFlow.ObserveAsync(
             readToken => ReadOnceAsync(readToken, previous, position, word, prepare),
             PlanFiltersAsync, ReadFilterOnceAsync, token, prepareFiltersOnOverflow, ReportFilter, FilterCandidateTarget);
+    }
 
     // This is deliberately raw: a filter may still yield an overflow and must not
     // recursively plan, replay the original Select/Prepare, or repeat that filter.
@@ -67,7 +78,11 @@ internal sealed class GingerDesktopSession : IDisposable
         {
             args.AddRange(["-ExpectedDirectory", previous.Directory, "-ConfirmNavigation"]);
             if (position.HasValue) args.AddRange(["-Operation", "Select", "-Position", position.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
-            else if (word is not null) args.AddRange(["-Operation", "Filter", "-Word", word, "-Enabled"]);
+            else if (word is not null)
+            {
+                args.AddRange(["-Operation", "Filter", "-Word", word, "-Enabled"]);
+                if (ChooseSearchWord is not null) args.Add("-RequireFreshFilterContext");
+            }
         }
         // Preparation and the two complete candidate contexts can exceed a minute
         // on the user's price list. Keep a finite budget and immediate user Stop;
@@ -82,7 +97,10 @@ internal sealed class GingerDesktopSession : IDisposable
         return observed;
     }
     public Task<GingerDesktopObservation> PrepareFiltersAsync(GingerDesktopObservation observed, CancellationToken token)
-        => GingerDesktopFilterFlow.PrepareFiltersAsync(observed, PlanFiltersAsync, ReadFilterOnceAsync, token, ReportFilter, FilterCandidateTarget);
+        => ChooseSearchWord is { } choose
+            ? _reasonedFilters.PrepareAsync(observed, choose,
+                (before, refreshToken) => ReadOnceAsync(refreshToken, before), ReadFilterOnceAsync, token, ReportFilter)
+            : GingerDesktopFilterFlow.PrepareFiltersAsync(observed, PlanFiltersAsync, ReadFilterOnceAsync, token, ReportFilter, FilterCandidateTarget);
 
     private void ReportFilter(string message)
     {

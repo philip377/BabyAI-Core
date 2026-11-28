@@ -7,10 +7,12 @@ param(
  [int]$Position=0,
  [string]$Word,
  [switch]$Enabled,
- [switch]$ConfirmNavigation
+ [switch]$ConfirmNavigation,
+ [switch]$RequireFreshFilterContext
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+if($RequireFreshFilterContext -and $Operation -ne 'Filter'){throw 'Fresh filter context is only valid for Filter'}
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'ginger-navigation.ps1'))
 & ([scriptblock]::Create($source.Substring(0,$source.IndexOf('$processes = @('))))
@@ -72,6 +74,22 @@ if($Operation -in @('Select','Filter')) {
   if((Test-Path -LiteralPath $searchPath) -and (Test-Path -LiteralPath $filterPath)){throw 'Ambiguous search observation'}
   $contextPath=if(Test-Path -LiteralPath $filterPath){$filterPath}else{$searchPath}
   $expected=Get-Content -LiteralPath $contextPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if($RequireFreshFilterContext) {
+   Write-ReadStage 'filter_context_recheck'
+   # A model decision is bound to the observed result set, not just the query.
+   # Do not accept a changed count/list, switch context types, or retry input.
+   if(-not $expected.QueryWordsMatchSource){throw 'Expected filter query does not describe source'}
+   if(Test-Path -LiteralPath $filterPath) {
+    $freshFilter=[GingerMenuAccess]::ReadFilterOnlyContext($window,$ownerId,700)
+    if($expected.ProductRows -ne $freshFilter.ProductRows -or $expected.ProductPanelHandle -ne $freshFilter.ProductPanelHandle){
+     throw 'Candidate metadata changed before filter; no input sent'
+    }
+    [GingerMenuAccess]::RequireSameCandidates([GingerCandidateSnapshot]$expected.SearchWords,$freshFilter.SearchWords)
+   } else {
+    $freshSearch=[GingerMenuAccess]::ReadSearchContext($window,$ownerId,700)
+    [GingerMenuAccess]::RequireSameSearchContext([GingerSearchContext]$expected,$freshSearch)
+   }
+  }
   [void][GingerMenuAccess]::SetSearchWord($window,$ownerId,[GingerCandidateSnapshot]$expected.SearchWords,$Word,[bool]$Enabled,$true)
  }
  Start-Sleep -Milliseconds 600
