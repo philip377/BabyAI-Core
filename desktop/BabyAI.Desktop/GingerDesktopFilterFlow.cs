@@ -143,23 +143,27 @@ internal static class GingerDesktopFilterFlow
         Func<CancellationToken, Task<GingerDesktopObservation>> readOnce,
         Func<GingerDesktopObservation, CancellationToken, Task<string>> planOnce,
         Func<GingerDesktopObservation, string, CancellationToken, Task<GingerDesktopObservation>> filterOnce,
-        CancellationToken token, bool prepareFiltersOnOverflow = false, Action<string>? report = null)
+        CancellationToken token, bool prepareFiltersOnOverflow = false, Action<string>? report = null,
+        int? candidateTarget = null)
     {
         token.ThrowIfCancellationRequested();
+        RequireCandidateTarget(candidateTarget);
         var observed = await readOnce(token);
         token.ThrowIfCancellationRequested();
         if (!prepareFiltersOnOverflow) observed.RequireComplete();
         return observed.NeedsFilters
-            ? await PrepareFiltersAsync(observed, planOnce, filterOnce, token, report)
+            ? await PrepareFiltersAsync(observed, planOnce, filterOnce, token, report, candidateTarget)
             : observed;
     }
 
     internal static async Task<GingerDesktopObservation> PrepareFiltersAsync(GingerDesktopObservation observed,
         Func<GingerDesktopObservation, CancellationToken, Task<string>> planOnce,
         Func<GingerDesktopObservation, string, CancellationToken, Task<GingerDesktopObservation>> filterOnce,
-        CancellationToken token, Action<string>? report = null)
+        CancellationToken token, Action<string>? report = null, int? candidateTarget = null)
     {
         token.ThrowIfCancellationRequested();
+        RequireCandidateTarget(candidateTarget);
+        if (ReachedCandidateTarget(observed, candidateTarget)) return observed;
         if (observed.NeedsFilters)
             report?.Invoke($"В панели Ginger {observed.CandidateCount} кандидатов. Сужаю список звёздочками слева, сохраняя уже включённые фильтры.");
         var json = await planOnce(observed, token);
@@ -177,10 +181,27 @@ internal static class GingerDesktopFilterFlow
             observed.RequireSameSource(after);
             RequireFilterTransition(observed, after, word);
             observed = after;
+            // A plan is a bounded list of possible filters, not an obligation to
+            // apply every word after a complete comparison-sized list is found.
+            if (ReachedCandidateTarget(observed, candidateTarget))
+            {
+                report?.Invoke($"Найдено {observed.CandidateCount} кандидатов. Дальше звёздочки не включаю; список готов к сравнению.");
+                token.ThrowIfCancellationRequested();
+                return observed;
+            }
         }
         // A broad list is never an empty result and never permits next-row/compare/match.
         observed.RequireComplete();
         return observed;
+    }
+
+    private static bool ReachedCandidateTarget(GingerDesktopObservation observed, int? target)
+        => target is { } limit && !observed.NeedsFilters && observed.CandidateCount > 0 && observed.CandidateCount <= limit;
+
+    private static void RequireCandidateTarget(int? target)
+    {
+        if (target is < 1 or > 256)
+            throw new ArgumentOutOfRangeException(nameof(target), "Предел кандидатов должен быть от 1 до 256.");
     }
 
     private static string[] ReadPlan(string json, GingerDesktopObservation observed)

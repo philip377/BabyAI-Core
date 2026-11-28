@@ -8,6 +8,7 @@ internal sealed class GingerDesktopSession : IDisposable
     private readonly FileStream _lock;
     public string DirectoryPath { get; }
     public Action<string>? FilterProgress { get; set; }
+    public int? FilterCandidateTarget { get; init; }
     public GingerDesktopSession()
     {
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BabyAI");
@@ -38,7 +39,7 @@ internal sealed class GingerDesktopSession : IDisposable
         bool prepareFiltersOnOverflow = false)
         => GingerDesktopFilterFlow.ObserveAsync(
             readToken => ReadOnceAsync(readToken, previous, position, word, prepare),
-            PlanFiltersAsync, ReadFilterOnceAsync, token, prepareFiltersOnOverflow, ReportFilter);
+            PlanFiltersAsync, ReadFilterOnceAsync, token, prepareFiltersOnOverflow, ReportFilter, FilterCandidateTarget);
 
     // This is deliberately raw: a filter may still yield an overflow and must not
     // recursively plan, replay the original Select/Prepare, or repeat that filter.
@@ -81,7 +82,7 @@ internal sealed class GingerDesktopSession : IDisposable
         return observed;
     }
     public Task<GingerDesktopObservation> PrepareFiltersAsync(GingerDesktopObservation observed, CancellationToken token)
-        => GingerDesktopFilterFlow.PrepareFiltersAsync(observed, PlanFiltersAsync, ReadFilterOnceAsync, token, ReportFilter);
+        => GingerDesktopFilterFlow.PrepareFiltersAsync(observed, PlanFiltersAsync, ReadFilterOnceAsync, token, ReportFilter, FilterCandidateTarget);
 
     private void ReportFilter(string message)
     {

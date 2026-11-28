@@ -192,7 +192,7 @@ public sealed partial class MainWindow
                 throw new OperationCanceledException("Чат изменился после разбора задания.");
             if (string.IsNullOrWhiteSpace(chatId))
                 throw new InvalidDataException("Не удалось определить чат для сохранения отложенных строк.");
-            session = new GingerDesktopSession();
+            session = new GingerDesktopSession { FilterCandidateTarget = GingerChatPreparation.MaxCandidates };
             session.FilterProgress = text => Report(GingerChatStage.Filtering, text);
             static GingerChatScanRow Row(GingerDesktopObservation value) => new(Item(value), value.Count,
                 value.Data.GetProperty("process_id").GetInt64(), value.Source.GetProperty("TableHandle").GetInt64(), value.Directory);

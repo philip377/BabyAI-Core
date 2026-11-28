@@ -13,6 +13,10 @@ internal static class FilterFlowTests
     {
         ObservationContract();
         await OnePlanAndFreshChain();
+        await CandidateTargetStopsEarly();
+        await CandidateTargetBoundaries();
+        await InvalidCandidateTargets();
+        await CandidateTargetCancellation();
         await OrdinaryAndOptInBoundaries();
         await Exhaustion();
         await InvalidPlans();
@@ -156,6 +160,138 @@ internal static class FilterFlowTests
         Check(progress.Count == 3 && progress[0].Contains("278") && progress[1].Contains("Alpha") && progress[2].Contains("Beta"), "Filtering progress lost");
     }
 
+    private static async Task CandidateTargetStopsEarly()
+    {
+        foreach (var initialCount in new[] { 278, 11, 256, 0 })
+        foreach (var finalCount in new[] { 1, 10 })
+        {
+            var initial = Observe("before-target", initialCount);
+            var fresh = Observe("after-first-filter", finalCount, enabled: ["Alpha"]);
+            var trace = new List<string>();
+            var progress = new List<string>();
+            Task<string> GetPlan(GingerDesktopObservation before, CancellationToken _)
+            {
+                Check(ReferenceEquals(before, initial), "Target planner received a substituted observation");
+                trace.Add("plan");
+                return Task.FromResult(Plan("Alpha", "Beta"));
+            }
+            Task<GingerDesktopObservation> Filter(GingerDesktopObservation before, string word, CancellationToken _)
+            {
+                trace.Add(word);
+                Check(ReferenceEquals(before, initial) && word == "Alpha", "Target preparation applied a destructive extra filter");
+                return Task.FromResult(fresh);
+            }
+            // Ordinary complete rows reach explicit preparation from ChatFlow;
+            // overflow reaches it through the existing opt-in Observe route.
+            var result = initialCount > 256
+                ? await GingerDesktopFilterFlow.ObserveAsync(_ => { trace.Add("read"); return Task.FromResult(initial); },
+                    GetPlan, Filter, CancellationToken.None, prepareFiltersOnOverflow: true, report: progress.Add, candidateTarget: 10)
+                : await GingerDesktopFilterFlow.PrepareFiltersAsync(initial, GetPlan, Filter, CancellationToken.None,
+                    report: progress.Add, candidateTarget: 10);
+            Check(trace.SequenceEqual(initialCount > 256 ? ["read", "plan", "Alpha"] : ["plan", "Alpha"]),
+                "Target preparation repeated or continued the validated plan after reaching its budget");
+            Check(ReferenceEquals(result, fresh) && result.Candidates.Length == finalCount &&
+                result.Data.GetProperty("candidates")[finalCount - 1].GetProperty("DescriptionText").GetString() == "Unabridged details " + finalCount,
+                "Target result did not preserve the exact complete fresh snapshot");
+            Check(!progress.Any(message => message.Contains("Beta", StringComparison.Ordinal)),
+                "Progress claimed an extra filter after a successful bounded result");
+        }
+    }
+
+    private static async Task CandidateTargetBoundaries()
+    {
+        foreach (var (target, count) in new[] { (1, 1), (10, 1), (10, 10), (256, 256) })
+        {
+            var initial = Observe("already-suitable", count);
+            var result = await GingerDesktopFilterFlow.PrepareFiltersAsync(initial,
+                (_, _) => throw new Exception("Already-suitable result must not request a plan"),
+                (_, _, _) => throw new Exception("Already-suitable result must not apply a filter"),
+                CancellationToken.None, candidateTarget: target);
+            Check(ReferenceEquals(result, initial), "Already-suitable result was replaced or truncated");
+        }
+        foreach (var (target, firstCount, finalCount) in new[] { (10, 11, 10), (10, 0, 10), (10, 300, 1), (1, 2, 1), (256, 278, 256) })
+        {
+            var words = new[] { "Alpha", "Beta", "Gamma" };
+            var initial = Observe("chain-start", 278, words);
+            var first = Observe("chain-first", firstCount, words, ["Alpha"]);
+            var final = Observe("chain-final", finalCount, words, ["Alpha", "Beta"]);
+            var calls = new List<string>();
+            var result = await GingerDesktopFilterFlow.PrepareFiltersAsync(initial,
+                (_, _) => { calls.Add("plan"); return Task.FromResult(Plan(words)); },
+                (before, word, _) =>
+                {
+                    calls.Add(word);
+                    Check(word == "Alpha" ? ReferenceEquals(before, initial) : word == "Beta" && ReferenceEquals(before, first),
+                        "Continuation used stale context or exceeded the first suitable result");
+                    return Task.FromResult(word == "Alpha" ? first : final);
+                }, CancellationToken.None, candidateTarget: target);
+            Check(calls.SequenceEqual(["plan", "Alpha", "Beta"]) && ReferenceEquals(result, final),
+                "Zero/above-target intermediate result stopped early, replanned, or reached an extra filter");
+        }
+        int defaultSteps = 0;
+        var defaultFinal = Observe("default-after-beta", 0, enabled: ["Alpha", "Beta"]);
+        var defaultResult = await GingerDesktopFilterFlow.PrepareFiltersAsync(Observe("default-start", 278),
+            (_, _) => Task.FromResult(Plan("Alpha", "Beta")), (_, word, _) =>
+            {
+                defaultSteps++;
+                return Task.FromResult(word == "Alpha" ? Observe("default-after-alpha", 10, enabled: ["Alpha"]) : defaultFinal);
+            }, CancellationToken.None);
+        Check(defaultSteps == 2 && ReferenceEquals(defaultResult, defaultFinal),
+            "Default-null preparation unexpectedly acquired the chat-only early-stop policy");
+
+        await ThrowsAsync<InvalidDataException>(() => GingerDesktopFilterFlow.ObserveAsync(
+            _ => Task.FromResult(Observe("read-only-target", 278)),
+            (_, _) => throw new Exception("Candidate target must not grant overflow filter permission"),
+            (_, _, _) => throw new Exception("Read-only target dispatched input"),
+            CancellationToken.None, candidateTarget: 10), "Target bypassed explicit overflow opt-in");
+    }
+
+    private static async Task InvalidCandidateTargets()
+    {
+        foreach (var target in new[] { int.MinValue, -1, 0, 257, int.MaxValue })
+        {
+            int reads = 0, plans = 0, filters = 0;
+            var initial = Observe("invalid-target", 1);
+            Task<string> GetPlan(GingerDesktopObservation _, CancellationToken token) { plans++; return Task.FromResult(Plan("Alpha")); }
+            Task<GingerDesktopObservation> Filter(GingerDesktopObservation before, string _, CancellationToken token) { filters++; return Task.FromResult(before); }
+            await ThrowsAsync<ArgumentOutOfRangeException>(() => GingerDesktopFilterFlow.ObserveAsync(
+                _ => { reads++; return Task.FromResult(initial); }, GetPlan, Filter, CancellationToken.None,
+                prepareFiltersOnOverflow: true, candidateTarget: target), "Invalid observation target accepted");
+            await ThrowsAsync<ArgumentOutOfRangeException>(() => GingerDesktopFilterFlow.PrepareFiltersAsync(initial,
+                GetPlan, Filter, CancellationToken.None, candidateTarget: target), "Invalid preparation target accepted");
+            Check(reads == 0 && plans == 0 && filters == 0, "Invalid target reached an external delegate");
+        }
+    }
+
+    private static async Task CandidateTargetCancellation()
+    {
+        using (var stop = new CancellationTokenSource())
+        {
+            stop.Cancel();
+            await ThrowsAsync<OperationCanceledException>(() => GingerDesktopFilterFlow.PrepareFiltersAsync(Observe("cancel-suitable", 10),
+                (_, _) => throw new Exception("Cancelled target planned"), (_, _, _) => throw new Exception("Cancelled target filtered"),
+                stop.Token, candidateTarget: 10), "Already-suitable target ignored prior Stop");
+        }
+        using (var stop = new CancellationTokenSource())
+            await ThrowsAsync<OperationCanceledException>(() => GingerDesktopFilterFlow.ObserveAsync(
+                _ => { stop.Cancel(); return Task.FromResult(Observe("cancel-read", 10)); },
+                (_, _) => throw new Exception("Cancelled observation planned"), (_, _, _) => throw new Exception("Cancelled observation filtered"),
+                stop.Token, prepareFiltersOnOverflow: true, candidateTarget: 10), "Suitable read ignored Stop");
+        using (var stop = new CancellationTokenSource())
+        {
+            int filters = 0;
+            await ThrowsAsync<OperationCanceledException>(() => GingerDesktopFilterFlow.PrepareFiltersAsync(Observe("cancel-filter", 278),
+                (_, _) => Task.FromResult(Plan("Alpha", "Beta")), (_, _, token) =>
+                {
+                    Check(token == stop.Token, "Target filter token lost");
+                    filters++;
+                    stop.Cancel();
+                    return Task.FromResult(Observe("cancelled-but-suitable", 10, enabled: ["Alpha"]));
+                }, stop.Token, candidateTarget: 10), "Suitable filter result ignored Stop");
+            Check(filters == 1, "Stop with a suitable result dispatched another filter");
+        }
+    }
+
     private static async Task OrdinaryAndOptInBoundaries()
     {
         int plans = 0, filters = 0;
@@ -209,10 +345,12 @@ internal static class FilterFlowTests
             Plan(Enumerable.Range(0, 33).Select(i => "W" + i).ToArray())
         };
         foreach (var plan in plans)
+        foreach (var target in new int?[] { null, 10 })
         {
             int filters = 0;
             await ThrowsAsync<InvalidDataException>(() => GingerDesktopFilterFlow.PrepareFiltersAsync(Observe("bad-plan", 278),
-                (_, _) => Task.FromResult(plan), (_, _, _) => { filters++; throw new Exception("Must validate the entire plan first"); }, CancellationToken.None), "Invalid plan accepted");
+                (_, _) => Task.FromResult(plan), (_, _, _) => { filters++; throw new Exception("Must validate the entire plan first"); }, CancellationToken.None,
+                candidateTarget: target), "Invalid plan accepted");
             Check(filters == 0, "Invalid plan dispatched a prefix");
         }
         foreach (var fixture in new[] { Observe("duplicate-word", 278, words: ["Alpha", "Alpha"]), Observe("already-set", 278, enabled: ["Alpha"]) })
@@ -276,13 +414,14 @@ internal static class FilterFlowTests
             x => x["words"]!.AsArray().RemoveAt(1)
         };
         foreach (var mutate in mutations)
+        foreach (var target in new int?[] { null, 10 })
         {
             int filters = 0;
-            var fixture = Fixture("changed", 300, enabled: ["Alpha"]);
+            var fixture = Fixture("changed", target.HasValue ? 10 : 300, enabled: ["Alpha"]);
             mutate(fixture);
             await ThrowsAsync<InvalidDataException>(() => GingerDesktopFilterFlow.PrepareFiltersAsync(Observe("before-change", 278),
                 (_, _) => Task.FromResult(Plan("Alpha", "Beta")), (_, _, _) => { filters++; return Task.FromResult(Read(fixture)); },
-                CancellationToken.None), "Changed source/filter accepted");
+                CancellationToken.None, candidateTarget: target), "Changed source/filter accepted");
             Check(filters == 1, "Changed source/filter caused another input");
         }
         int attempts = 0;

@@ -409,7 +409,12 @@ internal static class ScanRoutingTests
             }
             Window = new MainWindow(Bridge);
         }
-        internal Task Run(GingerDeferredRow? revisit = null) => Window.RunAsync(revisit).WaitAsync(TimeSpan.FromSeconds(10));
+        internal async Task Run(GingerDeferredRow? revisit = null)
+        {
+            await Window.RunAsync(revisit).WaitAsync(TimeSpan.FromSeconds(10));
+            Check(Scenario.Session?.FilterCandidateTarget == GingerChatPreparation.MaxCandidates,
+                "Production chat session did not pass its comparison budget into word filtering");
+        }
         public void Dispose()
         {
             TestEnvironment.SyntheticRoot = null;

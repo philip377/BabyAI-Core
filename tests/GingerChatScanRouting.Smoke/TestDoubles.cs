@@ -80,6 +80,7 @@ namespace BabyAI.Desktop
     {
         private readonly Scenario _scenario = Scenario.Current ?? throw new InvalidOperationException("Missing synthetic scenario");
         internal Action<string>? FilterProgress { get; set; }
+        internal int? FilterCandidateTarget { get; init; }
         internal string DirectoryPath => Path.GetDirectoryName(_scenario.Rows[0].Directory)!;
         internal GingerDesktopSession() => _scenario.Session = this;
         internal void Record(string text) => _scenario.Journal.Add(text);
