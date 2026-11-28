@@ -16,7 +16,6 @@ public sealed partial class MainWindow
     private const int NavigationExpandedWidth = 224;
     private const int NavigationCollapsedWidth = 80;
 
-    private bool _applyingAdaptiveLayout;
     private bool _composerDraftingReady;
     private bool _orbPresenceReady;
     private bool _statusPresentationReady;
@@ -26,7 +25,7 @@ public sealed partial class MainWindow
 
     private void Panel_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (!_expanded || _applyingAdaptiveLayout)
+        if (!_expanded)
             return;
 
         if (Panel.ActualWidth < 620 && _navigationExpanded)
@@ -155,18 +154,19 @@ public sealed partial class MainWindow
 
     private void UpdateOrbPresence()
     {
-        var label = StateGlyph.Text.Trim() switch
+        var stateLabel = StateGlyph.Text.Trim() switch
         {
-            "≈" => "BabyAI · слушаю",
-            "✦" => "BabyAI · думаю",
-            "…" => "BabyAI · отвечаю",
-            "›" => "BabyAI · выполняю",
-            "!" => "BabyAI · ждёт решения",
-            "✓" => "BabyAI · готово",
-            "×" => "BabyAI · ошибка",
-            _ => "BabyAI · готов",
+            "≈" => "UNIX · слушаю",
+            "✦" => "UNIX · думаю",
+            "…" => "UNIX · отвечаю",
+            "›" => "UNIX · выполняю",
+            "!" => "UNIX · ждёт решения",
+            "✓" => "UNIX · готово",
+            "×" => "UNIX · ошибка",
+            _ => "UNIX · готов",
         };
 
+        var label = stateLabel + (_expanded ? " · нажми, чтобы свернуть в орб" : " · нажми, чтобы открыть; перетащи, чтобы переместить");
         ToolTipService.SetToolTip(OrbButton, label);
         AutomationProperties.SetName(OrbButton, label);
     }
@@ -181,10 +181,10 @@ public sealed partial class MainWindow
             Control.IsEnabledProperty,
             (_, _) => KeepComposerWritable());
         KeepComposerWritable();
-        AutomationProperties.SetName(MessageBox, "Сообщение BabyAI");
+        AutomationProperties.SetName(MessageBox, "Сообщение UNIX");
         AutomationProperties.SetHelpText(
             MessageBox,
-            "Можно готовить следующее сообщение, пока BabyAI думает. Enter отправляет, когда текущий ответ завершён.");
+            "Можно готовить следующее сообщение, пока UNIX думает. Enter отправляет, когда текущий ответ завершён.");
     }
 
     private void KeepComposerWritable()
@@ -313,7 +313,7 @@ public sealed partial class MainWindow
             ? HorizontalAlignment.Right : HorizontalAlignment.Center;
         Grid.SetColumnSpan(NavigationToggleButton, _navigationExpanded ? 1 : 2);
         Grid.SetColumn(NavigationToggleButton, _navigationExpanded ? 1 : 0);
-        NavigationToggleButton.Content = _navigationExpanded ? "‹" : "›";
+        NavigationToggleButton.Content = _navigationExpanded ? "\uE76B" : "\uE76C";
         var tooltip = _navigationExpanded ? "Свернуть навигацию" : "Развернуть навигацию";
         ToolTipService.SetToolTip(NavigationToggleButton, tooltip);
         AutomationProperties.SetName(NavigationToggleButton, tooltip);

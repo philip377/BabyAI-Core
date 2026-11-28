@@ -33,6 +33,8 @@ public sealed partial class MainWindow
             ? "История сохраняется" : "История выключена · тексты только до перезапуска";
         if (restoreTranscript || !_navigationReady || activeChat != _selectedChatId)
         {
+            ClearGingerFollowUp();
+            InvalidateGingerChatContext();
             _conversation.Clear();
             foreach (var item in chats.GetProperty("messages").EnumerateArray())
             {

@@ -49,10 +49,10 @@ internal static class GingerDiagnostics
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
             catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException or
-                System.ComponentModel.Win32Exception or JsonException or OperationCanceledException)
+                System.ComponentModel.Win32Exception or JsonException or OperationCanceledException or TimeoutException)
             {
                 result = null;
-                status = ex is OperationCanceledException ? "timeout" : "failed";
+                status = ex is TimeoutException ? "timeout" : "failed";
                 log(status == "timeout" ? "Один способ чтения не ответил за 30 секунд; пробую следующий."
                     : "Один способ чтения недоступен; продолжаю диагностику.");
             }
@@ -77,10 +77,11 @@ internal static class GingerDiagnostics
         return readiness;
     }
 
-    internal static async Task<string> RunAsync(ProcessStartInfo info, TimeSpan timeout, CancellationToken token)
+    internal static async Task<string> RunAsync(ProcessStartInfo info, TimeSpan timeout, CancellationToken token, string? failureDirectory = null)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        deadline.CancelAfter(timeout);
+        token.ThrowIfCancellationRequested();
+        using var timeoutCancellation = new CancellationTokenSource(timeout);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCancellation.Token);
         using var process = new Process { StartInfo = info };
         if (!process.Start())
             throw new InvalidOperationException("Probe did not start");
@@ -90,8 +91,49 @@ internal static class GingerDiagnostics
         {
             await Task.WhenAll(stdout, stderr, process.WaitForExitAsync(deadline.Token));
             if (process.ExitCode != 0)
-                throw new InvalidOperationException("Probe failed");
+            {
+                var error = await stderr;
+                if (failureDirectory is not null)
+                {
+                    Directory.CreateDirectory(failureDirectory);
+                    var report = new { exit_code = process.ExitCode, stderr = error.Length > 16000 ? error[..16000] : error,
+                        stdout = (await stdout) is var output && output.Length > 16000 ? output[..16000] : output };
+                    await File.WriteAllTextAsync(Path.Combine(failureDirectory, "subprocess-failure-" + Guid.NewGuid().ToString("N") + ".json"),
+                        JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8, CancellationToken.None);
+                }
+                var reason = error.Contains("Ginger activation blocked before observation", StringComparison.OrdinalIgnoreCase)
+                    ? "Не удалось сделать Ginger активным перед чтением. Проход остановлен без автоматического повтора. Закрой мешающие окна установщиков или диалогов и открой Ginger."
+                    : error.Contains("Foreground changed", StringComparison.OrdinalIgnoreCase)
+                    ? "Активное окно сменилось во время проверки Ginger. Проход остановлен; автоматический повтор запрещён. Подробности — в журнале сессии."
+                    : error.Contains("Exactly one Ginger", StringComparison.OrdinalIgnoreCase)
+                    ? "Не найдено единственное доступное окно Ginger. Открой Ginger и проверь, нет ли второго экземпляра."
+                    : error.Contains("Candidate panel missing", StringComparison.OrdinalIgnoreCase)
+                    ? "Не найдена панель кандидатов Ginger. Проверь, что прайс открыт двойным кликом, выбрана вкладка «Сопоставление — новые» и включено «Дополнительно → Сопоставления снизу». Дождись загрузки и повтори чтение прайса."
+                    : error.Contains("Product selection changed", StringComparison.OrdinalIgnoreCase)
+                    ? "Выделение товара в Ginger изменилось. Дальнейшие действия остановлены; нужно заново прочитать текущую строку."
+                    : error.Contains("Ginger UI is not responding", StringComparison.OrdinalIgnoreCase)
+                    ? "Интерфейс Ginger не ответил вовремя. Действия остановлены; автоматического повтора нет."
+                    : error.Contains("Query", StringComparison.OrdinalIgnoreCase) && error.Contains("source", StringComparison.OrdinalIgnoreCase)
+                    ? "Панель поиска ещё не соответствует выбранному товару. Дождись загрузки строки."
+                    : error.Contains("selected", StringComparison.OrdinalIgnoreCase)
+                    ? "Не удалось подтвердить выделение одной исходной строки Ginger."
+                    : $"Драйвер Ginger завершился с кодом {process.ExitCode}. Подробности сохранены в журнале сессии.";
+                throw new InvalidOperationException(reason);
+            }
             return await stdout;
+        }
+        catch (OperationCanceledException ex) when (!token.IsCancellationRequested && timeoutCancellation.IsCancellationRequested)
+        {
+            if (failureDirectory is not null)
+            {
+                Directory.CreateDirectory(failureDirectory);
+                await File.WriteAllTextAsync(Path.Combine(failureDirectory, "subprocess-failure-" + Guid.NewGuid().ToString("N") + ".json"),
+                    JsonSerializer.Serialize(new { status = "timeout", timeout_ms = timeout.TotalMilliseconds,
+                        process_id = process.Id }, new JsonSerializerOptions { WriteIndented = true }),
+                    Encoding.UTF8, CancellationToken.None);
+            }
+            throw new TimeoutException($"Драйвер Ginger не завершил проверку за {timeout.TotalSeconds:0.#} с. " +
+                "Результат не подтверждён; автоматического повтора нет.", ex);
         }
         finally
         {

@@ -123,6 +123,15 @@ def serve(
                     raise DesktopCommandError("Desktop worker command is required")
                 command = command_value.strip()
 
+                if command == "ginger.search.word.preview":
+                    from .ginger_search_teacher import load_search_json
+                    request = load_search_json(line)
+                elif command == "ginger.teach.source.preview":
+                    # The new source-only contract rejects duplicate keys before
+                    # they can disappear in the ordinary transport dictionary.
+                    from .ginger_source_teacher import load_source_json
+                    request = load_source_json(line)
+
                 payload = request.get("payload", {})
                 if not isinstance(payload, dict):
                     raise DesktopCommandError(

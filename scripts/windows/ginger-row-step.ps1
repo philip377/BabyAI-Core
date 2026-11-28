@@ -1,4 +1,4 @@
-# Explicit development controller: selection receipts only, no candidate freshness claim.
+﻿# Explicit development controller: selection receipts only, no candidate freshness claim.
 [CmdletBinding()]
 param(
     [ValidateSet('Initialize','Compare','Step','Recover','Observe','Read','InspectSearch','InspectQuery','InspectSelection','PrepareFilters','PrepareRemoval','FinishReview','NextReviewed','Status')][string]$Operation='Status',
@@ -39,7 +39,7 @@ if($Operation -ne 'Initialize') {
     if($Operation -eq 'Observe' -and $null -eq $state.pending_attempt){throw 'No pending row observation'}
 }
 $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'ginger-navigation.ps1'))
-Invoke-Expression $source.Substring(0,$source.IndexOf('$processes = @('))
+& ([scriptblock]::Create($source.Substring(0,$source.IndexOf('$processes = @('))))
 $targets=@(Get-Process Ginger4 -ErrorAction Stop | Where-Object MainWindowHandle -ne 0)
 if($targets.Count -ne 1 -or [IO.Path]::GetFileName($targets[0].Path) -ine 'Ginger4.exe'){throw 'Exactly one visible Ginger executable required'}
 $window=$targets[0].MainWindowHandle

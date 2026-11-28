@@ -12,6 +12,7 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <AssemblyName>BabyAI-Setup</AssemblyName>
     <RootNamespace>BabyAI.Setup</RootNamespace>
+    <ApplicationIcon>..\..\desktop\BabyAI.Desktop\Assets\Unix.ico</ApplicationIcon>
     <Version>0.1.0</Version>
     <BabyAIBundleZip Condition="'$(BabyAIBundleZip)' == ''"></BabyAIBundleZip>
   </PropertyGroup>

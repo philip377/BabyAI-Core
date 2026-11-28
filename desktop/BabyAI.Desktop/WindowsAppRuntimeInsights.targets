@@ -1,0 +1,35 @@
+<Project>
+  <!-- Windows App SDK 2.3.1 omits this resource from its self-contained
+       component payload. AppNotificationManager.Register needs it while
+       checking IsSelfContained (WindowsAppSDK issues #6071 and #6774).
+       Take only the matching architecture's DLL from the restored official
+       Runtime package; do not install its MSIX or use a machine runtime. -->
+  <Target Name="IncludeWindowsAppRuntimeInsightsResource"
+          BeforeTargets="AssignTargetPaths"
+          Condition="'$(WindowsAppSDKSelfContained)' == 'true' and '$(WindowsPackageType)' == 'None'">
+    <PropertyGroup>
+      <_BabyAIInsightsArchitecture Condition="'$(RuntimeIdentifier)' == 'win-x64' or ('$(RuntimeIdentifier)' == '' and '$(PlatformTarget)' == 'x64')">x64</_BabyAIInsightsArchitecture>
+      <_BabyAIInsightsArchitecture Condition="'$(RuntimeIdentifier)' == 'win-arm64' or ('$(RuntimeIdentifier)' == '' and '$(PlatformTarget)' == 'ARM64')">arm64</_BabyAIInsightsArchitecture>
+      <_BabyAIInsightsMsix>$(PkgMicrosoft_WindowsAppSDK_Runtime)\tools\MSIX\win10-$(_BabyAIInsightsArchitecture)\Microsoft.WindowsAppRuntime.2.msix</_BabyAIInsightsMsix>
+      <!-- WinUI's nested build still checks MAX_PATH. Keep this extraction path
+           short, and absolute so Unzip and Exists resolve it identically. -->
+      <_BabyAIInsightsDirectory>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'Insights'))</_BabyAIInsightsDirectory>
+      <_BabyAIInsightsFile>$(_BabyAIInsightsDirectory)Microsoft.WindowsAppRuntime.Insights.Resource.dll</_BabyAIInsightsFile>
+    </PropertyGroup>
+    <Error Condition="'$(_BabyAIInsightsArchitecture)' == '' or !Exists('$(_BabyAIInsightsMsix)')"
+           Text="Cannot locate the restored Windows App SDK Runtime framework MSIX for this architecture: $(_BabyAIInsightsMsix)" />
+    <Unzip SourceFiles="$(_BabyAIInsightsMsix)"
+           DestinationFolder="$(_BabyAIInsightsDirectory)"
+           Include="Microsoft.WindowsAppRuntime.Insights.Resource.dll"
+           SkipUnchangedFiles="true" />
+    <Error Condition="!Exists('$(_BabyAIInsightsFile)')"
+           Text="The restored Windows App SDK Runtime framework MSIX is missing Microsoft.WindowsAppRuntime.Insights.Resource.dll." />
+    <ItemGroup>
+      <Content Include="$(_BabyAIInsightsFile)"
+               Link="Microsoft.WindowsAppRuntime.Insights.Resource.dll"
+               CopyToOutputDirectory="PreserveNewest"
+               CopyToPublishDirectory="PreserveNewest" />
+      <FileWrites Include="$(_BabyAIInsightsFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

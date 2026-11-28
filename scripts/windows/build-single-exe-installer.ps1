@@ -20,6 +20,12 @@ $work = Join-Path $env:RUNNER_TEMP ("babyai-sfx-" + [guid]::NewGuid().ToString('
 $payload = Join-Path $work 'payload'
 $payloadBundle = Join-Path $payload 'bundle'
 New-Item -ItemType Directory -Force -Path $payloadBundle | Out-Null
+# The downloaded SFX module has its own Explorer icon. Brand a private staging
+# copy before concatenation; never mutate the SDK module or the appended payload.
+$brandedSfx = Join-Path $work 'Unix-Setup.sfx'
+Copy-Item -LiteralPath $sfx -Destination $brandedSfx
+& (Join-Path $PSScriptRoot 'set-executable-icon.ps1') -Executable $brandedSfx `
+    -Icon (Join-Path $PSScriptRoot '..\..\desktop\BabyAI.Desktop\Assets\Unix.ico')
 Copy-Item $setup (Join-Path $payload 'BabyAI-Setup.exe') -Force
 Copy-Item (Join-Path $bundle '*') $payloadBundle -Recurse -Force
 
@@ -45,7 +51,7 @@ Progress="no"
 $parent = Split-Path $output -Parent
 if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
 $streams = @(
-    [System.IO.File]::OpenRead($sfx),
+    [System.IO.File]::OpenRead($brandedSfx),
     [System.IO.File]::OpenRead($config),
     [System.IO.File]::OpenRead($archive)
 )

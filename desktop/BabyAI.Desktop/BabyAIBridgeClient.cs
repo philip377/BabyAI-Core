@@ -103,7 +103,79 @@ public sealed class BabyAIBridgeClient : IDisposable
         return await ExecuteStreamingAsync("chat", payload, onEvent, cancellationToken);
     }
 
+    public async Task<JsonElement> PreviewGingerIntentAsync(string message, CancellationToken cancellationToken)
+    {
+        var json = await ExecuteAsync("ginger.intent.preview", JsonSerializer.Serialize(new { message }), cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
+    public async Task<JsonElement> ResearchGingerBottleAsync(string query, string sourceUrl, CancellationToken cancellationToken)
+    {
+        var json = await ExecuteAsync("ginger.bottle.research", JsonSerializer.Serialize(new {
+            query, source_url = sourceUrl, allow_public_web = true
+        }), cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
+    public async Task<JsonElement> SearchSettingsAsync(string command, string? mode = null,
+        string? apiKey = null, bool clearKey = false, CancellationToken cancellationToken = default)
+    {
+        if (command is not ("web.search.status" or "web.search.configure" or "web.search.check"))
+            throw new ArgumentException("Неизвестная команда настроек поиска.", nameof(command));
+        // Credentials travel only through the private worker pipe, never chat/history/logs.
+        var payload = JsonSerializer.Serialize(new {
+            mode, api_key = apiKey, clear_key = clearKey, allow_public_web = command == "web.search.check"
+        });
+        var json = await ExecuteAsync(command, payload, cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
+    public async Task<JsonElement> PreviewGingerLessonAsync(string supplier, string source,
+        string lesson, IEnumerable<string> candidates, CancellationToken cancellationToken)
+    {
+        var json = await ExecuteAsync(string.IsNullOrWhiteSpace(lesson) ? "ginger.recognize.preview" : "ginger.teach.preview",
+            JsonSerializer.Serialize(new { supplier, source, lesson, candidates }), cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
+    internal async Task<JsonElement> PreviewGingerSearchWordAsync(JsonElement request, CancellationToken cancellationToken)
+    {
+        var json = await ExecuteAsync("ginger.search.word.preview", request.GetRawText(), cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
+    public async Task<JsonElement> PreviewGingerSourceLessonAsync(string supplier, string source,
+        string lesson, IEnumerable<string> candidates, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        if (candidates.Any())
+            throw new InvalidDataException("Разбор сохранённого названия не принимает кандидатов.");
+        var json = await ExecuteAsync("ginger.teach.source.preview",
+            JsonSerializer.Serialize(new { supplier, source, lesson }), cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
     public Task ApproveLessonAsync() => ExecuteAsync("lesson.approve", "{}");
+
+    public async Task<string> RateGingerAnswerAsync(JsonElement report, int points, string feedback) =>
+        (await RateGingerAnswerReviewAsync(report, points, feedback)).AnswerId;
+
+    internal async Task<GingerAnswerRatingReceipt> RateGingerAnswerReviewAsync(JsonElement report, int points, string feedback)
+    {
+        var json = await ExecuteAsync("ginger.answer.rate", JsonSerializer.Serialize(new { report, points, feedback }));
+        using var document = JsonDocument.Parse(json);
+        return new(document.RootElement.GetProperty("answer_id").GetString()!,
+            document.RootElement.GetProperty("rating_active").GetBoolean());
+    }
+
+    public Task RevokeGingerAnswerAsync(string answerId, string feedback) =>
+        ExecuteAsync("ginger.answer.revoke", JsonSerializer.Serialize(new { answer_id = answerId, feedback }));
 
     public Task RejectLessonAsync() => ExecuteAsync("lesson.reject", "{}");
 
@@ -129,6 +201,9 @@ public sealed class BabyAIBridgeClient : IDisposable
 
     public Task SetHistoryEnabledAsync(bool enabled) =>
         ExecuteAsync("history.set_enabled", JsonSerializer.Serialize(new { enabled }));
+
+    public Task RecordGingerChatAsync(string chatId, string message, string result) =>
+        ExecuteAsync("ginger.chat.record", JsonSerializer.Serialize(new { chat_id = chatId, message, result }));
 
     public Task ClearHistoryAsync(string? project = null) =>
         ExecuteAsync("history.clear", JsonSerializer.Serialize(new { project }));

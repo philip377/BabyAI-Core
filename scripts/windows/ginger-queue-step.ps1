@@ -43,7 +43,7 @@ if($Operation -in @('Step','ReadCurrent')) {
     if($Operation -eq 'ReadCurrent' -and -not $status.awaiting_read){throw 'No opened document awaiting reading'}
 }
 $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'ginger-navigation.ps1'))
-Invoke-Expression $source.Substring(0,$source.IndexOf('$processes = @('))
+& ([scriptblock]::Create($source.Substring(0,$source.IndexOf('$processes = @('))))
 $targets=@(Get-Process Ginger4 -ErrorAction Stop | Where-Object MainWindowHandle -ne 0)
 if($targets.Count -ne 1 -or [IO.Path]::GetFileName($targets[0].Path) -ine 'Ginger4.exe') {
     throw 'Exactly one visible Ginger executable required'

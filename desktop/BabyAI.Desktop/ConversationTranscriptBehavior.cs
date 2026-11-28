@@ -132,6 +132,8 @@ public static class ConversationTranscriptBehavior
             || speaker.Equals("Вы", StringComparison.OrdinalIgnoreCase);
         var isSystem = speaker.Equals("System", StringComparison.OrdinalIgnoreCase)
             || speaker.Equals("Система", StringComparison.OrdinalIgnoreCase);
+        if (!isUser && !isSystem && GingerProgressTurn.TryCreateHistoryCard(text, out var progressCard))
+            return progressCard!;
         var alignment = isSystem
             ? HorizontalAlignment.Center
             : isUser ? HorizontalAlignment.Right : HorizontalAlignment.Left;
@@ -151,7 +153,7 @@ public static class ConversationTranscriptBehavior
 
         var bubble = new Border
         {
-            MaxWidth = isSystem ? 310 : 326,
+            MaxWidth = isSystem ? 420 : 620,
             Padding = isSystem ? new Thickness(11, 7, 11, 7) : new Thickness(13, 10, 13, 10),
             CornerRadius = isSystem
                 ? new CornerRadius(13)
@@ -169,7 +171,7 @@ public static class ConversationTranscriptBehavior
 
         var card = new StackPanel
         {
-            MaxWidth = isSystem ? 320 : 336,
+            MaxWidth = isSystem ? 430 : 630,
             HorizontalAlignment = alignment,
             Spacing = 4,
             Margin = new Thickness(0, 0, 0, 10),

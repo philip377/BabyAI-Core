@@ -1,4 +1,4 @@
-# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
+﻿# Guarded UI navigation. No guessed coordinates, text entry or direct server writes.
 [CmdletBinding()]
 param(
     [ValidateSet('Inspect', 'OpenPrices', 'ReadPrices', 'SelectFirstIncluded', 'OpenMatching', 'InspectMatching', 'OpenSelectedPrice', 'ReadSelectedProduct', 'ReadMatchingCandidates', 'SelectNextIncluded', 'SelectNextProduct')][string]$Mode = 'Inspect',
@@ -10,7 +10,10 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName Accessibility
 Add-Type -AssemblyName Microsoft.VisualBasic
-Add-Type -ReferencedAssemblies @([Accessibility.IAccessible].Assembly.Location, [Microsoft.VisualBasic.Interaction].Assembly.Location) -TypeDefinition @'
+# Resolve framework references absolutely: the installed self-contained .NET app
+# contains System*.dll facades incompatible with the Windows PowerShell compiler.
+$frameworkDirectory = [Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
+Add-Type -ReferencedAssemblies @((Join-Path $frameworkDirectory 'System.dll'), (Join-Path $frameworkDirectory 'System.Core.dll'), [Accessibility.IAccessible].Assembly.Location, [Microsoft.VisualBasic.Interaction].Assembly.Location) -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -19,6 +22,17 @@ using Accessibility;
 
 public sealed class GingerUiBusyException : InvalidOperationException {
     public GingerUiBusyException() : base("Ginger UI is not responding; further input blocked") { }
+}
+public sealed class GingerCandidateLimitException : InvalidOperationException {
+    public long ObservedCount { get; private set; }
+    public GingerCandidateLimitException(long count)
+        : base("Candidate read limit exceeded: observed "+count+", maximum 256") {
+        ObservedCount=count;
+    }
+}
+// A transient read state, never evidence of an empty list or permission to replay input.
+public sealed class GingerSearchPendingException : InvalidOperationException {
+    public GingerSearchPendingException(string message) : base(message) { }
 }
 public sealed class GingerMenuNode {
     public IAccessible Owner;
@@ -78,6 +92,13 @@ public sealed class GingerSearchContext {
     // Raw UI text only; search rows do not prove query completion or product identity.
     public GingerCandidateSnapshot SearchWords, Products;
     public bool QueryWordsMatchSource; // Lexical evidence only, not completion or identity.
+    public bool CanMatch=false, SearchCompletionVerified=false;
+}
+public sealed class GingerFilterOnlyContext {
+    // No product contents are observed here. This can only prepare additive filters.
+    public GingerCandidateSnapshot SearchWords;
+    public long ProductPanelHandle, ProductRows;
+    public bool QueryWordsMatchSource;
     public bool CanMatch=false, SearchCompletionVerified=false;
 }
 public sealed class GingerSelectionEvidence {
@@ -539,6 +560,11 @@ public static class GingerMenuAccess {
             RequireWindow(root,process);
             System.Threading.Thread.Sleep(50);
         }
+        IntPtr active=GetForegroundWindow();
+        if(active!=root) {
+            uint activeProcess; GetWindowThreadProcessId(active,out activeProcess);
+            throw new InvalidOperationException("Ginger activation blocked before observation; expected="+root.ToInt64()+", observed="+active.ToInt64()+", owner="+activeProcess);
+        }
         RequireForeground(root,process);
     }
     public static void RequireForeground(IntPtr root,uint process) {
@@ -806,8 +832,9 @@ public static class GingerMenuAccess {
             throw new InvalidOperationException("Candidate count unavailable");
         return count.ToInt64();
     }
-    private static GingerCandidateSnapshot ReadCandidatesOnce(IntPtr root,uint process,bool searchWords=false) {
-        GingerSelectedProduct source=ReadSelectedProductOnce(root,process);
+    private static GingerCandidateSnapshot ReadCandidatesOnce(IntPtr root,uint process,bool searchWords=false,GingerSelectedProduct adjacentSource=null) {
+        // Only the immediately preceding panel read may supply its verified end observation.
+        GingerSelectedProduct source=adjacentSource??ReadSelectedProductOnce(root,process);
         GingerCandidateSnapshot result=null;
         foreach(IntPtr hwnd in Windows(root,process)) {
             StringBuilder cls=new StringBuilder(256); GetClassNameW(hwnd,cls,cls.Capacity);
@@ -818,7 +845,10 @@ public static class GingerMenuAccess {
             if(!products) continue;
             if(result!=null) throw new InvalidOperationException("Ambiguous candidate panels");
             long count=ListCount(hwnd,process);
-            if(count>256) throw new InvalidOperationException((searchWords ? "Search word" : "Candidate")+" read limit exceeded: observed "+count+", maximum 256");
+            if(count>256) {
+                if(!searchWords) throw new GingerCandidateLimitException(count);
+                throw new InvalidOperationException("Search word read limit exceeded: observed "+count+", maximum 256");
+            }
             IAccessible list=Client(hwnd);
             if(list==null || Convert.ToInt32(list.get_accRole(0))!=33 || list.accChildCount>260)
                 throw new InvalidOperationException("Unsupported candidate list");
@@ -843,11 +873,11 @@ public static class GingerMenuAccess {
                 if(searchWords && SendMessageTimeoutW(hwnd,0x102C,new IntPtr(candidates.Count),new IntPtr(0xF000),2,100,out imageState)==IntPtr.Zero)
                     throw new InvalidOperationException("Search state image unavailable");
                 int bx=0,by=0,bw=0,bh=0;
-                if(searchWords)owner.accLocation(out bx,out by,out bw,out bh,id);
+                owner.accLocation(out bx,out by,out bw,out bh,id);
                 candidates.Add(new GingerCatalogueCandidate {
                     ObservedPosition=candidates.Count+1,Title=title,DescriptionText=description,
-                    DefaultAction=searchWords ? owner.get_accDefaultAction(id) : null,
-                    StateImage=(int)((imageState.ToInt64() & 0xF000)>>12),Bounds=searchWords ? new int[]{bx,by,bw,bh} : null,ActionOwner=owner,ActionChild=id,
+                    DefaultAction=owner.get_accDefaultAction(id),
+                    StateImage=(int)((imageState.ToInt64() & 0xF000)>>12),Bounds=new int[]{bx,by,bw,bh},ActionOwner=owner,ActionChild=id,
                     Selected=(itemState & 2)!=0, Checked=searchWords && role==44 ? (bool?)((itemState & 16)!=0) : null
                 });
             }
@@ -856,7 +886,9 @@ public static class GingerMenuAccess {
             result=new GingerCandidateSnapshot {Source=source,PanelHandle=hwnd.ToInt64(),Candidates=candidates.ToArray()};
         }
         if(result==null) throw new InvalidOperationException("Candidate panel missing");
-        RequireSameSelectedProduct(source,ReadSelectedProductOnce(root,process));
+        GingerSelectedProduct afterSource=ReadSelectedProductOnce(root,process);
+        RequireSameSelectedProduct(source,afterSource);
+        result.Source=afterSource;
         RequireWindow(root,process);
         return result;
     }
@@ -883,8 +915,106 @@ public static class GingerMenuAccess {
         RequireSameCandidates(first,second);
         return second;
     }
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hwnd,IntPtr dc);
+    [DllImport("gdi32.dll")] private static extern uint GetPixel(IntPtr dc,int x,int y);
+    public static bool IsActiveSelectionRgb(int r,int g,int b) {
+        return r>=0 && r<=90 && g>=35 && g<=180 && b>=110 && b<=255 && b>=g+25;
+    }
+    public static void RequireActiveBlueSource(IntPtr root,uint process,GingerProductRow[] expected,int position) {
+        RequireForeground(root,process);
+        RequireInputScale(root);
+        GingerProductRow[] rows=ReadProductRows(root,process);
+        RequireSameProductRows(expected,rows,true);
+        if(position<1 || position>rows.Length || !rows[position-1].Selected || Array.FindAll(rows,r=>r.Selected).Length!=1)
+            throw new InvalidOperationException("Exact selected source required for blue verification");
+        GingerProductRow row=rows[position-1];
+        int x,y,w,h;row.Target.accLocation(out x,out y,out w,out h,0);
+        if(w<24 || h<8 || w>10000 || h>1000)throw new InvalidOperationException("Source geometry unavailable");
+        IntPtr table=new IntPtr(row.Observation.TableHandle),dc=GetDC(IntPtr.Zero);
+        if(dc==IntPtr.Zero)throw new InvalidOperationException("Selection pixels unavailable");
+        int blue=0,total=0;
+        try {
+            for(int band=0;band<2;band++)for(int n=1;n<=16;n++) {
+                Point point=new Point {X=x+(w*n/17),Y=band==0?y+2:y+h-3};
+                if(WindowFromPoint(point)!=table)throw new InvalidOperationException("Source is covered; color unverified");
+                uint pixel=GetPixel(dc,point.X,point.Y);
+                if(pixel==0xffffffff)throw new InvalidOperationException("Selection pixel read failed");
+                if(IsActiveSelectionRgb((int)(pixel&255),(int)((pixel>>8)&255),(int)((pixel>>16)&255)))blue++;
+                total++;
+            }
+        } finally {ReleaseDC(IntPtr.Zero,dc);}
+        RequireForeground(root,process);
+        RequireSameProductRows(rows,ReadProductRows(root,process),true);
+        if(blue*100<total*70)throw new InvalidOperationException("Source must be actively blue, not light blue; matching blocked");
+    }
+    private static Point CandidatePoint(IntPtr root,uint process,GingerCandidateSnapshot snapshot,GingerCatalogueCandidate target) {
+        RequireForeground(root,process);
+        RequireInputScale(root);
+        IntPtr panel=new IntPtr(snapshot.PanelHandle); uint owner;
+        if(GetWindowThreadProcessId(panel,out owner)==0 || owner!=process || !IsWindowVisible(panel))
+            throw new InvalidOperationException("Candidate panel owner changed");
+        int x,y,w,h;
+        target.ActionOwner.accLocation(out x,out y,out w,out h,target.ActionChild);
+        if(!SameBounds(target.Bounds,new int[]{x,y,w,h}) || w<4 || h<4)
+            throw new InvalidOperationException("Candidate geometry changed");
+        Point point=new Point {X=checked(x+Math.Min(12,w/2)),Y=checked(y+h/2)};
+        if(WindowFromPoint(point)!=panel)throw new InvalidOperationException("Candidate covered by another window");
+        IAccessible list=Client(panel);
+        object hit=list.accHitTest(point.X,point.Y);
+        IAccessible hitOwner=hit as IAccessible ?? list;
+        object child=hit is IAccessible ? (object)0 : hit;
+        if(!(child is int) || (hit is int && (int)hit<=0) ||
+           hitOwner.get_accName(child)!=target.Title)
+            throw new InvalidOperationException("Candidate hit-test identity mismatch");
+        int hx,hy,hw,hh;hitOwner.accLocation(out hx,out hy,out hw,out hh,child);
+        if(!SameBounds(target.Bounds,new int[]{hx,hy,hw,hh}))
+            throw new InvalidOperationException("Candidate hit-test geometry mismatch");
+        return point;
+    }
+    // One explicitly authorized dispatch. Caller must durably record intent before invocation
+    // and reconcile the resulting product table; exceptions never authorize a retry.
+    public static void InvokeMatchingCandidate(IntPtr root,uint process,GingerProductRow[] expectedRows,
+            GingerCandidateSnapshot expected,int position,string exactTitle,bool confirmed) {
+        if(!confirmed)throw new InvalidOperationException("Explicit matching confirmation required");
+        if(expected==null || expected.Candidates==null || position<1 || position>expected.Candidates.Length ||
+           String.IsNullOrWhiteSpace(exactTitle))throw new InvalidOperationException("Explicit candidate required");
+        GingerProductRow[] rows=ReadProductRows(root,process);
+        RequireSameProductRows(expectedRows,rows,true);
+        GingerCandidateSnapshot fresh=ReadMatchingCandidates(root,process);
+        RequireSameCandidates(expected,fresh);
+        GingerCatalogueCandidate target=fresh.Candidates[position-1];
+        if(target.Title!=exactTitle || Array.FindAll(fresh.Candidates,c=>c.Title==exactTitle).Length!=1)
+            throw new InvalidOperationException("Candidate identity ambiguous or changed");
+        if(fresh.Source.LinkedProductText!="<не указано" && fresh.Source.LinkedProductText!="<не указано>")
+            throw new InvalidOperationException("Source already linked; replacement is not permitted");
+        int state=Convert.ToInt32(target.ActionOwner.get_accState(target.ActionChild));
+        if((state & (1|0x8000|0x10000))!=0 || target.Bounds==null || target.Bounds.Length!=4 ||
+           target.Bounds[2]<4 || target.Bounds[3]<4 || Normalize(target.DefaultAction)!="двойной щелчок")
+            throw new InvalidOperationException("Candidate is not visibly actionable");
+        RequireForeground(root,process);
+        RequireSameProductRows(rows,ReadProductRows(root,process),true);
+        RequireSameCandidates(fresh,ReadMatchingCandidates(root,process));
+        RequireForeground(root,process);
+        Point point=CandidatePoint(root,process,fresh,target);
+        int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
+        if(width<2 || height<2 || point.X<left || point.Y<top || point.X>=left+width || point.Y>=top+height)
+            throw new InvalidOperationException("Candidate outside desktop");
+        int x=(int)(((long)(point.X-left)*65536+32768)/width),y=(int)(((long)(point.Y-top)*65536+32768)/height);
+        Input[] input=new Input[4];
+        for(int i=0;i<4;i++)input[i]=new Input {Type=0,Mouse=new MouseInput {X=x,Y=y,Flags=(uint)(0xC001|(i%2==0?2:4))}};
+        RequireActiveBlueSource(root,process,rows,fresh.Source.ObservedRowPosition);
+        Point last=CandidatePoint(root,process,fresh,target);
+        if(last.X!=point.X || last.Y!=point.Y)throw new InvalidOperationException("Candidate moved before input");
+        if(SendInput(4,input,Marshal.SizeOf(typeof(Input)))!=4)
+            throw new InvalidOperationException("Incomplete matching double click; outcome unknown, no retry");
+    }
     public static GingerCandidateSnapshot ReadSearchWords(IntPtr root,uint process) {
-        GingerCandidateSnapshot first=ReadCandidatesOnce(root,process,true),second=ReadCandidatesOnce(root,process,true);
+        GingerCandidateSnapshot first=ReadCandidatesOnce(root,process,true);
+        // These full panel reads are adjacent: no input, sleep or external callback
+        // intervenes. Reuse only the first read's verified end source as the next
+        // read's start; its own fresh end source and the complete panel comparison stay.
+        GingerCandidateSnapshot second=ReadCandidatesOnce(root,process,true,first.Source);
         RequireSameCandidates(first,second);
         return second;
     }
@@ -968,7 +1098,9 @@ public static class GingerMenuAccess {
         int hx,hy,hw,hh;hitOwner.accLocation(out hx,out hy,out hw,out hh,hitId);
         if(hx!=b[0] || hy!=b[1] || hw!=b[2] || hh!=b[3] || WindowFromPoint(point)!=panel)
             throw new InvalidOperationException("Search star covered or moved");
-        RequireSameSelectedProduct(fresh.Source,ReadSelectedProduct(root,process));
+        // This fresh double panel read checks the source before/between/after its
+        // reads; RequireSameCandidates also binds that source to fresh. A separate
+        // immediate double source read adds no input boundary or independent guard.
         RequireSameCandidates(fresh,ReadSearchWords(root,process));
         RequireForeground(root,process);
         if(WindowFromPoint(point)!=panel) throw new InvalidOperationException("Search target changed");
@@ -995,7 +1127,7 @@ public static class GingerMenuAccess {
     }
     private static GingerSearchContext ReadSearchContextOnce(IntPtr root,uint process) {
         GingerCandidateSnapshot words=ReadCandidatesOnce(root,process,true);
-        GingerCandidateSnapshot products=ReadCandidatesOnce(root,process);
+        GingerCandidateSnapshot products=ReadCandidatesOnce(root,process,false,words.Source);
         RequireSameSelectedProduct(words.Source,products.Source);
         if(words.PanelHandle==products.PanelHandle)
             throw new InvalidOperationException("Search and product panels must be distinct");
@@ -1013,9 +1145,70 @@ public static class GingerMenuAccess {
         RequireSameSelectedProduct(second.SearchWords.Source,second.Products.Source);
     }
     public static GingerSearchContext ReadSearchContext(IntPtr root,uint process) {
-        GingerSearchContext first=ReadSearchContextOnce(root,process),second=ReadSearchContextOnce(root,process);
+        return ReadSearchContext(root,process,0);
+    }
+    public static GingerSearchContext ReadSearchContext(IntPtr root,uint process,int settleMilliseconds) {
+        if(settleMilliseconds<0 || settleMilliseconds>1000) throw new ArgumentOutOfRangeException("settleMilliseconds");
+        GingerSearchContext first=ReadSearchContextOnce(root,process);
+        if(settleMilliseconds>0) System.Threading.Thread.Sleep(settleMilliseconds);
+        GingerSearchContext second=ReadSearchContextOnce(root,process);
         RequireSameSearchContext(first,second);
         return second; // A stable query and result list still cannot certify search completion.
+    }
+    private static GingerFilterOnlyContext ReadFilterOnlyContextOnce(IntPtr root,uint process) {
+        GingerCandidateSnapshot words=ReadCandidatesOnce(root,process,true);
+        long productPanel=0,productRows=-1;
+        foreach(IntPtr hwnd in Windows(root,process)) {
+            StringBuilder cls=new StringBuilder(256); GetClassNameW(hwnd,cls,cls.Capacity);
+            if(!IsWindowVisible(hwnd) || !cls.ToString().Contains("SysListView32")) continue;
+            bool isSearch=false,isProduct=false;
+            foreach(string[] columns in Headers(hwnd,process)) {
+                isSearch |= Column(columns,"слово")>=0 && Column(columns,"поиск")>=0;
+                isProduct |= Column(columns,"товар")>=0 && Column(columns,"цена")>=0;
+            }
+            if(!isProduct) continue;
+            if(isSearch) throw new InvalidOperationException("Ambiguous matching panel");
+            if(productPanel!=0) throw new InvalidOperationException("Ambiguous candidate panels");
+            productPanel=hwnd.ToInt64();
+            productRows=ListCount(hwnd,process);
+            // Continue the entire window enumeration: an overflow does not prove uniqueness.
+        }
+        if(productPanel==0) throw new InvalidOperationException("Candidate panel missing");
+        if(productPanel==words.PanelHandle) throw new InvalidOperationException("Search and product panels must be distinct");
+        GingerSelectedProduct afterSource=ReadSelectedProductOnce(root,process);
+        RequireSameSelectedProduct(words.Source,afterSource);
+        if(ListCount(new IntPtr(productPanel),process)!=productRows)
+            throw new InvalidOperationException("Candidate count changed during filter-only observation");
+        RequireWindow(root,process);
+        words.Source=afterSource;
+        // The list can shrink after the full reader reports overflow. Validate the
+        // source/count/window first, then request a fresh full read, not a filter.
+        if(productRows<=256) throw new GingerSearchPendingException("Candidate list is within the read limit; complete observation required");
+        bool lexical=SearchWordsDescribeSource(Array.ConvertAll(words.Candidates,row=>row.Title),afterSource.Title);
+        if(!lexical) throw new GingerSearchPendingException("Search words do not describe selected source");
+        return new GingerFilterOnlyContext {SearchWords=words,ProductPanelHandle=productPanel,
+            ProductRows=productRows,QueryWordsMatchSource=lexical};
+    }
+    private static void RequireSameFilterOnlyContext(GingerFilterOnlyContext first,GingerFilterOnlyContext second) {
+        foreach(GingerFilterOnlyContext context in new[] {first,second}) {
+            if(context==null || context.CanMatch || context.SearchCompletionVerified || !context.QueryWordsMatchSource ||
+               context.ProductRows<=256 || context.ProductPanelHandle<=0 || context.SearchWords==null ||
+               context.SearchWords.PanelHandle<=0 || context.ProductPanelHandle==context.SearchWords.PanelHandle ||
+               context.SearchWords.CanMatch || context.SearchWords.IdentityVerified || context.SearchWords.SearchCompletionVerified ||
+               context.SearchWords.Source==null || context.SearchWords.Source.CanMatch || context.SearchWords.Source.IdentityVerified)
+                throw new InvalidOperationException("Invalid filter-only context");
+        }
+        if(first.ProductPanelHandle!=second.ProductPanelHandle || first.ProductRows!=second.ProductRows)
+            throw new InvalidOperationException("Candidate metadata changed between filter-only observations");
+        RequireSameCandidates(first.SearchWords,second.SearchWords);
+    }
+    public static GingerFilterOnlyContext ReadFilterOnlyContext(IntPtr root,uint process,int settleMilliseconds) {
+        if(settleMilliseconds<0 || settleMilliseconds>1000) throw new ArgumentOutOfRangeException("settleMilliseconds");
+        GingerFilterOnlyContext first=ReadFilterOnlyContextOnce(root,process);
+        if(settleMilliseconds>0) System.Threading.Thread.Sleep(settleMilliseconds);
+        GingerFilterOnlyContext second=ReadFilterOnlyContextOnce(root,process);
+        RequireSameFilterOnlyContext(first,second);
+        return second;
     }
     public static GingerMatchingView InspectMatching(IntPtr root,uint process) {
         GingerMatchingView result=new GingerMatchingView();
@@ -1094,7 +1287,14 @@ if ($Mode -eq 'OpenMatching') {
     $actions.Add('Ensure bottom matching view for verified supplier document')
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
-        $matchingView = [GingerMenuAccess]::InspectMatching($window, $processId)
+        try {
+            $matchingView = [GingerMenuAccess]::InspectMatching($window, $processId)
+        } catch {
+            if ($_.Exception.GetBaseException() -isnot [GingerUiBusyException]) { throw }
+            if ($timer.Elapsed.TotalSeconds -ge 10) { throw }
+            Start-Sleep -Milliseconds 200
+            continue # Observe loading only; never invoke the menu again.
+        }
         if ($matchingView.Status -ne 'panels_not_verified') { break }
         Start-Sleep -Milliseconds 200
     } while ($timer.Elapsed.TotalSeconds -lt 10)

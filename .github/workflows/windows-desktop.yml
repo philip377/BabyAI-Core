@@ -16,23 +16,90 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "10.0.x"
+      - name: Test agent profiles and scoped matching decisions
+        shell: pwsh
+        run: dotnet run --project tests/AgentProfiles.Smoke/AgentProfiles.Smoke.csproj
+      - name: Test window restoration, DPI and work areas without desktop input
+        shell: pwsh
+        run: dotnet run --project tests/WindowFrame.Smoke/WindowFrame.Smoke.csproj -c Release
       - name: Test Ginger diagnostics subprocess safety
         # Runs only fixed synthetic subprocesses, not a live Ginger session.
         shell: pwsh
         run: dotnet run --project tests/GingerDiagnostics.Smoke/GingerDiagnostics.Smoke.csproj
+      - name: Test Ginger chat stages, confirmation, ratings, lessons and cancellation without desktop input
+        shell: pwsh
+        run: dotnet run --project tests/GingerChat.Smoke/GingerChat.Smoke.csproj
+      - name: Test saved-row lesson routing and chat isolation without desktop input
+        shell: pwsh
+        run: dotnet run --project tests/GingerDeferredLessonRouting.Smoke/GingerDeferredLessonRouting.Smoke.csproj -c Release
+      - name: Test durable comparison evidence before deferral without desktop input
+        shell: pwsh
+        run: dotnet run --project tests/GingerComparisonEvidence.Smoke/GingerComparisonEvidence.Smoke.csproj -c Release
+      - name: Test real chat scan orchestration and skipped-row context isolation
+        shell: pwsh
+        run: dotnet run --project tests/GingerChatScanRouting.Smoke/GingerChatScanRouting.Smoke.csproj -c Release
+      - name: Test bounded Ginger filter preparation and incomplete observation guards
+        shell: pwsh
+        run: dotnet run --project tests/GingerDesktopSession.Smoke/GingerDesktopSession.Smoke.csproj -c Release
+      - name: Test adaptive Qwen search decisions and stale input guards without desktop input
+        shell: pwsh
+        run: |
+          dotnet run --project tests/GingerReasonedFilter.Smoke/GingerReasonedFilter.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Adaptive search flow checks failed' }
+          dotnet run --project tests/GingerSearchPlanner.Smoke/GingerSearchPlanner.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Search planner binding checks failed' }
+      - name: Test grounded Ginger status and contextual follow-ups without desktop input
+        shell: pwsh
+        run: |
+          dotnet run --project tests/GingerTaskStatus.Smoke/GingerTaskStatus.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Ginger task status checks failed' }
+          dotnet run --project tests/GingerChatFollowUp.Smoke/GingerChatFollowUp.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Ginger follow-up checks failed' }
+          dotnet run --project tests/GingerChatStatusRouting.Smoke/GingerChatStatusRouting.Smoke.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Ginger status routing checks failed' }
+      - name: Test Ginger driver import preserves explicit confirmation
+        shell: powershell
+        run: ./tests/ginger-driver-import-smoke.ps1
       - name: Test Ginger semantic navigation on an isolated fixture
         shell: powershell
         run: ./tests/ginger-navigation-smoke.ps1
+      - name: Test bounded Ginger search observation without input
+        shell: powershell
+        run: ./tests/ginger-search-wait-smoke.ps1
+      - name: Test Ginger preparation snapshots and post-input reads without desktop access
+        shell: powershell
+        run: ./tests/ginger-desktop-prepare-smoke.ps1
+      - name: Test fresh candidate context before model-selected filters without desktop access
+        shell: powershell
+        run: ./tests/ginger-fresh-filter-context-smoke.ps1
+      - name: Test Ginger filter-only context without desktop access
+        shell: powershell
+        run: ./tests/ginger-filter-only-context-smoke.ps1
+      - name: Test bounded search-word reads without desktop access
+        shell: powershell
+        run: ./tests/ginger-search-word-read-smoke.ps1
+      - name: Test Ginger panel loading without repeating navigation
+        shell: powershell
+        run: ./tests/ginger-panel-wait-smoke.ps1
       - name: Test tab OCR preprocessing on synthetic images
         shell: powershell
         run: ./tests/ginger-tab-image-smoke.ps1
       - name: Install BabyAI Core package
         shell: pwsh
         run: python -m pip install -e ".[dev]"
+      - name: Test bounded filter-only planning without model or desktop input
+        shell: pwsh
+        run: python -m pytest tests/test_ginger_filter_only.py -q
+      - name: Test protected search settings and bounded research without external requests
+        shell: pwsh
+        run: python -m pytest tests/test_public_search_settings.py tests/test_ginger_bottle_research.py -q
+      - name: Test supplier lesson proposals and independent pair verification without desktop input
+        shell: pwsh
+        run: python -m pytest tests/test_ginger_teacher.py tests/test_ginger_source_teacher.py tests/test_ginger_search_teacher.py tests/test_ginger_search_roles.py tests/test_ginger_lesson_evidence.py tests/test_ginger_answer_reward.py tests/test_ginger_identity_evidence.py tests/test_ginger_volume_evidence.py tests/test_ginger_marking_evidence.py tests/test_ginger_marking_lessons.py -q
       - name: Test persistent Ginger queue controller guards
         # Uses synthetic files and rejects before live UI access.
         shell: pwsh
-        run: python -m pytest tests/test_ginger_price_queue.py tests/test_ginger_row_journal.py tests/test_ginger_filter_preflight.py tests/test_ginger_filter_plan.py tests/test_ginger_filter_relaxation.py tests/test_ginger_filter_controller.py tests/test_ginger_row_filter_prepare.py tests/test_ginger_row_review.py tests/test_ginger_review_queue.py tests/test_ginger_batch.py tests/test_ginger_search_session.py tests/test_ginger_candidate_review.py tests/test_ginger_review_report.py tests/test_ginger_review_feedback.py tests/test_ginger_review_form.py tests/test_ginger_product_condition.py tests/test_ginger_variant_evidence.py tests/test_ginger_batch_report.py -q
+        run: python -m pytest tests/test_agents_navigation_wiring.py tests/test_ginger_price_queue.py tests/test_ginger_row_journal.py tests/test_ginger_filter_preflight.py tests/test_ginger_filter_plan.py tests/test_ginger_filter_relaxation.py tests/test_ginger_filter_controller.py tests/test_ginger_row_filter_prepare.py tests/test_ginger_row_review.py tests/test_ginger_review_queue.py tests/test_ginger_batch.py tests/test_ginger_search_session.py tests/test_ginger_candidate_review.py tests/test_ginger_review_report.py tests/test_ginger_review_feedback.py tests/test_ginger_review_form.py tests/test_ginger_product_condition.py tests/test_ginger_variant_evidence.py tests/test_ginger_batch_report.py -q
       - name: Verify desktop bridge
         shell: pwsh
         env:
@@ -49,6 +116,17 @@ jobs:
           $exe = Get-ChildItem desktop/BabyAI.Desktop/bin/x64/Release -Filter BabyAI.Desktop.exe -File -Recurse | Select-Object -First 1
           if (-not $exe) { throw "BabyAI.Desktop.exe was not produced." }
           Write-Host "Runnable desktop executable: $($exe.FullName)"
+      - name: Compile Ginger driver from packaged application directory
+        shell: powershell
+        run: |
+          $testScript = (Resolve-Path tests/ginger-driver-import-smoke.ps1).Path
+          $exe = Get-ChildItem desktop/BabyAI.Desktop/bin/x64/Release -Filter BabyAI.Desktop.exe -File -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'Desktop executable missing' }
+          Push-Location $exe.DirectoryName
+          try {
+            & "$env:WINDIR/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -NonInteractive -STA -File $testScript
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged-directory Ginger compilation failed' }
+          } finally { Pop-Location }
       - name: Smoke-test Desktop startup
         shell: pwsh
         env:

@@ -155,16 +155,88 @@ async Task MustFail(string command, TimeSpan timeout, CancellationToken token)
     var failed = false;
     var watch = Stopwatch.StartNew();
     try { await GingerDiagnostics.RunAsync(Command(command), timeout, token); }
-    catch (Exception ex) when (ex is InvalidOperationException or IOException or InvalidDataException or OperationCanceledException)
+    catch (Exception ex) when (ex is InvalidOperationException or IOException or InvalidDataException or OperationCanceledException or TimeoutException)
     { failed = true; }
     if (!failed) throw new Exception("Expected failure");
     if (watch.Elapsed > TimeSpan.FromSeconds(15)) throw new Exception("Process cleanup hung");
 }
 
 await MustFail("exit 7", TimeSpan.FromSeconds(10), CancellationToken.None);
-await MustFail("Start-Sleep -Seconds 60", TimeSpan.FromMilliseconds(500), CancellationToken.None);
-using var cancel = new CancellationTokenSource(500);
-await MustFail("Start-Sleep -Seconds 60", TimeSpan.FromSeconds(30), cancel.Token);
+var failureFolder = Path.Combine(Path.GetTempPath(), "ginger-error-test-" + Guid.NewGuid().ToString("N"));
+try
+{
+    try
+    {
+        await GingerDiagnostics.RunAsync(Command("[Console]::Error.Write('synthetic-driver-reason'); exit 7"),
+            TimeSpan.FromSeconds(10), CancellationToken.None, failureFolder);
+        throw new Exception("Failed subprocess accepted");
+    }
+    catch (InvalidOperationException)
+    {
+        var reports = Directory.GetFiles(failureFolder, "subprocess-failure-*.json");
+        if (reports.Length != 1) throw new Exception("Missing failure report");
+        using var report = JsonDocument.Parse(File.ReadAllText(reports[0]));
+        if (report.RootElement.GetProperty("exit_code").GetInt32() != 7 ||
+            report.RootElement.GetProperty("stderr").GetString() != "synthetic-driver-reason")
+            throw new Exception("Original diagnostic lost");
+    }
+}
+finally { if (Directory.Exists(failureFolder)) Directory.Delete(failureFolder, true); }
+Console.WriteLine("PASS: original subprocess error and exit code retained locally");
+
+foreach (var (diagnostic, expected) in new[] {
+    ("Product selection changed", "Выделение товара в Ginger изменилось"),
+    ("Ginger UI is not responding; further input blocked", "Интерфейс Ginger не ответил вовремя") })
+{
+    try
+    {
+        await GingerDiagnostics.RunAsync(Command($"[Console]::Error.Write('{diagnostic}'); exit 1"),
+            TimeSpan.FromSeconds(10), CancellationToken.None);
+        throw new Exception("Failed driver accepted");
+    }
+    catch (InvalidOperationException ex)
+    {
+        if (!ex.Message.Contains(expected)) throw new Exception("Specific driver reason lost", ex);
+    }
+}
+
+var timeoutFolder = Path.Combine(Path.GetTempPath(), "ginger-timeout-test-" + Guid.NewGuid().ToString("N"));
+try
+{
+    try
+    {
+        await GingerDiagnostics.RunAsync(Command("Start-Sleep -Seconds 60"),
+            TimeSpan.FromMilliseconds(500), CancellationToken.None, timeoutFolder);
+        throw new Exception("Deadline accepted as completed output");
+    }
+    catch (TimeoutException ex)
+    {
+        if (!ex.Message.Contains("Результат не подтверждён")) throw new Exception("Missing unknown-outcome warning", ex);
+        var reports = Directory.GetFiles(timeoutFolder, "subprocess-failure-*.json");
+        if (reports.Length != 1) throw new Exception("Missing deadline diagnostic");
+        using var report = JsonDocument.Parse(File.ReadAllText(reports[0]));
+        if (report.RootElement.GetProperty("status").GetString() != "timeout" ||
+            report.RootElement.GetProperty("timeout_ms").GetDouble() != 500)
+            throw new Exception("Deadline diagnostic is incorrect");
+        try
+        {
+            using var child = Process.GetProcessById(report.RootElement.GetProperty("process_id").GetInt32());
+            if (!child.HasExited) throw new Exception("Timed-out child survived cleanup");
+        }
+        catch (ArgumentException) { } // The child no longer exists, as required.
+    }
+    using var cancel = new CancellationTokenSource(500);
+    try
+    {
+        await GingerDiagnostics.RunAsync(Command("Start-Sleep -Seconds 60"),
+            TimeSpan.FromSeconds(30), cancel.Token, timeoutFolder);
+        throw new Exception("User cancellation accepted as completed output");
+    }
+    catch (OperationCanceledException) when (cancel.IsCancellationRequested) { }
+    if (Directory.GetFiles(timeoutFolder, "subprocess-failure-*.json").Length != 1)
+        throw new Exception("User Stop incorrectly reported as a timeout");
+}
+finally { if (Directory.Exists(timeoutFolder)) Directory.Delete(timeoutFolder, true); }
 await MustFail("[Console]::Out.Write(('x' * 4100000)); Start-Sleep -Seconds 60",
     TimeSpan.FromSeconds(10), CancellationToken.None);
 await MustFail("[Console]::Error.Write(('x' * 4100000)); Start-Sleep -Seconds 60",

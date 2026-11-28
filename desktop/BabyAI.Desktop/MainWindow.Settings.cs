@@ -1,4 +1,4 @@
-using Microsoft.UI.Windowing;
+﻿using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -10,10 +10,23 @@ public sealed partial class MainWindow
 {
     private readonly DesktopUiSettingsStore _uiSettings = new();
 
-    private void Root_Loaded(object sender, RoutedEventArgs e)
+    private async void Root_Loaded(object sender, RoutedEventArgs e)
     {
         ApplyStoredUiSettings();
         _ = CheckForUpdatesOnStartupAsync();
+        if (Environment.GetCommandLineArgs().Contains("--ginger-read-check", StringComparer.Ordinal)
+            || Environment.GetCommandLineArgs().Contains("--ginger-prepare-check", StringComparer.Ordinal))
+        {
+            _expanded = true;
+            await ExpandPanelAsync();
+            GingerNavigationButton_Click(sender, e);
+        }
+        else if (Environment.GetCommandLineArgs().Contains("--agents", StringComparer.Ordinal))
+        {
+            _expanded = true;
+            await ExpandPanelAsync();
+            AgentsNavigationButton_Click(sender, e);
+        }
     }
 
     private void ApplyStoredUiSettings()
@@ -26,6 +39,8 @@ public sealed partial class MainWindow
 
     private async void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy || _gingerRunning) return;
+        InvalidateGingerChatContext();
         var contentHost = new ContentControl
         {
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -72,9 +87,11 @@ public sealed partial class MainWindow
         var generalButton = AddSection("Общие", BuildGeneralSettings);
         AddSection("Обновления", BuildUpdateSettings);
         AddSection("Мозг", BuildBrainSettings);
+        AddSection("Интернет-поиск", BuildSearchSettings);
         AddSection("Производительность", BuildPerformanceSettings);
         AddSection("История и проекты", BuildHistorySettings);
         AddSection("Интерфейс", BuildInterfaceSettings);
+        AddSection("Агенты и питомцы", BuildAgentSettings);
         AddSection("Диагностика", BuildDiagnosticsSettings);
 
         var layout = new Grid

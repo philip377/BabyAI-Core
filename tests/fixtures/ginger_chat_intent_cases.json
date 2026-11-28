@@ -1,0 +1,214 @@
+[
+  {
+    "message": "продолжим сопоставление?",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Продолжим сопоставление?!",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Продолжи сопоставлять товары",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Ну что, вернёмся к сопоставлению",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Давай дальше по прайсу",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Пора заняться сопоставлением",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Юникс, подбери соответствия товарам из прайса",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Можешь продолжить сопоставление?",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Продолжаем сверять номенклатуру",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Займись подбором кандидата для текущей строки",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Помоги сопоставить товар с нашей номенклатурой",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Надо бы вернуться к сопоставлению в Ginger",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Давай возобновим подбор кандидатов",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Продолжай сапоставлять товары",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Вернись к сверке номенклатуры, пожалуйста",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Приступай к сопоставлению текущей строки",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Можно тебя попросить продолжить сопоставлять товары?",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Погнали дальше сопоставлять прайс",
+    "expected": "prepare_matching"
+  },
+  {
+    "message": "Пока не продолжай сопоставление",
+    "expected": "other"
+  },
+  {
+    "message": "Продолжать сопоставление не нужно",
+    "expected": "other"
+  },
+  {
+    "message": "Как продолжить сопоставление?",
+    "expected": "other"
+  },
+  {
+    "message": "Ты умеешь сопоставлять товары?",
+    "expected": "other"
+  },
+  {
+    "message": "Он сказал: «Продолжи сопоставление»",
+    "expected": "other"
+  },
+  {
+    "message": "Завтра займись сопоставлением",
+    "expected": "other"
+  },
+  {
+    "message": "Продолжи сопоставление, когда я вернусь",
+    "expected": "other"
+  },
+  {
+    "message": "Если попрошу, продолжи сопоставление",
+    "expected": "other"
+  },
+  {
+    "message": "Продолжи сопоставление. Нет, подожди",
+    "expected": "other"
+  },
+  {
+    "message": "Кандидаты появились",
+    "expected": "other"
+  },
+  {
+    "message": "Сколько товаров уже сопоставлено?",
+    "expected": "other"
+  },
+  {
+    "message": "Прайс открыт",
+    "expected": "other"
+  },
+  {
+    "message": "Вчера мы сопоставляли товары",
+    "expected": "other"
+  },
+  {
+    "message": "Расскажи про Ginger",
+    "expected": "other"
+  },
+  {
+    "message": "Нужно исправить код сопоставления товаров",
+    "expected": "other"
+  },
+  {
+    "message": "Сравни цены поставщиков",
+    "expected": "other"
+  },
+  {
+    "message": "У поставщика слово подмят означает тестер",
+    "expected": "other"
+  },
+  {
+    "message": "продолжай",
+    "expected": "other"
+  },
+  {
+    "message": "Это пример фразы: давай продолжим сопоставление",
+    "expected": "other"
+  },
+  {
+    "message": "Я написал ему продолжи сопоставление",
+    "expected": "other"
+  },
+  {
+    "message": "Фраза давай продолжим сопоставление может звучать по-разному",
+    "expected": "other"
+  },
+  {
+    "message": "Я спросил, можем ли мы сопоставлять товары",
+    "expected": "other"
+  },
+  {
+    "message": "Чтобы продолжить сопоставление, нужна модель",
+    "expected": "other"
+  },
+  {
+    "message": "Нам нужно перестать сопоставлять товары",
+    "expected": "other"
+  },
+  {
+    "message": "Текущий прайс уже сопоставлен",
+    "expected": "other"
+  },
+  {
+    "message": "Давай сопоставлять цены товаров",
+    "expected": "other"
+  },
+  {
+    "message": "Сейчас в Ginger видна таблица кандидатов",
+    "expected": "other"
+  },
+  {
+    "message": "Нравится, что UNIX сопоставляет товары",
+    "expected": "other"
+  },
+  {
+    "message": "Сопоставь весь прайс",
+    "expected": "clarify"
+  },
+  {
+    "message": "Сопоставь десять товаров",
+    "expected": "clarify"
+  },
+  {
+    "message": "Сопоставь товар Roja Elysium",
+    "expected": "clarify"
+  },
+  {
+    "message": "Продолжи сопоставление и проведи заказ",
+    "expected": "clarify"
+  },
+  {
+    "message": "Подбери кандидата и сохрани документ",
+    "expected": "clarify"
+  },
+  {
+    "message": "Сопоставь прайс поставщика Ромашка",
+    "expected": "clarify"
+  },
+  {
+    "message": "Пожалуйста, займись текущей позицией прайса",
+    "expected": "clarify"
+  }
+]

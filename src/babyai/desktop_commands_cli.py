@@ -21,7 +21,14 @@ def main() -> None:
 @app.command("exec")
 def exec_command(command: str, payload: str = typer.Option("{}")) -> None:
     try:
-        data = json.loads(payload)
+        if command == "ginger.search.word.preview":
+            from .ginger_search_teacher import load_search_json
+            data = load_search_json(payload)
+        elif command == "ginger.teach.source.preview":
+            from .ginger_source_teacher import load_source_json
+            data = load_source_json(payload)
+        else:
+            data = json.loads(payload)
         if not isinstance(data, dict):
             raise ValueError("payload must be a JSON object")
         result = DesktopCommands().execute(command, data)

@@ -85,7 +85,7 @@ def test_desktop_stream_ui_owns_one_turn_and_rejects_ghost_deltas() -> None:
     assert window.index("RollbackAssistantTurn();", error_catch) < window.index("finally", error_catch)
 
     assert "OrbState.Answering" in window
-    assert "BabyAI · отвечаю" in adaptive
+    assert "UNIX · отвечаю" in adaptive
     assert 'value.Contains("отвеч")' in activity
     assert 'status.Contains("отвеч")' in elapsed
     assert "Desktop chat first fragment displayed" in window

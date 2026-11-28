@@ -7,7 +7,7 @@ $ErrorActionPreference='Stop'
 $intentPath=Join-Path $ReceiptDirectory 'intent.json'
 $intent=Get-Content -LiteralPath $intentPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'ginger-navigation.ps1'))
-Invoke-Expression $source.Substring(0,$source.IndexOf('$processes = @('))
+& ([scriptblock]::Create($source.Substring(0,$source.IndexOf('$processes = @('))))
 $p=@(Get-Process Ginger4 | Where-Object MainWindowHandle -ne 0)
 if($p.Count -ne 1 -or $p[0].Id -ne $intent.process_id -or [IO.Path]::GetFileName($p[0].Path) -ine 'Ginger4.exe'){throw 'Ginger process changed; no automatic recovery'}
 $observationDirectory=Join-Path $ReceiptDirectory ('observation-'+[guid]::NewGuid().ToString('N'))

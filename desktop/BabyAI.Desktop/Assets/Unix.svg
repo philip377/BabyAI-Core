@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>UNIX — orb and signal</title>
+  <desc>An original open U orbit with a detached signal point on a violet-blue orb. No fonts or external resources.</desc>
+  <defs>
+    <radialGradient id="orb" cx=".29" cy=".22" r=".95">
+      <stop offset="0" stop-color="#91a2ff"/>
+      <stop offset=".42" stop-color="#7966f0"/>
+      <stop offset=".78" stop-color="#5840c2"/>
+      <stop offset="1" stop-color="#31236f"/>
+    </radialGradient>
+    <linearGradient id="rim" x1=".1" y1="0" x2=".85" y2="1">
+      <stop offset="0" stop-color="#d6e5ff"/>
+      <stop offset=".5" stop-color="#a295ff"/>
+      <stop offset="1" stop-color="#6959bd"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="0" y1="0" x2=".7" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e2eaff"/>
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="232" fill="#30245e"/>
+  <circle cx="256" cy="253" r="226" fill="url(#orb)" stroke="url(#rim)" stroke-width="4"/>
+  <path d="M91 215C109 124 189 67 277 78C199 81 132 139 115 220Z" fill="#ffffff" opacity=".13"/>
+  <path d="M164 166V279C164 333 203 371 256 371S348 333 348 279V241"
+        fill="none" stroke="#2c2169" stroke-opacity=".22" stroke-width="50" stroke-linecap="round" transform="translate(0 7)"/>
+  <path d="M164 166V279C164 333 203 371 256 371S348 333 348 279V241"
+        fill="none" stroke="url(#signal)" stroke-width="48" stroke-linecap="round"/>
+  <circle cx="348" cy="163" r="27" fill="#c8f3ff"/>
+</svg>

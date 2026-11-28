@@ -262,6 +262,76 @@ class DesktopCommands:
                 "review": review,
             }
 
+        if command in {"ginger.answer.rate", "ginger.answer.revoke"}:
+            from .ginger_answer_reward import record_answer_rating, revoke_answer_rating
+            directory = self.config.data_dir / "ginger-answer-ratings"
+            if command == "ginger.answer.rate":
+                record = record_answer_rating(directory, payload.get("report"),
+                    points=payload.get("points"), user_feedback=payload.get("feedback"))
+            else:
+                record = revoke_answer_rating(directory, payload.get("answer_id"),
+                    user_feedback=payload.get("feedback"))
+            active = not (directory / (record["answer_id"] + ".revoked.json")).exists()
+            return {"ok": True, "answer_id": record["answer_id"], "rating_active": active}
+
+        if command == "ginger.intent.preview":
+            from .ginger_chat_intent import review_intent
+            return {"ok": True, "command": command,
+                    **review_intent(self._provider(), payload.get("message"))}
+
+        if command in {"web.search.status", "web.search.configure", "web.search.check"}:
+            from .public_search_settings import PublicSearchSettings
+            from .ginger_bottle_research import check_search
+            from .permissions import Capability
+            settings = PublicSearchSettings(self.config.data_dir)
+            if command == "web.search.status":
+                result = settings.status()
+            elif command == "web.search.configure":
+                result = settings.save(payload.get("mode"), api_key=payload.get("api_key"),
+                                       clear_key=payload.get("clear_key", False))
+            else:
+                permissions = PermissionStore(self.config.permissions_file)
+                if payload.get("allow_public_web") is not True:
+                    permissions.require(Capability.PUBLIC_WEB_READ)
+                with permissions.temporary_grant(Capability.PUBLIC_WEB_READ):
+                    permissions.require(Capability.PUBLIC_WEB_READ)
+                    result = check_search(settings)
+            return {"ok": True, "command": command, **result}
+
+        if command == "ginger.bottle.research":
+            from .ginger_bottle_research import research, validate_query
+            from .public_search_settings import PublicSearchSettings
+            from .permissions import Capability
+            query = validate_query(payload.get("query"))
+            # This command belongs to the trusted Desktop surface, not the
+            # model tool catalogue. A click grants one bounded research only.
+            permissions = PermissionStore(self.config.permissions_file)
+            if payload.get("allow_public_web") is not True:
+                permissions.require(Capability.PUBLIC_WEB_READ)
+            with permissions.temporary_grant(Capability.PUBLIC_WEB_READ):
+                permissions.require(Capability.PUBLIC_WEB_READ)
+                result = research(query, source_url=payload.get("source_url", ""),
+                                  provider_factory=self._provider,
+                                  settings=PublicSearchSettings(self.config.data_dir))
+            return {"ok": True, "command": command, **result}
+
+        if command == "ginger.search.word.preview":
+            from .ginger_search_teacher import consult_search_word, validate_search_payload
+            request = validate_search_payload(payload)
+            return {"ok": True, "command": command,
+                    **consult_search_word(self._provider(), request)}
+
+        if command == "ginger.teach.source.preview":
+            from .ginger_source_teacher import consult_source, validate_source_payload
+            request = validate_source_payload(payload)
+            return {"ok": True, "command": command,
+                    **consult_source(self._provider(), request)}
+
+        if command in {"ginger.teach.preview", "ginger.recognize.preview"}:
+            from .ginger_teacher import consult
+            return {"ok": True, "command": command,
+                    **consult(self._provider(), payload, recognize=command == "ginger.recognize.preview")}
+
         if command == "chat":
             message = str(payload.get("message", "")).strip()
             if not message:

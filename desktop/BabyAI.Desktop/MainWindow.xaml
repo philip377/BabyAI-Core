@@ -46,6 +46,7 @@
             <ColumnDefinition x:Name="PanelColumn" Width="0" />
         </Grid.ColumnDefinitions>
 
+        <Grid x:Name="OrbDock" Grid.Column="0" VerticalAlignment="Top">
         <Button x:Name="OrbButton"
                 Grid.Column="0"
                 Width="112"
@@ -57,11 +58,13 @@
                 PointerPressed="OrbButton_PointerPressed"
                 PointerMoved="OrbButton_PointerMoved"
                 PointerReleased="OrbButton_PointerReleased"
+                PointerCaptureLost="OrbButton_PointerCaptureLost"
                 Padding="0"
                 Background="Transparent"
                 BorderBrush="#26FFFFFF"
                 BorderThickness="1">
-            <Grid>
+            <Viewbox x:Name="OrbViewbox" Width="112" Height="112">
+            <Grid x:Name="OrbArtwork" Width="112" Height="112">
                 <Ellipse Width="110" Height="110" Fill="#130B0D13" Stroke="#24FFFFFF" StrokeThickness="1" />
                 <Ellipse x:Name="OrbGlow" Width="106" Height="106" Opacity="0.34" Fill="#697CFF" />
                 <Ellipse Width="98" Height="98" Opacity="0.45">
@@ -98,14 +101,16 @@
                            VerticalAlignment="Center"
                            Foreground="White" />
             </Grid>
+            </Viewbox>
         </Button>
+        </Grid>
 
         <Border x:Name="Panel"
                 Grid.Column="1"
                 Width="0"
                 Height="420"
-                Margin="6,0,0,0"
-                CornerRadius="28"
+                Margin="0"
+                CornerRadius="20"
                 Background="#E60E1016"
                 BorderBrush="Transparent"
                 BorderThickness="0"
@@ -119,12 +124,55 @@
             </Border.Transitions>
 
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition x:Name="NavigationColumn" Width="224" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <Border CornerRadius="28" Opacity="0.35">
+                <Grid Grid.Row="0" Grid.ColumnSpan="2" Height="56" Margin="8,0,6,0" ColumnSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid x:Name="HeaderOrbHost" Width="40" Height="40" VerticalAlignment="Center" />
+                    <Border x:Name="WindowDragHandle" Grid.Column="1" Background="Transparent"
+                            PointerPressed="WindowDragHandle_PointerPressed"
+                            ToolTipService.ToolTip="Перетащи окно · двойной щелчок — развернуть">
+                        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" Margin="4,0,0,0">
+                            <TextBlock Text="UNIX" FontSize="14" FontWeight="SemiBold" CharacterSpacing="90" Foreground="#FFF0F2FF" />
+                            <TextBlock Text="Личный помощник" FontSize="11" Foreground="#FF929BB2" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <Button Width="36" Height="32" CornerRadius="10" Padding="0"
+                                Style="{StaticResource IconButtonStyle}" Click="OrbButton_Click"
+                                AutomationProperties.Name="Компактный орб" ToolTipService.ToolTip="Компактный орб">
+                            <Ellipse Width="13" Height="13" Stroke="#FFBDC8FF" StrokeThickness="1.5" Fill="#287C8DFF" />
+                        </Button>
+                        <Button Width="36" Height="32" CornerRadius="10" Padding="0"
+                                Style="{StaticResource IconButtonStyle}" Click="WindowMinimize_Click"
+                                AutomationProperties.Name="Свернуть окно" ToolTipService.ToolTip="Свернуть на панель задач">
+                            <FontIcon Glyph="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                        </Button>
+                        <Button x:Name="WindowMaximizeButton" Width="36" Height="32" CornerRadius="10" Padding="0"
+                                Style="{StaticResource IconButtonStyle}" Click="WindowMaximize_Click"
+                                AutomationProperties.Name="Развернуть окно" ToolTipService.ToolTip="Развернуть на весь экран">
+                            <FontIcon x:Name="WindowMaximizeIcon" Glyph="&#xE922;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                        </Button>
+                        <Button Width="36" Height="32" CornerRadius="10" Padding="0"
+                                Style="{StaticResource IconButtonStyle}" Click="WindowHide_Click"
+                                AutomationProperties.Name="Скрыть в области уведомлений" ToolTipService.ToolTip="Скрыть в области уведомлений · UNIX продолжит работу">
+                            <FontIcon Glyph="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <Border Grid.Row="1" CornerRadius="20" Opacity="0.35">
                     <Border.Background>
                         <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
                             <GradientStop Color="#162B3350" Offset="0" />
@@ -134,10 +182,10 @@
                     </Border.Background>
                 </Border>
 
-                <Border x:Name="NavigationSurface" Grid.Column="0"
+                <Border x:Name="NavigationSurface" Grid.Row="1" Grid.Column="0"
                         Margin="8"
                         Padding="4,8"
-                        CornerRadius="21"
+                        CornerRadius="16"
                         Background="#4807080D"
                         BorderBrush="#12FFFFFF"
                         BorderThickness="1">
@@ -184,8 +232,9 @@
                                     Height="34"
                                     Padding="0"
                                     CornerRadius="10"
-                                    Content="‹"
-                                    FontSize="19"
+                                    Content="&#xE76B;"
+                                    FontFamily="Segoe MDL2 Assets"
+                                    FontSize="12"
                                     Style="{StaticResource IconButtonStyle}"
                                     Click="NavigationToggleButton_Click"
                                     AutomationProperties.Name="Свернуть навигацию"
@@ -249,7 +298,7 @@
                             </Button>
                             <Button x:Name="GingerNavigationButton"
                                     Style="{StaticResource NavigationButtonStyle}"
-                                    Click="GingerNavigationButton_Click"
+                                    Click="AgentsNavigationButton_Click"
                                     AutomationProperties.Name="Агенты"
                                     ToolTipService.ToolTip="Агенты UNIX">
                                 <StackPanel Orientation="Horizontal" Spacing="11">
@@ -283,7 +332,7 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Column="1" Padding="20,20,20,18" RowSpacing="14">
+                <Grid Grid.Row="1" Grid.Column="1" Padding="18,10,18,18" RowSpacing="14">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
@@ -302,8 +351,8 @@
                         <StackPanel Grid.Column="0" Spacing="3">
                             <StackPanel Orientation="Horizontal" Spacing="7">
                                 <Ellipse Width="7" Height="7" Fill="#FF8F9CFF" VerticalAlignment="Center" />
-                                <TextBlock Text="UNIX"
-                                           FontSize="21"
+                                <TextBlock Text="Чат"
+                                           FontSize="19"
                                            FontWeight="SemiBold"
                                            CharacterSpacing="35"
                                            Foreground="#FFF7F8FC" />
@@ -331,20 +380,13 @@
                                 Click="DetailsButton_Click"
                                 ToolTipService.ToolTip="Диагностика" />
 
-                        <Button Grid.Column="2"
-                                Width="32"
-                                Height="32"
-                                Padding="0"
-                                CornerRadius="16"
-                                Content="‹"
-                                FontSize="18"
-                                Style="{StaticResource IconButtonStyle}"
-                                VerticalAlignment="Top"
-                                Click="OrbButton_Click"
-                                ToolTipService.ToolTip="Свернуть" />
                     </Grid>
 
                     <Grid Grid.Row="1" ColumnSpacing="8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
@@ -387,6 +429,23 @@
                                 Style="{StaticResource IconButtonStyle}"
                                 Click="RetryButton_Click"
                                 Visibility="Collapsed" />
+                        <Button x:Name="GingerDeferredButton"
+                                Grid.Row="1" Grid.ColumnSpan="3"
+                                Margin="0,8,0,0" Padding="10,6" CornerRadius="11"
+                                HorizontalAlignment="Left"
+                                Style="{StaticResource IconButtonStyle}"
+                                IsEnabled="{Binding IsEnabled, ElementName=SendButton}"
+                                Loaded="GingerDeferredButton_Loaded"
+                                Click="GingerDeferredButton_Click"
+                                AutomationProperties.Name="Отложенные позиции">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="Отложенные позиции" FontSize="11" VerticalAlignment="Center" />
+                                <Border Background="#257C8DFF" CornerRadius="8" MinWidth="22" Padding="5,1">
+                                    <TextBlock x:Name="GingerDeferredCount" Text="…" FontSize="10"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                            </StackPanel>
+                        </Button>
                     </Grid>
 
                     <Border Grid.Row="2"
@@ -396,9 +455,86 @@
                         <ScrollViewer x:Name="ConversationScroller"
                                       VerticalScrollBarVisibility="Auto"
                                       HorizontalScrollBarVisibility="Disabled">
-                            <StackPanel x:Name="ConversationStack"
-                                        Padding="2,2,6,2"
-                                        Spacing="4" />
+                            <StackPanel Spacing="8">
+                                <StackPanel x:Name="ConversationStack"
+                                            Padding="2,2,6,2"
+                                            Spacing="4" />
+                                <Border x:Name="GingerChatActivity" Visibility="Collapsed"
+                                        Background="#141D2437" CornerRadius="12" Padding="12">
+                                    <StackPanel Orientation="Horizontal" Spacing="9">
+                                        <StackPanel Orientation="Horizontal" Spacing="3" VerticalAlignment="Center">
+                                            <Ellipse x:Name="GingerStepDot1" Width="5" Height="5" Fill="#FF8F9CFF" />
+                                            <Ellipse x:Name="GingerStepDot2" Width="5" Height="5" Fill="#FF8F9CFF" />
+                                            <Ellipse x:Name="GingerStepDot3" Width="5" Height="5" Fill="#FF8F9CFF" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="GingerChatStageText" Text="Агент Ginger"
+                                                   FontSize="12" TextWrapping="Wrap" MaxWidth="320"
+                                                   AutomationProperties.LiveSetting="Polite" />
+                                    </StackPanel>
+                                </Border>
+                                <Border x:Name="GingerChatConfirmationCard" Visibility="Collapsed"
+                                        Background="#141D2437" CornerRadius="12" Padding="12">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="Проверка пары Ginger" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="GingerChatPairText" TextWrapping="Wrap"
+                                                   IsTextSelectionEnabled="True" />
+                                        <TextBlock Text="Проверь полные названия. Подтверждение разрешает одну привязку в открытом прайсе."
+                                                   FontSize="12" TextWrapping="Wrap" />
+                                        <Button x:Name="GingerChatConfirmButton" Content="Сопоставить эту пару"
+                                                Click="GingerChatConfirm_Click" />
+                                        <Button x:Name="GingerChatRejectButton" Content="Отклонить пару"
+                                                Click="GingerChatReject_Click" />
+                                    </StackPanel>
+                                </Border>
+                                <Expander x:Name="GingerBottleCard" Visibility="Collapsed"
+                                          Header="Флакон и упаковка — интернет-проверка" HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Stretch">
+                                    <StackPanel Spacing="10">
+                                        <TextBox x:Name="GingerBottleQuery" Header="Название для поиска" MaxLength="240" />
+                                        <TextBox x:Name="GingerBottleUrl" Header="Ссылка на страницу, если уже есть" MaxLength="2048" PlaceholderText="https://…" />
+                                        <TextBlock Text="В интернет уйдёт только указанное название. Фотографии и описания не подтверждают автоматически соответствие товару."
+                                                   FontSize="12" TextWrapping="Wrap" />
+                                        <Button x:Name="GingerBottleSearchButton" Content="Найти флакон в интернете" Click="GingerBottleSearch_Click" />
+                                        <TextBlock x:Name="GingerBottleStatus" TextWrapping="Wrap" IsTextSelectionEnabled="True" AutomationProperties.LiveSetting="Polite" />
+                                        <StackPanel x:Name="GingerBottleSources" Spacing="18" />
+                                    </StackPanel>
+                                </Expander>
+                                <Expander x:Name="GingerChatReviewCard" Visibility="Collapsed"
+                                          Header="Оценить ответ UNIX" HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Stretch">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock x:Name="GingerChatReviewSource" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                        <ComboBox x:Name="GingerChatScore" Header="Оценка ответа от 0 до 10"
+                                                  PlaceholderText="Выбери оценку" HorizontalAlignment="Stretch" />
+                                        <TextBox x:Name="GingerChatFeedback" Header="Пояснение к оценке / причина отзыва"
+                                                 MaxLength="4000" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" MaxHeight="160" />
+                                        <Button x:Name="GingerChatRateButton" Content="Сохранить оценку ответа" Click="GingerChatRate_Click" />
+                                        <Button x:Name="GingerChatRevokeRatingButton" Content="Отозвать оценку" Click="GingerChatRevokeRating_Click" />
+                                        <TextBlock x:Name="GingerChatRatingStatus" TextWrapping="Wrap" FontSize="12" AutomationProperties.LiveSetting="Polite" />
+                                    </StackPanel>
+                                </Expander>
+                                <Expander x:Name="GingerChatLessonCard" Visibility="Collapsed"
+                                          Header="Объяснить UNIX" HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Stretch">
+                                    <StackPanel Spacing="10">
+                                        <TextBlock x:Name="GingerChatLessonSource" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                        <TextBlock x:Name="GingerChatSavedLesson" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                        <ComboBox x:Name="GingerChatLessonSelector" Header="Объяснения поставщика" HorizontalAlignment="Stretch"
+                                                  SelectionChanged="GingerChatLessonSelector_Changed" />
+                                        <TextBlock Text="Новое объяснение добавляется к действующим. Для исправления или отзыва выбери отдельный урок. При проверке UNIX учитывает их вместе."
+                                                   TextWrapping="Wrap" FontSize="12" />
+                                        <TextBox x:Name="GingerChatLessonText" Header="Твоё объяснение"
+                                                 MaxLength="4000" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" MaxHeight="160"
+                                                 TextChanged="GingerChatLessonText_Changed" />
+                                        <Button x:Name="GingerChatPreviewLessonButton" Content="Проверить понимание" Click="GingerChatPreviewLesson_Click" />
+                                        <TextBox x:Name="GingerChatLessonPreview" Header="Как UNIX понял объяснение"
+                                                 IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="200" />
+                                        <Button x:Name="GingerChatSaveLessonButton" Content="Понимание верно — сохранить урок" Click="GingerChatSaveLesson_Click" />
+                                        <Button x:Name="GingerChatRevokeLessonButton" Content="Отозвать выбранный урок" Click="GingerChatRevokeLesson_Click" />
+                                        <TextBlock x:Name="GingerChatLessonStatus" TextWrapping="Wrap" FontSize="12" AutomationProperties.LiveSetting="Polite" />
+                                    </StackPanel>
+                                </Expander>
+                            </StackPanel>
                         </ScrollViewer>
                     </Border>
 
@@ -452,13 +588,15 @@
                                     Height="40"
                                     Padding="0"
                                     CornerRadius="20"
-                                    Content="↑"
                                     FontSize="20"
                                     FontWeight="SemiBold"
                                     Style="{StaticResource PrimaryCircleButtonStyle}"
                                     VerticalAlignment="Bottom"
                                     Click="SendButton_Click"
-                                    ToolTipService.ToolTip="Отправить · Enter" />
+                                    ToolTipService.ToolTip="Отправить · Enter">
+                                <Path Data="M 1,7 L 7,1 L 13,7 M 7,1 L 7,15"
+                                      Stroke="#FF11131A" StrokeThickness="1.8" Width="14" Height="16" />
+                            </Button>
 
                             <Button x:Name="StopButton"
                                     Grid.Column="3"
@@ -466,13 +604,14 @@
                                     Height="40"
                                     Padding="0"
                                     CornerRadius="20"
-                                    Content="■"
                                     FontSize="12"
                                     Style="{StaticResource IconButtonStyle}"
                                     Click="StopButton_Click"
                                     VerticalAlignment="Bottom"
                                     ToolTipService.ToolTip="Остановить"
-                                    Visibility="Collapsed" />
+                                    Visibility="Collapsed">
+                                <Rectangle Width="10" Height="10" RadiusX="2" RadiusY="2" Fill="#FFF2F4FF" />
+                            </Button>
                         </Grid>
                     </Border>
 
