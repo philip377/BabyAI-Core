@@ -92,7 +92,7 @@ jobs:
         run: python -m pytest tests/test_public_search_settings.py tests/test_ginger_bottle_research.py -q
       - name: Test supplier lesson proposals and independent pair verification without desktop input
         shell: pwsh
-        run: python -m pytest tests/test_ginger_teacher.py tests/test_ginger_source_teacher.py tests/test_ginger_search_teacher.py tests/test_ginger_lesson_evidence.py tests/test_ginger_answer_reward.py tests/test_ginger_identity_evidence.py tests/test_ginger_volume_evidence.py tests/test_ginger_marking_evidence.py tests/test_ginger_marking_lessons.py -q
+        run: python -m pytest tests/test_ginger_teacher.py tests/test_ginger_source_teacher.py tests/test_ginger_search_teacher.py tests/test_ginger_search_roles.py tests/test_ginger_lesson_evidence.py tests/test_ginger_answer_reward.py tests/test_ginger_identity_evidence.py tests/test_ginger_volume_evidence.py tests/test_ginger_marking_evidence.py tests/test_ginger_marking_lessons.py -q
       - name: Test persistent Ginger queue controller guards
         # Uses synthetic files and rejects before live UI access.
         shell: pwsh

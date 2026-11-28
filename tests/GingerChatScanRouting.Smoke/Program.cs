@@ -383,7 +383,7 @@ internal static class ScanRoutingTests
 
     private static async Task ModelSearchRoutesThroughChat()
     {
-        foreach (var mode in new[] { "selected", "manual", "changed-chat", "failed" })
+        foreach (var mode in new[] { "selected", "manual", "blocked", "legacy", "bad-evidence", "changed-chat", "failed" })
         {
             using var fixture = new Fixture(count: 2);
             var before = ReplaceCandidates(fixture, 20);
@@ -396,10 +396,23 @@ internal static class ScanRoutingTests
             fixture.Bridge.SearchReply = request => {
                 if (mode == "failed") throw new InvalidDataException("Synthetic model failure");
                 if (mode == "changed-chat") fixture.Bridge.CurrentChat = "another-chat";
+                var requestId = request.GetProperty("request_id").GetString();
+                if (mode == "legacy") return JsonSerializer.SerializeToElement(new {
+                    ok = true, command = "ginger.search.word.preview", mode = "search_word",
+                    request_id = requestId, word = "Synthetic", reason = "Legacy model rationale", can_match = false
+                });
+                var reason = mode == "blocked" ? "Synthetic veto: conflicting definitions" : "Synthetic model rationale";
                 return JsonSerializer.SerializeToElement(new {
                     ok = true, command = "ginger.search.word.preview", mode = "search_word",
-                    request_id = request.GetProperty("request_id").GetString(),
-                    word = mode == "manual" ? null : "Synthetic", reason = "Synthetic model rationale", can_match = false
+                    request_id = requestId, word = mode is "manual" or "blocked" ? null : "Synthetic", reason, can_match = false,
+                    search_evidence = new {
+                        version = 1, definitions = Array.Empty<object>(),
+                        blocked_reason = mode == "blocked" ? reason : null,
+                        proposal = new { request_id = mode == "bad-evidence" ? new string('0', 32) : requestId,
+                            word = mode == "manual" ? null : "Synthetic", role = mode == "manual" ? "unknown" : "name",
+                            source_quote = mode == "manual" ? "" : request.GetProperty("source").GetString(),
+                            reason = "Synthetic model rationale" }
+                    }
                 });
             };
             await fixture.Run();
@@ -417,6 +430,17 @@ internal static class ScanRoutingTests
                 Check(fixture.Scenario.FilterActions == 0 && fixture.Bridge.Comparisons.Count == 0 &&
                     fixture.Scenario.NextPositions.Count == 0 && fixture.Store.Read().Count == 0,
                     "Rejected model search clicked, compared, deferred or advanced");
+                var saved = Directory.GetFiles(before.Directory, "search-decision-*.json");
+                Check(saved.Length == (mode is "manual" or "blocked" ? 1 : 0),
+                    "Invalid evidence was saved or valid refusal/veto lost its journal");
+                if (mode == "blocked")
+                {
+                    using var record = JsonDocument.Parse(File.ReadAllText(saved.Single()));
+                    var result = record.RootElement.GetProperty("result");
+                    Check(result.GetProperty("word").ValueKind == JsonValueKind.Null &&
+                        result.GetProperty("search_evidence").GetProperty("proposal").GetProperty("word").GetString() == "Synthetic",
+                        "Veto journal lost the original non-actionable proposal");
+                }
                 NoCards(fixture);
             }
             Released(fixture);

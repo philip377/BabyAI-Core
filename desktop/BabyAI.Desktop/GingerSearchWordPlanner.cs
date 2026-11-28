@@ -60,7 +60,7 @@ internal sealed class GingerSearchWordPlanner(
     {
         GingerDesktopObservation.Object(result);
         var required = new HashSet<string>(StringComparer.Ordinal) {
-            "ok", "command", "mode", "request_id", "word", "reason", "can_match"
+            "ok", "command", "mode", "request_id", "word", "reason", "can_match", "search_evidence"
         };
         foreach (var field in result.EnumerateObject())
         {
@@ -76,12 +76,74 @@ internal sealed class GingerSearchWordPlanner(
             GingerDesktopObservation.Text(result, "mode", 32) != "search_word" ||
             GingerDesktopObservation.Text(result, "request_id", 32) != requestId) throw Invalid();
         var reason = GingerDesktopObservation.Text(result, "reason", 600);
-        var value = result.GetProperty("word");
-        if (value.ValueKind == JsonValueKind.Null) return new(null, reason);
-        var word = GingerDesktopObservation.Text(result, "word", 512);
+        var word = NullableText(result, "word", 512);
+        RequireEvidence(result.GetProperty("search_evidence"), requestId, word, reason);
+        if (word is null) return new(null, reason);
         GingerDesktopFilterFlow.RequireDisabledWord(observed, word);
         if (history.Any(effect => effect.Word == word)) throw Invalid();
         return new(word, reason);
+    }
+
+    // The worker grounds literal quotes against its inputs. This boundary checks
+    // the entire evidence envelope, and never turns a veto into an actionable word.
+    private static void RequireEvidence(JsonElement evidence, string requestId, string? word, string reason)
+    {
+        RequireFields(evidence, "version", "definitions", "proposal", "blocked_reason");
+        var version = GingerDesktopObservation.Field(evidence, "version", JsonValueKind.Number);
+        if (!version.TryGetInt32(out var number) || number != 1) throw Invalid();
+        var definitions = GingerDesktopObservation.Field(evidence, "definitions", JsonValueKind.Array);
+        if (definitions.GetArrayLength() > 24) throw Invalid();
+        foreach (var definition in definitions.EnumerateArray())
+        {
+            RequireFields(definition, "term", "role", "quote");
+            GingerDesktopObservation.Text(definition, "term", 200);
+            Role(definition);
+            GingerDesktopObservation.Text(definition, "quote", 1000);
+        }
+
+        var blockedReason = NullableText(evidence, "blocked_reason", 600);
+        var proposal = evidence.GetProperty("proposal");
+        if (proposal.ValueKind == JsonValueKind.Null)
+        {
+            if (word is not null || blockedReason is null || reason != blockedReason) throw Invalid();
+            return;
+        }
+        RequireFields(proposal, "request_id", "word", "role", "source_quote", "reason");
+        if (GingerDesktopObservation.Text(proposal, "request_id", 32) != requestId) throw Invalid();
+        var proposedWord = NullableText(proposal, "word", 512);
+        var proposedRole = Role(proposal);
+        var sourceQuote = GingerDesktopObservation.Text(proposal, "source_quote", 2000, allowEmpty: true);
+        var proposedReason = GingerDesktopObservation.Text(proposal, "reason", 600);
+        if (proposedWord is null && (proposedRole != "unknown" || sourceQuote.Length != 0)) throw Invalid();
+        if (proposedWord is not null && string.IsNullOrWhiteSpace(sourceQuote)) throw Invalid();
+        if (blockedReason is not null)
+        {
+            if (word is not null || reason != blockedReason) throw Invalid();
+            return;
+        }
+        if (word != proposedWord || reason != proposedReason ||
+            (word is not null && proposedRole is not ("brand" or "name" or "variant"))) throw Invalid();
+    }
+
+    private static void RequireFields(JsonElement value, params string[] names)
+    {
+        GingerDesktopObservation.Object(value);
+        var required = new HashSet<string>(names, StringComparer.Ordinal);
+        foreach (var field in value.EnumerateObject())
+            if (!required.Remove(field.Name)) throw Invalid();
+        if (required.Count != 0) throw Invalid();
+    }
+
+    private static string? NullableText(JsonElement parent, string name, int limit)
+        => parent.GetProperty(name).ValueKind == JsonValueKind.Null
+            ? null : GingerDesktopObservation.Text(parent, name, limit);
+
+    private static string Role(JsonElement parent)
+    {
+        var role = GingerDesktopObservation.Text(parent, "role", 32);
+        if (role is not ("brand" or "name" or "variant" or "packaging" or "service" or
+            "concentration" or "volume" or "tester" or "gender" or "unknown")) throw Invalid();
+        return role;
     }
 
     private static InvalidDataException Invalid() => new("Ответ Qwen о звёздочке не подтверждён. Поиск остановлен без подстановки другого слова.");
