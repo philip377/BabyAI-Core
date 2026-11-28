@@ -19,13 +19,16 @@ REQUEST = dict(
            dict(word="NOCTURNE", search='Поиск: "NOCTURNE"', checked=None)],
     candidate_count=278, history=[],
 )
-REPLY = dict(request_id=REQUEST["request_id"], word="NOCTURNE", role="name", source_quote="NOCTURNE",
+REPLY = dict(request_id=REQUEST["request_id"], word="NOCTURNE", role="name",
              reason="Различающее слово полного названия.")
 
 
 def expected_reply(reply=REPLY):
+    reason = ("Предлагаю слово «" + reply["word"] + "». Роль по оценке Qwen: название. "
+              "Слово есть в прочитанном названии. Результат фильтра ещё не проверен.")
     return dict(mode="search_word", can_match=False, request_id=reply["request_id"], word=reply["word"],
-                reason=reply["reason"], search_evidence=dict(version=1, definitions=[], proposal=reply,
+                reason=reason, search_evidence=dict(version=2, definitions=[], proposal=reply,
+                                                          source_evidence=dict(origin="observed_source", derived_by="host", quote=reply["word"]),
                                                           blocked_reason=None))
 
 
@@ -43,7 +46,7 @@ class Model:
 
 def model_reply(**changes):
     if "word" in changes and changes["word"] is None:
-        changes = dict(role="unknown", source_quote="") | changes
+        changes = dict(role="unknown") | changes
     return Model(json.dumps(REPLY | changes, ensure_ascii=False))
 
 
@@ -73,7 +76,7 @@ def test_unique_unchecked_arbitrary_word_and_exact_id_are_preserved(checked):
     request["request_id"] = "ABCDEF0123456789ABCDEF0123456789"
     request["words"][1] = dict(word="Ω83 / nuit", search="", checked=checked)
     request["source"] = "ARVENA Ω83 / nuit 50ml"
-    reply = REPLY | dict(request_id=request["request_id"], word="Ω83 / nuit", source_quote="Ω83 / nuit")
+    reply = REPLY | dict(request_id=request["request_id"], word="Ω83 / nuit")
     assert consult_search_word(Model(json.dumps(reply)), request) == expected_reply(reply)
 
 
@@ -246,7 +249,9 @@ def test_reason_requires_bounded_nonempty_text(reason):
 
 
 def test_exact_reason_limit_is_accepted():
-    assert consult_search_word(model_reply(reason="Я" * 600), REQUEST)["reason"] == "Я" * 600
+    result = consult_search_word(model_reply(reason="Я" * 600), REQUEST)
+    assert result["search_evidence"]["proposal"]["reason"] == "Я" * 600
+    assert "Я" * 600 not in result["reason"] and "по оценке Qwen" in result["reason"]
 
 
 @pytest.mark.parametrize("raw", ["", " ", "{", "x" * 10_001,

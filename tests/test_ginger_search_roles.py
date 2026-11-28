@@ -14,7 +14,7 @@ REQUEST = dict(request_id="abcd" * 8, supplier="Synthetic", source="Lunora Quiet
 
 def proposal(word="Quiet", role="name", **changes):
     return dict(request_id=REQUEST["request_id"], word=word, role=role,
-                source_quote=REQUEST["source"], reason="Слово названия из исходной строки.") | changes
+                reason="Слово названия из исходной строки.") | changes
 
 
 class Script:
@@ -45,7 +45,8 @@ def test_different_words_with_different_roles_are_compatible_and_all_evidence_su
              rule("Red Case", "packaging", "Red Case — упаковка, не название.")]
     result, model = run_with_rules(rules)
     assert result["word"] == "Quiet" and result["can_match"] is False
-    assert result["search_evidence"] == dict(version=1, definitions=rules, proposal=proposal(), blocked_reason=None)
+    assert result["search_evidence"] == dict(version=2, definitions=rules, proposal=proposal(),
+        source_evidence=dict(origin="observed_source", derived_by="host", quote="Quiet"), blocked_reason=None)
     assert len(model.calls) == 2
     assert model.calls[0] == dict(lesson="\n".join(r["quote"] for r in rules))
     assert "source" not in model.calls[0] and "words" not in model.calls[0]
@@ -69,8 +70,8 @@ def test_nested_name_and_variant_do_not_create_false_conflict():
 
 
 @pytest.mark.parametrize("source", [REQUEST["source"], REQUEST["source"].upper()])
-def test_broad_source_quote_cannot_hide_packaging_veto_even_when_model_calls_it_name(source):
-    chosen = proposal("Case", source_quote=source)
+def test_host_source_evidence_cannot_override_packaging_veto_even_when_model_calls_it_name(source):
+    chosen = proposal("Case")
     result, model = run_with_rules([rule("Red Case", "packaging", "Red Case — только упаковка.")],
                                   chosen, source=source)
     assert result["word"] is None and "упаковка" in result["reason"]
@@ -104,19 +105,20 @@ def test_generic_attribute_cannot_pass_as_name_even_with_literal_citation(word):
     request = REQUEST | dict(source="Lunora Zephra " + word,
                              words=[dict(word=word, search=word, checked=False),
                                     dict(word="Zephra", search="", checked=False)])
-    model = Script(proposal(word, source_quote=word))
+    model = Script(proposal(word))
     assert consult_search_word(model, request)["word"] is None
     assert len(model.calls) == 1
     assert model.calls[0]["eligible_words"] == ["Zephra"]
 
 
 def test_empty_lesson_does_not_extract_and_model_refusal_is_not_reported_as_verified_conflict():
-    chosen = proposal(None, "unknown", source_quote="", reason="Уроки конфликтуют: EDP — упаковка.")
+    chosen = proposal(None, "unknown", reason="Уроки конфликтуют: EDP — упаковка.")
     model = Script(chosen)
     result = consult_search_word(model, REQUEST)
     assert result["word"] is None and "конфликт" not in result["reason"]
     assert "Qwen не предложила" in result["reason"]
     assert result["search_evidence"]["proposal"]["reason"] == chosen["reason"]
+    assert result["search_evidence"]["source_evidence"] is None
     assert len(model.calls) == 1 and model.calls[0]["definitions"] == []
 
 
@@ -136,15 +138,15 @@ def test_bad_lesson_evidence_never_reaches_choice(raw_rules):
 
 @pytest.mark.parametrize("change", [dict(source_quote="made up"), dict(source_quote="River"),
     dict(source_quote=""), dict(source_quote=REQUEST["source"].upper()), dict(role="NAME"),
-    dict(role=True), dict(word=None), dict(word=None, role="unknown"), dict(source_quote="x" * 2001)])
-def test_invalid_choice_proof_fails_closed(change):
+    dict(role=True), dict(word=None), dict(source_evidence={}), dict(source_quote="x" * 2001)])
+def test_old_proof_fields_and_invalid_choice_fail_closed(change):
     with pytest.raises(ValueError):
         consult_search_word(Script(proposal(**change)), REQUEST)
 
 
 def test_source_quote_must_not_clip_word_inside_longer_source_token():
     with pytest.raises(ValueError):
-        consult_search_word(Script(proposal(source_quote="Quiet")), REQUEST | dict(source="Quietly River"))
+        consult_search_word(Script(proposal()), REQUEST | dict(source="Quietly River"))
 
 
 def test_augmented_request_is_bounded_without_truncating_lessons_or_retrying():
@@ -173,3 +175,52 @@ def test_no_eligible_word_skips_inference_and_never_fabricates_a_proposal():
     result = consult_search_word(model, request)
     assert result["word"] is None and "Нет допустимого" in result["reason"]
     assert result["search_evidence"]["proposal"] is None and not model.calls
+    assert result["search_evidence"]["source_evidence"] is None
+
+
+@pytest.mark.parametrize("word,source,expected", [
+    ("Quiet", "Lunora Quiet River", "Quiet"),
+    ("Quiet", "Lunora QUIET River", "QUIET"),
+    ("Лист", "🧪 Lunora лист 50ml", "лист"),
+    ("Ω83 / nuit", "Lunora (Ω83 / NUIT) 50ml", "Ω83 / NUIT"),
+    ("Nüit", "Lunora NÜIT 50ml", "NÜIT"),
+])
+def test_host_derives_literal_source_case_and_does_not_change_model_proposal(word, source, expected):
+    chosen = proposal(word, reason="Гарантированно уникален; я уже нашёл товар.")
+    request = REQUEST | dict(source=source, words=[dict(word=word, search="", checked=False)])
+    result = consult_search_word(Script(chosen), request)
+    assert result["word"] == word and result["can_match"] is False
+    evidence = result["search_evidence"]
+    assert evidence["proposal"] == chosen and "source_quote" not in evidence["proposal"]
+    assert evidence["source_evidence"] == dict(origin="observed_source", derived_by="host", quote=expected)
+    assert "уникален" not in result["reason"] and "нашёл" not in result["reason"]
+    assert "по оценке Qwen" in result["reason"] and "ещё не проверен" in result["reason"]
+
+
+def test_lesson_definition_stays_separate_from_computed_source_word():
+    quote = "Quiet River — название, оба слова важны."
+    chosen = proposal("River", reason=quote)
+    result, model = run_with_rules([rule("Quiet River", "name", quote)], chosen)
+    evidence = result["search_evidence"]
+    assert result["word"] == "River" and evidence["source_evidence"]["quote"] == "River"
+    assert evidence["definitions"][0]["quote"] == quote
+    assert evidence["proposal"]["reason"] == quote and quote not in result["reason"]
+    assert len(model.calls) == 2
+
+
+def test_one_clean_source_occurrence_does_not_hide_a_blocked_occurrence():
+    result, _ = run_with_rules([rule("Red Case", "packaging", "Red Case — упаковка.")], proposal("Case"),
+                              source="Lunora Quiet Case Red Case 50ml")
+    assert result["word"] is None and "упаковка" in result["reason"]
+    assert result["search_evidence"]["source_evidence"]["quote"] == "Case"
+
+
+def test_role_and_word_are_checked_even_when_an_exact_source_span_exists():
+    request = REQUEST | dict(history=[dict(word="Quiet", before_count=180, after_count=90)])
+    with pytest.raises(ValueError, match="Повтор"):
+        consult_search_word(Script(proposal()), request)
+    request = REQUEST | dict(words=REQUEST["words"] + [dict(word="Quiet", search="", checked=False)])
+    with pytest.raises(ValueError, match="неоднозначно"):
+        consult_search_word(Script(proposal()), request)
+    result = consult_search_word(Script(proposal(role="service")), REQUEST)
+    assert result["word"] is None and result["search_evidence"]["source_evidence"]["quote"] == "Quiet"

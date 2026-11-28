@@ -6,7 +6,7 @@ import re
 _REQUEST_FIELDS = {"request_id", "supplier", "source", "lesson", "words", "candidate_count", "history"}
 _WORD_FIELDS = {"word", "search", "checked"}
 _HISTORY_FIELDS = {"word", "before_count", "after_count"}
-_RESPONSE_FIELDS = {"request_id", "word", "role", "source_quote", "reason"}
+_RESPONSE_FIELDS = {"request_id", "word", "role", "reason"}
 _MAX_COUNT = 2_147_483_647
 _IDENTITY_ROLES = {"brand", "name", "variant"}
 _ROLES = _IDENTITY_ROLES | {"packaging", "service", "concentration", "volume", "tester", "gender", "unknown"}
@@ -35,12 +35,11 @@ _INSTRUCTION = (
     "An empty lesson means no lessons, not a conflict. Different roles of different words are compatible. "
     "words.search contains synonyms; more synonyms do not make a word more distinctive. "
     "history is prior observed filtering, not actions you perform. Do not invent an unknown label's meaning. "
-    "Return only JSON with exactly request_id, word, role, source_quote, reason. "
+    "Return only JSON with exactly request_id, word, role, reason. "
     "request_id: copy exactly. word: copy one eligible_words entry exactly, or null if its role is uncertain. "
     "role: exactly brand, name, variant, packaging, service, concentration, volume, tester, gender, or unknown. "
-    "source_quote: one exact contiguous source substring containing word. "
     "reason: brief explanation in Russian (max 600 characters), without claims of completed actions or guaranteed results. "
-    "For null word use role=unknown and source_quote=\"\". You cannot choose a product candidate or act."
+    "For null word use role=unknown. You cannot choose a product candidate or act."
 )
 
 
@@ -170,7 +169,7 @@ def _lesson_conflict(definitions, source):
     applicable = [(rule, spans) for rule, spans in applicable if spans]
     for i, (rule, spans) in enumerate(applicable):
         if rule["role"] == "unknown":
-            return "Роль метки «" + _label(rule["term"]) + "» в уроках не определена. Нужна ручная проверка."
+            return "Модель не определила роль метки «" + _label(rule["term"]) + "» по урокам. Нужна ручная проверка."
         for other, other_spans in applicable[:i]:
             if rule["role"] == other["role"] or {rule["role"], other["role"]} <= _IDENTITY_ROLES:
                 continue
@@ -211,7 +210,7 @@ def consult_search_word(provider, payload):
     """
     request = validate_search_payload(payload)
     definitions = _lesson_definitions(provider, request["lesson"])
-    evidence = dict(version=1, definitions=definitions, proposal=None, blocked_reason=None)
+    evidence = dict(version=2, definitions=definitions, proposal=None, source_evidence=None, blocked_reason=None)
 
     def response(word, reason):
         return dict(mode="search_word", request_id=request["request_id"], word=word,
@@ -243,7 +242,6 @@ def consult_search_word(provider, payload):
         raise ValueError("Ответ выбора слова относится к другому запросу.")
     _text(result["reason"], 600)
     _role(result["role"])
-    _text(result["source_quote"], 2000, allow_empty=True)
     word = result["word"]
     if word is not None:
         _text(word, 512)
@@ -252,13 +250,22 @@ def consult_search_word(provider, payload):
             raise ValueError("Слово отсутствует, неоднозначно или звёздочка уже включена.")
         if any(row["word"] == word for row in request["history"]):
             raise ValueError("Повтор выполненного шага поиска запрещён.")
-        if not result["source_quote"].strip() or not _quoted_term(word, result["source_quote"],
-                                                                 request["source"], ignore_case=True):
+        spans = _spans(word, request["source"], ignore_case=True)
+        if not spans:
             raise ValueError("Выбранное слово не подтверждено дословным фрагментом названия.")
-    elif result["role"] != "unknown" or result["source_quote"] != "":
-        raise ValueError("Отказ выбора не должен содержать роль или цитату выбранного слова.")
+        # Derive a literal observation from the input, never from model prose or
+        # a lesson quote. This proves occurrence, not the proposed semantic role.
+        start, end = spans[0]
+        evidence["source_evidence"] = dict(origin="observed_source", derived_by="host",
+                                          quote=request["source"][start:end])
+    elif result["role"] != "unknown":
+        raise ValueError("Отказ выбора не должен содержать роль выбранного слова.")
     evidence["proposal"] = result
     veto = (_word_veto(result, definitions, request["source"]) if word is not None else
             "Qwen не предложила безопасное следующее слово. Нужна ручная проверка.")
     evidence["blocked_reason"] = veto
-    return response(None if veto else word, veto or result["reason"])
+    # Keep the untouched model interpretation in proposal for audit. Do not
+    # present unverified uniqueness, scent notes or promised outcomes as facts.
+    reason = (veto or "Предлагаю слово «" + _label(word) + "». Роль по оценке Qwen: " +
+              _ROLE_LABELS[result["role"]] + ". Слово есть в прочитанном названии. Результат фильтра ещё не проверен.")
+    return response(None if veto else word, reason)

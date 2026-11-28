@@ -383,7 +383,7 @@ internal static class ScanRoutingTests
 
     private static async Task ModelSearchRoutesThroughChat()
     {
-        foreach (var mode in new[] { "selected", "manual", "blocked", "legacy", "bad-evidence", "changed-chat", "failed" })
+        foreach (var mode in new[] { "selected", "manual", "blocked", "legacy", "v1", "bad-evidence", "bad-source", "changed-chat", "failed" })
         {
             using var fixture = new Fixture(count: 2);
             var before = ReplaceCandidates(fixture, 20);
@@ -401,16 +401,28 @@ internal static class ScanRoutingTests
                     ok = true, command = "ginger.search.word.preview", mode = "search_word",
                     request_id = requestId, word = "Synthetic", reason = "Legacy model rationale", can_match = false
                 });
-                var reason = mode == "blocked" ? "Synthetic veto: conflicting definitions" : "Synthetic model rationale";
+                if (mode == "v1") return JsonSerializer.SerializeToElement(new {
+                    ok = true, command = "ginger.search.word.preview", mode = "search_word",
+                    request_id = requestId, word = "Synthetic", reason = "Synthetic model rationale", can_match = false,
+                    search_evidence = new { version = 1, definitions = Array.Empty<object>(), blocked_reason = (string?)null,
+                        proposal = new { request_id = requestId, word = "Synthetic", role = "name",
+                            source_quote = "Synthetic", reason = "Synthetic model rationale" } }
+                });
+                var reason = mode switch {
+                    "blocked" => "Synthetic veto: conflicting definitions",
+                    "manual" => "Synthetic host abstention",
+                    _ => "Synthetic host explanation; role is a model estimate"
+                };
                 return JsonSerializer.SerializeToElement(new {
                     ok = true, command = "ginger.search.word.preview", mode = "search_word",
                     request_id = requestId, word = mode is "manual" or "blocked" ? null : "Synthetic", reason, can_match = false,
                     search_evidence = new {
-                        version = 1, definitions = Array.Empty<object>(),
-                        blocked_reason = mode == "blocked" ? reason : null,
+                        version = 2, definitions = Array.Empty<object>(),
+                        blocked_reason = mode is "manual" or "blocked" ? reason : null,
+                        source_evidence = mode == "manual" ? null : new {
+                            origin = "observed_source", derived_by = "host", quote = mode == "bad-source" ? "synthetic" : "Synthetic" },
                         proposal = new { request_id = mode == "bad-evidence" ? new string('0', 32) : requestId,
                             word = mode == "manual" ? null : "Synthetic", role = mode == "manual" ? "unknown" : "name",
-                            source_quote = mode == "manual" ? "" : request.GetProperty("source").GetString(),
                             reason = "Synthetic model rationale" }
                     }
                 });
@@ -422,7 +434,9 @@ internal static class ScanRoutingTests
             {
                 Check(fixture.Scenario.FilterActions == 1 && fixture.Bridge.Comparisons.Count == 1 &&
                     ReferenceEquals(fixture.Window.Confirmation?.Observation, after), "Chat did not compare the newly filtered snapshot");
-                Check(fixture.Window.Progress.Transcript.Contains("Synthetic model rationale"), "Chat omitted actual model explanation");
+                Check(fixture.Window.Progress.Transcript.Contains("Synthetic host explanation; role is a model estimate") &&
+                    !fixture.Window.Progress.Transcript.Contains("Synthetic model rationale"),
+                    "Chat lost host explanation or promoted raw model rationale");
                 Check(Directory.GetFiles(before.Directory, "search-decision-*.json").Length == 1, "Chat omitted search evidence");
             }
             else
@@ -438,7 +452,8 @@ internal static class ScanRoutingTests
                     using var record = JsonDocument.Parse(File.ReadAllText(saved.Single()));
                     var result = record.RootElement.GetProperty("result");
                     Check(result.GetProperty("word").ValueKind == JsonValueKind.Null &&
-                        result.GetProperty("search_evidence").GetProperty("proposal").GetProperty("word").GetString() == "Synthetic",
+                        result.GetProperty("search_evidence").GetProperty("proposal").GetProperty("word").GetString() == "Synthetic" &&
+                        result.GetProperty("search_evidence").GetProperty("source_evidence").GetProperty("quote").GetString() == "Synthetic",
                         "Veto journal lost the original non-actionable proposal");
                 }
                 NoCards(fixture);

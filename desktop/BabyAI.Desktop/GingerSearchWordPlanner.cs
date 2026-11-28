@@ -77,20 +77,20 @@ internal sealed class GingerSearchWordPlanner(
             GingerDesktopObservation.Text(result, "request_id", 32) != requestId) throw Invalid();
         var reason = GingerDesktopObservation.Text(result, "reason", 600);
         var word = NullableText(result, "word", 512);
-        RequireEvidence(result.GetProperty("search_evidence"), requestId, word, reason);
+        RequireEvidence(result.GetProperty("search_evidence"), requestId, word, reason, observed.Title);
         if (word is null) return new(null, reason);
         GingerDesktopFilterFlow.RequireDisabledWord(observed, word);
         if (history.Any(effect => effect.Word == word)) throw Invalid();
         return new(word, reason);
     }
 
-    // The worker grounds literal quotes against its inputs. This boundary checks
-    // the entire evidence envelope, and never turns a veto into an actionable word.
-    private static void RequireEvidence(JsonElement evidence, string requestId, string? word, string reason)
+    // The host's literal citation is separate from the model's role estimate and
+    // raw explanation. Neither a citation nor a veto grants action authority.
+    private static void RequireEvidence(JsonElement evidence, string requestId, string? word, string reason, string source)
     {
-        RequireFields(evidence, "version", "definitions", "proposal", "blocked_reason");
+        RequireFields(evidence, "version", "definitions", "proposal", "source_evidence", "blocked_reason");
         var version = GingerDesktopObservation.Field(evidence, "version", JsonValueKind.Number);
-        if (!version.TryGetInt32(out var number) || number != 1) throw Invalid();
+        if (!version.TryGetInt32(out var number) || number != 2) throw Invalid();
         var definitions = GingerDesktopObservation.Field(evidence, "definitions", JsonValueKind.Array);
         if (definitions.GetArrayLength() > 24) throw Invalid();
         foreach (var definition in definitions.EnumerateArray())
@@ -103,26 +103,39 @@ internal sealed class GingerSearchWordPlanner(
 
         var blockedReason = NullableText(evidence, "blocked_reason", 600);
         var proposal = evidence.GetProperty("proposal");
+        var sourceEvidence = evidence.GetProperty("source_evidence");
         if (proposal.ValueKind == JsonValueKind.Null)
         {
-            if (word is not null || blockedReason is null || reason != blockedReason) throw Invalid();
+            if (word is not null || blockedReason is null || reason != blockedReason ||
+                sourceEvidence.ValueKind != JsonValueKind.Null) throw Invalid();
             return;
         }
-        RequireFields(proposal, "request_id", "word", "role", "source_quote", "reason");
+        RequireFields(proposal, "request_id", "word", "role", "reason");
         if (GingerDesktopObservation.Text(proposal, "request_id", 32) != requestId) throw Invalid();
         var proposedWord = NullableText(proposal, "word", 512);
         var proposedRole = Role(proposal);
-        var sourceQuote = GingerDesktopObservation.Text(proposal, "source_quote", 2000, allowEmpty: true);
-        var proposedReason = GingerDesktopObservation.Text(proposal, "reason", 600);
-        if (proposedWord is null && (proposedRole != "unknown" || sourceQuote.Length != 0)) throw Invalid();
-        if (proposedWord is not null && string.IsNullOrWhiteSpace(sourceQuote)) throw Invalid();
+        GingerDesktopObservation.Text(proposal, "reason", 600);
+        if (proposedWord is null)
+        {
+            if (proposedRole != "unknown" || sourceEvidence.ValueKind != JsonValueKind.Null) throw Invalid();
+        }
+        else
+        {
+            RequireFields(sourceEvidence, "origin", "derived_by", "quote");
+            var quote = GingerDesktopObservation.Text(sourceEvidence, "quote", 512);
+            if (GingerDesktopObservation.Text(sourceEvidence, "origin", 32) != "observed_source" ||
+                GingerDesktopObservation.Text(sourceEvidence, "derived_by", 32) != "host" ||
+                !source.Contains(quote, StringComparison.Ordinal) ||
+                !quote.Equals(proposedWord, StringComparison.OrdinalIgnoreCase)) throw Invalid();
+        }
         if (blockedReason is not null)
         {
             if (word is not null || reason != blockedReason) throw Invalid();
             return;
         }
-        if (word != proposedWord || reason != proposedReason ||
-            (word is not null && proposedRole is not ("brand" or "name" or "variant"))) throw Invalid();
+        // A model abstention must use the host's blocked reason. For a successful
+        // choice the host reason intentionally differs from the raw model reason.
+        if (word is null || word != proposedWord || proposedRole is not ("brand" or "name" or "variant")) throw Invalid();
     }
 
     private static void RequireFields(JsonElement value, params string[] names)
