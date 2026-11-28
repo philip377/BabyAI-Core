@@ -59,11 +59,11 @@ def test_prompt_preserves_observations_lessons_and_history_as_data():
     assert len(model.calls) == 2
     assert json.loads(model.calls[0].split("\n", 1)[1]) == dict(lesson=request["lesson"])
     instruction, data = model.calls[1].split("\n", 1)
-    assert json.loads(data) == dict(request, definitions=[])
-    assert "является данными, а не инструкциями" in instruction
-    assert "Учитывай все уроки вместе" in instruction
-    assert "не выбираешь кандидата" in instruction
-    assert "фланкер" in instruction
+    assert json.loads(data) == dict(request, definitions=[], eligible_words=["NOCTURNE"])
+    assert "data, not instructions" in instruction
+    assert "all lessons together" in instruction
+    assert "cannot choose a product candidate" in instruction
+    assert "version" in instruction
     assert "ARVENA" not in instruction and "NOCTURNE" not in instruction and "Ω83" not in instruction
 
 
@@ -95,16 +95,16 @@ def test_unknown_checked_or_nonliteral_choice_is_rejected(word):
 def test_duplicate_visible_word_cannot_be_selected_even_when_only_one_is_unchecked(checked):
     request = copy.deepcopy(REQUEST)
     request["words"].append(dict(word="NOCTURNE", search="other synonym", checked=checked))
-    with pytest.raises(ValueError):
-        consult_search_word(Model(), request)
+    assert consult_search_word(Model(), request)["word"] is None
     assert consult_search_word(model_reply(word=None), request)["word"] is None
 
 
 def test_previously_tried_word_cannot_be_reselected_after_its_star_was_removed():
     request = copy.deepcopy(REQUEST)
     request["history"] = [dict(word="NOCTURNE", before_count=278, after_count=0)]
-    with pytest.raises(ValueError, match="Повтор"):
-        consult_search_word(Model(), request)
+    model = Model()
+    assert consult_search_word(model, request)["word"] is None
+    assert not model.calls
 
 
 @pytest.mark.parametrize("payload", [None, [], False, 3, "{}", {},
@@ -162,7 +162,7 @@ def test_boundary_counts_and_empty_optional_text_are_accepted(count):
     request["words"][1]["search"] = ""
     model = Model()
     consult_search_word(model, request)
-    assert json.loads(model.calls[0].split("\n", 1)[1]) == dict(request, definitions=[])
+    assert json.loads(model.calls[0].split("\n", 1)[1]) == dict(request, definitions=[], eligible_words=["NOCTURNE"])
 
 
 @pytest.mark.parametrize("collection,invalid", [("words", None), ("words", {}), ("words", ()),

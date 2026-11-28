@@ -101,11 +101,13 @@ def test_nonidentity_role_is_vetoed_without_fallback_or_retry(role):
 
 @pytest.mark.parametrize("word", ["EDP", "edt", "EdC", "75", "7,5", "30ml", "100мл", "ml", "мл", "oz"])
 def test_generic_attribute_cannot_pass_as_name_even_with_literal_citation(word):
-    request = REQUEST | dict(source="Lunora " + word,
-                             words=[dict(word=word, search=word, checked=False)])
+    request = REQUEST | dict(source="Lunora Zephra " + word,
+                             words=[dict(word=word, search=word, checked=False),
+                                    dict(word="Zephra", search="", checked=False)])
     model = Script(proposal(word, source_quote=word))
     assert consult_search_word(model, request)["word"] is None
     assert len(model.calls) == 1
+    assert model.calls[0]["eligible_words"] == ["Zephra"]
 
 
 def test_empty_lesson_does_not_extract_and_model_refusal_is_not_reported_as_verified_conflict():
@@ -153,3 +155,21 @@ def test_augmented_request_is_bounded_without_truncating_lessons_or_retrying():
     with pytest.raises(ValueError, match="16000"):
         consult_search_word(model, REQUEST | dict(lesson=text, words=words))
     assert len(model.calls) == 1
+
+
+def test_eligible_list_preserves_full_observations_but_removes_blocked_and_used_words():
+    rules = [rule("Red Case", "packaging", "Red Case — упаковка.")]
+    request = dict(history=[dict(word="Quiet", before_count=180, after_count=90)])
+    result, model = run_with_rules(rules, proposal("River"), **request)
+    assert result["word"] == "River"
+    assert model.calls[1]["eligible_words"] == ["River"]
+    assert model.calls[1]["words"] == REQUEST["words"]
+    assert model.calls[1]["history"] == request["history"]
+
+
+def test_no_eligible_word_skips_inference_and_never_fabricates_a_proposal():
+    model = Script()
+    request = REQUEST | dict(words=[dict(word="EDP", search="EDP", checked=False)])
+    result = consult_search_word(model, request)
+    assert result["word"] is None and "Нет допустимого" in result["reason"]
+    assert result["search_evidence"]["proposal"] is None and not model.calls
