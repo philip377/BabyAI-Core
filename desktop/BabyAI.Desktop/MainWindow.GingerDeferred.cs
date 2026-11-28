@@ -47,6 +47,7 @@ public sealed partial class MainWindow
         }
         var originChat = _selectedChatId;
         GingerDeferredRow? revisit = null;
+        GingerDeferredRow? teach = null;
         _gingerDialogOpen = true;
         try
         {
@@ -58,7 +59,7 @@ public sealed partial class MainWindow
             var introduction = new TextBlock
             {
                 Text = rows.Length == 0 ? "Отложенных позиций пока нет." :
-                    "Позиции, для которых не нашлось кандидатов. Открой нужный прайс в Ginger и выбери строку для разбора.",
+                    "Выбери позицию. «Объяснить UNIX» разбирает сохранённое название. Чтобы заново проверить кандидатов, открой нужный прайс в Ginger и нажми «Открыть для разбора».",
                 TextWrapping = TextWrapping.Wrap,
             };
             var list = new ListView
@@ -84,11 +85,13 @@ public sealed partial class MainWindow
             {
                 XamlRoot = Root.XamlRoot, Title = $"Отложенные позиции · {rows.Length}", Content = content,
                 PrimaryButtonText = "Открыть для разбора", IsPrimaryButtonEnabled = false,
+                SecondaryButtonText = "Объяснить UNIX", IsSecondaryButtonEnabled = false,
                 CloseButtonText = "Закрыть", DefaultButton = ContentDialogButton.Close,
             };
             list.SelectionChanged += (_, _) =>
             {
                 dialog.IsPrimaryButtonEnabled = list.SelectedItem is GingerDeferredRow;
+                dialog.IsSecondaryButtonEnabled = dialog.IsPrimaryButtonEnabled;
                 if (list.SelectedItem is GingerDeferredRow selected)
                     detail.Text = $"{selected.Supplier} · документ {selected.Document} · строка {selected.Position}\n" +
                         $"{selected.Title}\n\n{selected.Reason}\nСохранено: {selected.CreatedAt.ToLocalTime():g}";
@@ -105,11 +108,26 @@ public sealed partial class MainWindow
                 }
                 revisit = selected;
             };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary) revisit = null;
+            dialog.SecondaryButtonClick += (_, args) =>
+            {
+                if (_exitRequested || _gingerRunning || _agentsDialogOpen || ApprovalCard.Visibility == Visibility.Visible ||
+                    _gingerChatConfirmation is not null || GingerChatConfirmationCard.Visibility == Visibility.Visible ||
+                    _selectedChatId != originChat || list.SelectedItem is not GingerDeferredRow selected)
+                {
+                    args.Cancel = true;
+                    status.Text = "Состояние приложения изменилось. Закрой список и заверши текущее действие.";
+                    return;
+                }
+                teach = selected;
+            };
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary) revisit = null;
+            if (result != ContentDialogResult.Secondary) teach = null;
         }
         catch (Exception ex)
         {
             revisit = null;
+            teach = null;
             ReplyText.Text = "Не удалось открыть отложенные позиции. " + ex.Message;
             StartupDiagnostics.Log("Opening deferred Ginger rows failed", ex);
         }
@@ -122,10 +140,17 @@ public sealed partial class MainWindow
             catch (Exception ex)
             {
                 revisit = null;
+                teach = null;
                 StartupDiagnostics.Log("Restoring controls after deferred Ginger rows failed", ex);
             }
         }
-        if (revisit is null || GingerDeferredOpeningBlocked() || _selectedChatId != originChat) return;
+        if (GingerDeferredOpeningBlocked() || _selectedChatId != originChat) return;
+        if (teach is not null)
+        {
+            await OpenDeferredGingerLessonAsync(teach, originChat);
+            return;
+        }
+        if (revisit is null) return;
         try
         {
             await RunGingerFromChatAsync($"Разобрать отложенную позицию: строка {revisit.Position}.",
@@ -135,6 +160,40 @@ public sealed partial class MainWindow
         {
             ReplyText.Text = "Не удалось открыть позицию для разбора. " + ex.Message;
             StartupDiagnostics.Log("Revisiting a deferred Ginger row failed", ex);
+        }
+    }
+
+    private async Task OpenDeferredGingerLessonAsync(GingerDeferredRow row, string? expectedChatId)
+    {
+        if (GingerDeferredOpeningBlocked() || _selectedChatId != expectedChatId) return;
+        var generation = Volatile.Read(ref _chatGeneration);
+        try
+        {
+            SetBusy(true);
+            var chat = await _bridge.NavigationAsync("chat.current");
+            var chatId = chat.GetProperty("active_chat_id").GetString();
+            if (_exitRequested || _gingerRunning || _gingerDialogOpen || _agentsDialogOpen ||
+                ApprovalCard.Visibility == Visibility.Visible || _gingerChatConfirmation is not null ||
+                GingerChatConfirmationCard.Visibility == Visibility.Visible ||
+                generation != Volatile.Read(ref _chatGeneration) || _selectedChatId != expectedChatId ||
+                string.IsNullOrWhiteSpace(chatId) || chatId != expectedChatId) return;
+            var lesson = GingerChatLessonReview.ForDeferredSource(chatId, row, new GingerLearning());
+            InvalidateGingerChatContext();
+            StopVoiceListening(updateUi: false);
+            ShowGingerChatLesson(lesson);
+            ReplyText.Text = "Открыто сохранённое название. Напиши объяснение и нажми «Проверить понимание».";
+        }
+        catch (Exception ex)
+        {
+            if (!_exitRequested && _selectedChatId == expectedChatId && generation == Volatile.Read(ref _chatGeneration))
+                ReplyText.Text = "Не удалось открыть объяснение позиции. " + ex.Message;
+            StartupDiagnostics.Log("Opening a source-only Ginger lesson failed", ex);
+        }
+        finally
+        {
+            _busy = false;
+            try { SetBusy(false); }
+            catch (Exception ex) { StartupDiagnostics.Log("Restoring controls after source-only Ginger lesson failed", ex); }
         }
     }
 

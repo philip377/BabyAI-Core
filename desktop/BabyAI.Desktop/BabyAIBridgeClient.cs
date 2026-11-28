@@ -142,6 +142,18 @@ public sealed class BabyAIBridgeClient : IDisposable
         return document.RootElement.Clone();
     }
 
+    public async Task<JsonElement> PreviewGingerSourceLessonAsync(string supplier, string source,
+        string lesson, IEnumerable<string> candidates, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        if (candidates.Any())
+            throw new InvalidDataException("Разбор сохранённого названия не принимает кандидатов.");
+        var json = await ExecuteAsync("ginger.teach.source.preview",
+            JsonSerializer.Serialize(new { supplier, source, lesson }), cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
     public Task ApproveLessonAsync() => ExecuteAsync("lesson.approve", "{}");
 
     public async Task<string> RateGingerAnswerAsync(JsonElement report, int points, string feedback) =>

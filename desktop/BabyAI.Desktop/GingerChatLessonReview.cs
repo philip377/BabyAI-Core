@@ -14,6 +14,7 @@ internal sealed class GingerChatLessonReview
     public string ChatId { get; }
     public string Supplier { get; }
     public string Source { get; }
+    public bool SourceOnly { get; }
     public IReadOnlyList<GingerLearning.LanguageLesson> Lessons { get; private set; }
     public string? SelectedLessonId { get; private set; }
     public GingerLearning.LanguageLesson? Saved => Lessons.SingleOrDefault(lesson => lesson.LessonId == SelectedLessonId);
@@ -23,12 +24,28 @@ internal sealed class GingerChatLessonReview
     public bool CanRevoke => CanPreview && Saved is { Enabled: true };
 
     public GingerChatLessonReview(string chatId, GingerChatItem item, GingerLearning learning)
+        : this(chatId, item, learning, sourceOnly: false) { }
+
+    // A persisted reminder supplies a frozen teaching example, not a current
+    // desktop observation or permission to compare, navigate or bind a product.
+    public static GingerChatLessonReview ForDeferredSource(string chatId, GingerDeferredRow row, GingerLearning learning)
     {
+        ArgumentNullException.ThrowIfNull(row);
+        return new(chatId, new GingerChatItem(row.Supplier, row.Document, row.Position,
+            row.Title, false, []), learning, sourceOnly: true);
+    }
+
+    private GingerChatLessonReview(string chatId, GingerChatItem item, GingerLearning learning, bool sourceOnly)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(learning);
         if (string.IsNullOrWhiteSpace(chatId) || string.IsNullOrWhiteSpace(item.Supplier)
-            || string.IsNullOrWhiteSpace(item.Title) || item.Candidates.Length is < 1 or > 100
+            || string.IsNullOrWhiteSpace(item.Title) || item.Candidates is null
+            || (sourceOnly ? item.Candidates.Length != 0 : item.Candidates.Length is < 1 or > 100)
             || item.Candidates.Any(string.IsNullOrWhiteSpace))
             throw new InvalidDataException("Для урока нужны чат, поставщик, товар и ограниченный список кандидатов.");
         ChatId = chatId; Supplier = item.Supplier; Source = item.Title;
+        SourceOnly = sourceOnly;
         _candidates = item.Candidates.ToArray();
         _learning = learning;
         Lessons = learning.ReadLanguageLessons(Supplier);
@@ -100,6 +117,10 @@ internal sealed class GingerChatLessonReview
             if (revision != _revision)
                 throw new InvalidOperationException("Объяснение изменено во время проверки. Проверь его заново.");
             RequireUnchangedLessons();
+            if (SourceOnly) RequireSourceOnlyResult(result);
+            else if (result.ValueKind == JsonValueKind.Object && result.TryGetProperty("mode", out var mode)
+                && mode.ValueKind == JsonValueKind.String && mode.GetString() == "source_only")
+                throw new InvalidDataException("Проверка исходной строки не является проверкой пары кандидатов.");
             if (result.TryGetProperty("error", out _))
                 throw new InvalidDataException("Модель не завершила проверку объяснения.");
             var understanding = result.GetProperty("understanding").GetString();
@@ -110,11 +131,47 @@ internal sealed class GingerChatLessonReview
                 || (candidate is not null && _candidates.Count(c => c == candidate) != 1))
                 throw new InvalidDataException("Модель вернула непроверяемое понимание урока или кандидата.");
             Draft = draft with { Understanding = understanding };
+            if (SourceOnly)
+                return JsonSerializer.SerializeToElement(new {
+                    request = new { mode = "source_only", supplier = Supplier, source = Source,
+                        lesson = combined, candidates = _candidates }, result
+                });
             return JsonSerializer.SerializeToElement(new {
                 request = new { supplier = Supplier, source = Source, lesson = combined, candidates = _candidates }, result
             });
         }
         finally { Volatile.Write(ref _working, 0); }
+    }
+
+    private static void RequireSourceOnlyResult(JsonElement result)
+    {
+        const string failure = "Модель не завершила отдельную проверку объяснения исходной строки.";
+        if (result.ValueKind != JsonValueKind.Object) throw new InvalidDataException(failure);
+        var fields = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in result.EnumerateObject())
+            if (!fields.Add(property.Name) || property.Name is not
+                ("mode" or "understanding" or "candidate" or "explanation" or "ok" or "command" or "id"))
+                throw new InvalidDataException(failure);
+        if (!result.TryGetProperty("mode", out var mode) || mode.ValueKind != JsonValueKind.String
+            || mode.GetString() != "source_only" || !result.TryGetProperty("candidate", out var candidate)
+            || candidate.ValueKind != JsonValueKind.Null)
+            throw new InvalidDataException(failure);
+        foreach (var name in new[] { "understanding", "explanation" })
+            if (!result.TryGetProperty(name, out var text) || text.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(text.GetString()) || text.GetString()!.Length > 4000)
+                throw new InvalidDataException(failure);
+        // Direct command tests return the four payload fields. The real bridge
+        // retains ok/command and its already-validated optional worker request id.
+        if (fields.Overlaps(["ok", "command", "id"]))
+        {
+            if (!result.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True
+                || !result.TryGetProperty("command", out var command) || command.ValueKind != JsonValueKind.String
+                || command.GetString() != "ginger.teach.source.preview")
+                throw new InvalidDataException(failure);
+            if (result.TryGetProperty("id", out var id) && (id.ValueKind != JsonValueKind.Number
+                || !id.TryGetInt64(out var number) || number < 0))
+                throw new InvalidDataException(failure);
+        }
     }
 
     public void Save(string chatId, string currentText)

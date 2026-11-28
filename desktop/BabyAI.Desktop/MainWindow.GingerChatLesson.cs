@@ -19,12 +19,15 @@ public sealed partial class MainWindow
     {
         _gingerChatLesson?.Invalidate();
         _gingerChatLesson = lesson;
-        GingerChatLessonSource.Text = $"Поставщик: {lesson.Supplier}\nПример из прайса: {lesson.Source}";
+        GingerChatLessonSource.Text = $"Поставщик: {lesson.Supplier}\n" +
+            (lesson.SourceOnly ? "Сохранённое название: " : "Пример из прайса: ") + lesson.Source;
         PopulateGingerChatLessons();
         GingerChatLessonText.Text = "";
         GingerChatLessonPreview.Text = "";
-        GingerChatLessonStatus.Text = "Добавь объяснение или выбери сохранённое. Проверь понимание на показанном примере перед сохранением.";
-        GingerChatLessonCard.IsExpanded = false;
+        GingerChatLessonStatus.Text = lesson.SourceOnly
+            ? "Кандидатов в сохранённой позиции нет. Объясни название и проверь понимание перед сохранением урока."
+            : "Добавь объяснение или выбери сохранённое. Проверь понимание на показанном примере перед сохранением.";
+        GingerChatLessonCard.IsExpanded = lesson.SourceOnly;
         GingerChatLessonCard.Visibility = Visibility.Visible;
         UpdateGingerChatSavedLesson();
         UpdateGingerChatLessonControls();
@@ -114,13 +117,22 @@ public sealed partial class MainWindow
         try
         {
             var chatId = (await _bridge.NavigationAsync("chat.current")).GetProperty("active_chat_id").GetString() ?? "";
-            var report = await lesson.PreviewAsync(chatId, text, _bridge.PreviewGingerLessonAsync, cancellation.Token);
+            var report = await lesson.PreviewAsync(chatId, text,
+                lesson.SourceOnly ? _bridge.PreviewGingerSourceLessonAsync : _bridge.PreviewGingerLessonAsync,
+                cancellation.Token);
+            if (!IsCurrentGingerChatLesson(lesson)) throw new OperationCanceledException();
             result = "Понимание готово к проверке.\nПоставщик: " + lesson.Supplier +
                 "\nТвоё объяснение: " + text + "\nПонял так: " + lesson.Draft!.Understanding + "\nПример: " + lesson.Source + "\n" +
-                FormatGingerChatProposal(report.GetProperty("result")) +
+                (lesson.SourceOnly
+                    ? "Разбор сохранённого названия: " + report.GetProperty("result").GetProperty("explanation").GetString() +
+                      "\nКандидаты не проверялись. Пара для сопоставления не выбрана."
+                    : FormatGingerChatProposal(report.GetProperty("result"))) +
                 "\nВсе объяснения, использованные при проверке:\n" + report.GetProperty("request").GetProperty("lesson").GetString() +
-                "\nПроверь понимание. Если всё верно, отдельно сохрани урок. Для сопоставления пары снова попроси продолжить сопоставление.";
-            ShowGingerChatReview(new GingerChatAnswerReview(lesson.ChatId, report));
+                "\nПроверь понимание. Если всё верно, отдельно сохрани урок." +
+                (lesson.SourceOnly
+                    ? " Он будет учтён при следующих сравнениях этого поставщика. Позиция остаётся в отложенных до новой проверки в Ginger."
+                    : " Для сопоставления пары снова попроси продолжить сопоставление.");
+            if (!lesson.SourceOnly) ShowGingerChatReview(new GingerChatAnswerReview(lesson.ChatId, report));
             notificationKind = GingerNotificationKind.LessonReady;
         }
         catch (OperationCanceledException)
@@ -137,7 +149,8 @@ public sealed partial class MainWindow
         finally
         {
             _chatCancellation = null;
-            GingerChatLessonPreview.Text = result;
+            try { if (IsCurrentGingerChatLesson(lesson)) GingerChatLessonPreview.Text = result; }
+            catch (Exception ex) { StartupDiagnostics.Log("Displaying Ginger lesson preview failed", ex); }
             await FinishGingerChatLessonAsync(lesson, message, result);
             NotifyGingerOutcome(notificationKind, lesson.ChatId);
         }
@@ -181,13 +194,40 @@ public sealed partial class MainWindow
 
     private async Task FinishGingerChatLessonAsync(GingerChatLessonReview lesson, string message, string result)
     {
-        var summary = result.Split('\n')[0];
-        ShowGingerChatStep(summary, false);
-        GingerChatLessonStatus.Text = summary;
-        AppendConversation("Вы", message);
-        AppendConversation("UNIX", result);
-        try { await _bridge.RecordGingerChatAsync(lesson.ChatId, message, result); }
-        catch (Exception ex) { AppendConversation("Система", "Результат показан, но не записан в историю чата. " + ex.Message); }
-        finally { SetBusy(false); }
+        try
+        {
+            try
+            {
+                if (IsCurrentGingerChatLesson(lesson))
+                {
+                    var summary = result.Split('\n')[0];
+                    ShowGingerChatStep(summary, false);
+                    GingerChatLessonStatus.Text = summary;
+                    AppendConversation("Вы", message);
+                    AppendConversation("UNIX", result);
+                }
+            }
+            catch (Exception ex) { StartupDiagnostics.Log("Displaying Ginger lesson result failed", ex); }
+            try { await _bridge.RecordGingerChatAsync(lesson.ChatId, message, result); }
+            catch (Exception ex)
+            {
+                StartupDiagnostics.Log("Ginger lesson history failed", ex);
+                try
+                {
+                    if (IsCurrentGingerChatLesson(lesson))
+                        AppendConversation("Система", "Результат не записан в историю чата. " + ex.Message);
+                }
+                catch (Exception displayError) { StartupDiagnostics.Log("Displaying Ginger lesson history error failed", displayError); }
+            }
+        }
+        finally
+        {
+            _busy = false;
+            try { SetBusy(false); }
+            catch (Exception ex) { StartupDiagnostics.Log("Restoring controls after Ginger lesson failed", ex); }
+        }
     }
+
+    private bool IsCurrentGingerChatLesson(GingerChatLessonReview lesson) =>
+        !_exitRequested && ReferenceEquals(_gingerChatLesson, lesson) && _selectedChatId == lesson.ChatId;
 }
