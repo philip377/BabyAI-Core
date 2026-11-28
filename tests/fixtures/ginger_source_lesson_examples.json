@@ -1,0 +1,86 @@
+{
+  "purpose": "Synthetic source-only lesson checks; semantic criteria require human review, not substring scoring.",
+  "desktop_actions": false,
+  "cases": [
+    {
+      "name": "full_uppercase_fragrance",
+      "payload": {
+        "supplier": "Проверочный поставщик A",
+        "source": "MONTBLANC EXPLORER PLATINUM 100 мл",
+        "lesson": "EXPLORER, EXPLORER PLATINUM и EXPLORER ULTRA BLUE — разные полные названия ароматов. Заглавные буквы не делают дополнительные слова необязательными."
+      },
+      "expected_meaning": "Сохраняет EXPLORER PLATINUM; не сокращает до EXPLORER и не заменяет на ULTRA BLUE.",
+      "independent_case": false
+    },
+    {
+      "name": "dented_tester_and_pv",
+      "payload": {
+        "supplier": "Проверочный поставщик B",
+        "source": "Oria VELVET MOSS ПВ 75 мл немного подмят",
+        "lesson": "В этом прайсе пометка «немного подмят» означает тестер. Это не отдельная версия аромата. ПВ означает парфюмерную воду EDP."
+      },
+      "expected_meaning": "Применяет оба объяснения: тестер и EDP; сохраняет VELVET MOSS.",
+      "independent_case": false
+    },
+    {
+      "name": "arbitrary_supplier_code",
+      "payload": {
+        "supplier": "Проверочный поставщик C",
+        "source": "DORIA NIGHT HARBOR Ω-83 60 мл",
+        "lesson": "В этом прайсе Ω-83 означает одеколон EDC. Это код концентрации, а не часть названия аромата."
+      },
+      "expected_meaning": "Связывает Ω-83 именно с EDC; сохраняет NIGHT HARBOR и не добавляет неподтверждённый статус тестера.",
+      "independent_case": false
+    },
+    {
+      "name": "conflicting_lessons",
+      "payload": {
+        "supplier": "Проверочный поставщик D",
+        "source": "Oria VELVET MOSS Q-8 75 мл",
+        "lesson": "1. Q-8 означает тестер.\n\n2. Q-8 означает обычный товар, не тестер."
+      },
+      "expected_meaning": "Отмечает несовместимость двух определений и неопределённость статуса; не выбирает первое или последнее молча.",
+      "independent_case": false
+    },
+    {
+      "name": "missing_facts",
+      "payload": {
+        "supplier": "Проверочный поставщик E",
+        "source": "Lunora WHITE SAND",
+        "lesson": "EDP означает парфюмерную воду, EDT — туалетную воду. Слово tester обозначает тестер. Отсутствующие объём и концентрацию определять нельзя. В этом прайсе отсутствие слова tester само по себе не подтверждает обычный товар."
+      },
+      "expected_meaning": "Оставляет объём, концентрацию и статус тестера неопределёнными, не достраивает их по знакомому названию.",
+      "independent_case": false
+    },
+    {
+      "name": "heldout_full_fragrance",
+      "payload": {
+        "supplier": "Проверочный поставщик F",
+        "source": "ARVENA STONE VEIL NOCTURNE 40 мл EDP",
+        "lesson": "В этом прайсе STONE VEIL и STONE VEIL NOCTURNE — самостоятельные ароматы. NOCTURNE входит в полное название, а не обозначает комплектацию. Заглавные буквы не меняют смысл названия."
+      },
+      "expected_meaning": "Подтверждает полное название STONE VEIL NOCTURNE, не сокращает его, не объявляет роль NOCTURNE неизвестной из-за отсутствия каталога.",
+      "independent_case": true
+    },
+    {
+      "name": "heldout_supplier_designations",
+      "payload": {
+        "supplier": "Проверочный поставщик G",
+        "source": "BELORIN SILK MEADOW ТВ 90 мл витринная коробка",
+        "lesson": "У этого поставщика пометка «витринная коробка» означает тестер. Она не обозначает отдельную разновидность аромата. ТВ означает туалетную воду EDT."
+      },
+      "expected_meaning": "Применяет оба определения: тестер и EDT. Не превращает пометку в неизвестную разновидность аромата или признак.",
+      "independent_case": true
+    },
+    {
+      "name": "heldout_code_and_specific_unknown",
+      "payload": {
+        "supplier": "Проверочный поставщик H",
+        "source": "VESLIA WILD PEAR R/64 35 мл",
+        "lesson": "В этом прайсе R/64 означает концентрацию духи, parfum. Код не относится к названию аромата и ничего не сообщает о статусе тестера. Отсутствие пометки тестера в этом прайсе не подтверждает обычный товар."
+      },
+      "expected_meaning": "Устанавливает концентрацию духи/parfum, отделяет код от WILD PEAR. Неизвестен именно статус тестера, не концентрация.",
+      "independent_case": true
+    }
+  ]
+}
