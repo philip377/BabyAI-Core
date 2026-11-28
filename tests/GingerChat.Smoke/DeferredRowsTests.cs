@@ -11,6 +11,7 @@ internal static class DeferredRowsTests
     {
         PersistenceAndIdentity();
         ManualReviewAndMixedRows();
+        SearchReviewPersistenceAndLimits();
         InvalidInputCannotPublish();
         InvalidManualReviewCannotPublish();
         CorruptionCannotBecomeAnEmptyList();
@@ -84,6 +85,52 @@ internal static class DeferredRowsTests
         foreach (var observation in new[] { "", "relative-folder", fixture.Observation + "\nother", new string('p', 2049) })
             Refused(() => fixture.Store.Add(Item, "chat-1", observation), "Invalid observation path was saved");
         Check(fixture.Store.Read().Count == 0, "Rejected rows left committed records");
+    }
+
+    private static void SearchReviewPersistenceAndLimits()
+    {
+        using var fixture = new Fixture();
+        const string reason = "Нет допустимого нового слова для поиска. Нужна ручная проверка.";
+        foreach (var count in new[] { 0, 213, 278 })
+        {
+            var item = Item with { Position = count + 1,
+                Candidates = count > 256 ? [] : Enumerable.Range(1, count).Select(i => "Candidate " + i).ToArray() };
+            var saved = fixture.Store.AddSearchReview(item, "chat-1", fixture.Observation, reason, count);
+            var reopened = new GingerDeferredRows(fixture.Root).Read().Single(row => row.Id == saved.Id);
+            Check(reopened.Reason == GingerDeferredRows.SearchReviewPrefix + reason &&
+                reopened.ObservationDirectory == fixture.Observation && reopened.Title == item.Title,
+                "Semantic refusal lost its reason, decision evidence or full source");
+            Check(reopened.Reason != GingerDeferredRows.NoCandidatesReason,
+                "Search review asserted the catalog was empty");
+            var bytes = File.ReadAllBytes(fixture.Entry(saved));
+            var duplicate = fixture.Store.AddSearchReview(item, "new-chat", fixture.Observation + "-fresh", "Новая причина", count);
+            Check(saved == duplicate && bytes.SequenceEqual(File.ReadAllBytes(fixture.Entry(saved))),
+                "Duplicate search review overwrote original evidence");
+        }
+        using var rejected = new Fixture();
+        foreach (var detail in new[] { "", " ", new string('я', 601), "bad\0reason", "bad\ud800reason" })
+            Refused(() => rejected.Store.AddSearchReview(Item, "chat-1", rejected.Observation, detail, 0),
+                "Invalid search reason was published");
+        foreach (var bad in new[] {
+            (Item with { Linked = true }, 0L), (Item with { Candidates = null! }, 0L),
+            (Item, -1L), (Item, 213L), (ManualItem, 278L),
+            (ManualItem with { Candidates = [" ", "valid"] }, 2L) })
+            Refused(() => rejected.Store.AddSearchReview(bad.Item1, "chat-1", rejected.Observation, reason, bad.Item2),
+                "Invalid search candidate count or source was published");
+        Check(!Directory.Exists(rejected.Root), "Rejected search review created persistence files");
+        var stored = fixture.Store.Read().First();
+        var path = fixture.Entry(stored);
+        var original = File.ReadAllText(path);
+        foreach (var malformed in new[] { GingerDeferredRows.SearchReviewPrefix,
+            GingerDeferredRows.SearchReviewPrefix + new string('x', 601),
+            GingerDeferredRows.SearchReviewPrefix + " " })
+        {
+            var json = JsonNode.Parse(original)!.AsObject();
+            json["Reason"] = malformed;
+            File.WriteAllText(path, json.ToJsonString());
+            Refused(() => fixture.Store.Read(), "Corrupt semantic review was silently accepted");
+        }
+        File.WriteAllText(path, original);
     }
 
     private static void ManualReviewAndMixedRows()

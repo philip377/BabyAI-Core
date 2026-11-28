@@ -6,6 +6,16 @@ internal sealed record GingerSearchFilterEffect(string Word, long BeforeCount, l
 internal sealed record GingerSearchWordDecision(string? Word, string Reason,
     Func<CancellationToken, Task>? RequireCurrent = null);
 
+// A validated semantic refusal, not a driver/model failure or proof of an empty
+// catalogue. Only the chat orchestration may persist it and authorize navigation.
+internal sealed class GingerSearchReviewRequiredException(
+    GingerDesktopObservation observation, string reason, string evidenceDirectory) : Exception(reason)
+{
+    internal GingerDesktopObservation Observation { get; } = observation;
+    internal string Reason { get; } = reason;
+    internal string EvidenceDirectory { get; } = evidenceDirectory;
+}
+
 // One model decision per additive action. The instance belongs to a session so
 // returning to a row cannot reset its action budget or replay an uncertain input.
 internal sealed class GingerReasonedFilterFlow
@@ -52,7 +62,18 @@ internal sealed class GingerReasonedFilterFlow
                 var decision = await choose(observed, effects, token);
                 token.ThrowIfCancellationRequested();
                 RequireDecision(decision);
-                if (decision.Word is null) throw Manual("Qwen остановила поиск: " + decision.Reason);
+                if (decision.Word is null)
+                {
+                    // The decision's durable evidence belongs to the snapshot
+                    // before refresh. Navigation must use the fresh matching one.
+                    var evidenceDirectory = observed.Directory;
+                    var reviewObservation = await refresh(observed, token);
+                    token.ThrowIfCancellationRequested();
+                    RequireUnchangedSnapshot(observed, reviewObservation);
+                    if (decision.RequireCurrent is not null) await decision.RequireCurrent(token);
+                    token.ThrowIfCancellationRequested();
+                    throw new GingerSearchReviewRequiredException(reviewObservation, decision.Reason, evidenceDirectory);
+                }
                 var word = decision.Word;
                 if (state.AttemptedWords.Contains(word))
                     throw Manual("Повторное включение слова «" + word + "» запрещено.");

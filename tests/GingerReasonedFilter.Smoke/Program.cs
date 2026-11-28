@@ -20,12 +20,15 @@ internal static class ReasonedFilterTests
         await InitialEmptyMayChoose();
         await BudgetAcrossCalls();
         await InvalidDecisions();
+        await SemanticRefusals();
+        await SemanticRefusalAfterAction();
+        await RefusalFailuresAndCancellation();
         await StaleRefresh();
         await RequireCurrentIsLastGuard();
         await CancellationBoundaries();
         await FailedActionsCannotReplay();
         await ConcurrentCallsAreRejected();
-        Console.WriteLine($"PASS: {_checks} reasoned-filter checks; linked production flow/observations, adaptive history, four-action budget, fresh guards and terminal zero; no UI/model/files/processes");
+        Console.WriteLine($"PASS: {_checks} reasoned-filter checks; linked production flow/observations, adaptive history, four-action budget, fresh semantic refusals and terminal zero; no UI/model/files/processes");
     }
 
     private static void Check(bool condition, string message)
@@ -37,9 +40,16 @@ internal static class ReasonedFilterTests
     private static async Task<Exception> Fails(Func<Task> action, string message)
     {
         try { await action(); }
-        catch (Exception error) when (error is InvalidDataException or IOException or OperationCanceledException or InvalidOperationException)
+        catch (Exception error) when (error is InvalidDataException or IOException or OperationCanceledException or InvalidOperationException or TimeoutException)
         { _checks++; return error; }
         throw new Exception("Expected failure: " + message);
+    }
+
+    private static async Task<GingerSearchReviewRequiredException> ReviewRequired(Func<Task> action)
+    {
+        try { await action(); }
+        catch (GingerSearchReviewRequiredException review) { _checks++; return review; }
+        throw new Exception("Expected a validated semantic refusal");
     }
 
     private static GingerDesktopObservation Observation(int candidates, bool realNullState = false)
@@ -192,17 +202,17 @@ internal static class ReasonedFilterTests
     private static async Task InvalidDecisions()
     {
         foreach (var decision in new GingerSearchWordDecision?[] {
-            null, new(null, "Нельзя надёжно сузить этот список."), new("", "reason"), new(" ", "reason"),
+            null, new(null, ""), new(null, " \n"), new(null, null!), new(null, new string('r', 601)),
+            new("", "reason"), new(" ", "reason"),
             new(new string('w', 513), "reason"), new("White", ""), new("White", " \n"),
             new("White", null!), new("White", new string('r', 601)), new("missing", "reason"),
             new("white", "reason"), new("White ", "reason") })
         {
             var harness = new Harness();
             harness.Decisions.Enqueue(decision!);
-            var error = await Fails(() => harness.Run(Observation(278)), "invalid/null decision");
+            await Fails(() => harness.Run(Observation(278)), "invalid/null decision");
             Check(harness.RefreshCalls == 0 && harness.ApplyCalls == 0 && harness.ChooseCalls == 1,
                 "Invalid/null decision caused refresh/input/fallback");
-            if (decision is { Word: null }) Check(error.Message.Contains(decision.Reason, StringComparison.Ordinal), "Manual exception lost Qwen's reason");
         }
         foreach (var transform in new Action<JsonObject>[] {
             data => { data["words"]![0]!["Checked"] = true; data["words"]![0]!["StateImage"] = 2; },
@@ -216,6 +226,101 @@ internal static class ReasonedFilterTests
         var failed = new Harness { ChooseOverride = (_, _, _) => throw new IOException("Synthetic Qwen failure") };
         await Fails(() => failed.Run(Observation(278)), "model exception");
         Check(failed.ChooseCalls == 1 && failed.RefreshCalls == 0 && failed.ApplyCalls == 0, "Model error triggered retry/fallback");
+    }
+
+    private static async Task SemanticRefusals()
+    {
+        const string reason = "Нет допустимого нового слова для поиска. Нужна ручная проверка.";
+        foreach (var count in new[] { 0, 11, 213, 278 })
+        foreach (var guarded in new[] { false, true })
+        {
+            var harness = new Harness();
+            var original = Observation(count);
+            harness.Decisions.Enqueue(new(null, reason, guarded ? _ =>
+            { harness.Timeline.Add("guard"); return Task.CompletedTask; } : null));
+            var review = await ReviewRequired(() => harness.Run(original));
+            Check(ReferenceEquals(review.Observation, harness.Refreshed.Single()) &&
+                !ReferenceEquals(review.Observation, original), "Semantic refusal did not carry the fresh observation");
+            Check(review.EvidenceDirectory == original.Directory && review.EvidenceDirectory != review.Observation.Directory,
+                "Semantic refusal lost the pre-refresh decision evidence directory");
+            Check(review.Reason == reason && review.Message == reason && !review.Message.Contains("Qwen", StringComparison.Ordinal),
+                "Semantic refusal altered the host reason or claimed model inference");
+            Check(review.Observation.CandidateCount == count && review.Observation.NeedsFilters == (count > 256),
+                "Broad/overflow refusal was changed to an empty catalogue");
+            Check(harness.ChooseCalls == 1 && harness.RefreshCalls == 1 && harness.ApplyCalls == 0 && harness.Messages.Count == 0,
+                "Refusal retried the model, reported input or sent an action");
+            Check(harness.Timeline.SequenceEqual(guarded ? new[] { "choose", "refresh", "guard" } : ["choose", "refresh"]),
+                "Refusal authorization was not checked after the fresh read");
+            // The signal releases the in-flight latch; it never spends an input attempt.
+            harness.Decisions.Enqueue(new("White", "A later independent decision."));
+            harness.AfterCounts.Enqueue(1);
+            Check((await harness.Run(review.Observation)).CandidateCount == 1 && harness.ApplyCalls == 1,
+                "Refusal left the flow locked or marked an unperformed input as attempted");
+        }
+    }
+
+    private static async Task SemanticRefusalAfterAction()
+    {
+        foreach (var remaining in new[] { 25, 300 })
+        {
+            var harness = new Harness();
+            var original = Observation(278);
+            harness.Decisions.Enqueue(new("White", "First verified filter."));
+            harness.AfterCounts.Enqueue(remaining);
+            harness.Decisions.Enqueue(new(null, "No safe next word.", _ =>
+            { harness.Timeline.Add("guard"); return Task.CompletedTask; }));
+            var review = await ReviewRequired(() => harness.Run(original));
+            Check(review.EvidenceDirectory == harness.AppliedResults.Single().Directory && review.EvidenceDirectory != original.Directory,
+                "Refusal after an action cited the initial row instead of the latest decision snapshot");
+            Check(ReferenceEquals(review.Observation, harness.Refreshed[1]) && review.Observation.CandidateCount == remaining &&
+                review.Observation.Words[0].GetProperty("Checked").GetBoolean(),
+                "Refusal after an action discarded the verified new filter/result");
+            Check(harness.ChooseCalls == 2 && harness.RefreshCalls == 2 && harness.ApplyCalls == 1 &&
+                harness.Histories[1].SequenceEqual(new[] { new GingerSearchFilterEffect("White", 278, remaining) }),
+                "Refusal repeated input/model or lost verified history");
+            Check(harness.Timeline.SequenceEqual(new[] { "choose", "refresh", "report", "apply", "choose", "refresh", "guard" }),
+                "Refusal after an action skipped its independent fresh/current guards");
+        }
+    }
+
+    private static async Task RefusalFailuresAndCancellation()
+    {
+        foreach (var boundary in new[] { "choose", "refresh", "guard" })
+        foreach (var failure in new[] { "schema", "io", "timeout", "cancel", "chat", "lesson", "role" })
+        {
+            Exception expected = failure switch {
+                "io" => new IOException("Synthetic disk/read failure"),
+                "timeout" => new TimeoutException("Synthetic timeout"),
+                "cancel" => new OperationCanceledException("Synthetic caller-independent cancellation"),
+                _ => new InvalidDataException("Synthetic invalid " + failure)
+            };
+            var harness = new Harness();
+            var decision = new GingerSearchWordDecision(null, "No next word.", _ =>
+            { harness.Timeline.Add("guard"); return boundary == "guard" ? Task.FromException(expected) : Task.CompletedTask; });
+            harness.Decisions.Enqueue(decision);
+            if (boundary == "choose") harness.ChooseOverride = (_, _, _) => Task.FromException<GingerSearchWordDecision>(expected);
+            if (boundary == "refresh") harness.RefreshOverride = (_, _) => Task.FromException<GingerDesktopObservation>(expected);
+            var error = await Fails(() => harness.Run(Observation(278)), boundary + " " + failure);
+            Check(ReferenceEquals(error, expected), "Refusal preparation promoted/wrapped an error into a review signal");
+            Check(harness.ChooseCalls == 1 && harness.RefreshCalls == (boundary == "choose" ? 0 : 1) &&
+                harness.ApplyCalls == 0 && harness.Messages.Count == 0, "Refusal failure retried or sent input");
+        }
+        foreach (var boundary in new[] { "before", "choose", "refresh", "guard" })
+        {
+            using var cancellation = new CancellationTokenSource();
+            var harness = new Harness();
+            var decision = new GingerSearchWordDecision(null, "No next word.", _ =>
+            { harness.Timeline.Add("guard"); if (boundary == "guard") cancellation.Cancel(); return Task.CompletedTask; });
+            harness.Decisions.Enqueue(decision);
+            if (boundary == "before") cancellation.Cancel();
+            if (boundary == "choose") harness.ChooseOverride = (_, _, _) => { cancellation.Cancel(); return Task.FromResult(decision); };
+            if (boundary == "refresh") harness.RefreshOverride = (before, _) => { cancellation.Cancel(); return Task.FromResult(Change(before)); };
+            var error = await Fails(() => harness.Run(Observation(278), cancellation.Token), "refusal cancellation " + boundary);
+            Check(error is OperationCanceledException && harness.ApplyCalls == 0 && harness.Messages.Count == 0,
+                "Cancelled refusal became a review signal or input");
+            Check(harness.ChooseCalls == (boundary == "before" ? 0 : 1) &&
+                harness.RefreshCalls == (boundary is "before" or "choose" ? 0 : 1), "Cancelled refusal retried observation/model");
+        }
     }
 
     private static async Task StaleRefresh()
@@ -245,8 +350,9 @@ internal static class ReasonedFilterTests
             ("word extra field",278,data => data["words"]![0]!["unexpected"] = "changed")
         };
         foreach (var change in changes)
+        foreach (var word in new string?[] { "White", null })
         {
-            var harness = new Harness(); harness.Decisions.Enqueue(new("White", "reason"));
+            var harness = new Harness(); harness.Decisions.Enqueue(new(word, "reason"));
             harness.RefreshOverride = (before, _) => Task.FromResult(Change(before, change.Change));
             await Fails(() => harness.Run(Observation(change.Count)), "stale " + change.Name);
             Check(harness.ChooseCalls == 1 && harness.RefreshCalls == 1 && harness.ApplyCalls == 0 && harness.Messages.Count == 0,

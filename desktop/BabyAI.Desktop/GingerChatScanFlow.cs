@@ -1,7 +1,10 @@
 namespace BabyAI.Desktop;
 
 internal sealed record GingerChatScanRow(GingerChatItem Item, int Count, long ProcessId,
-    long TableHandle, string ObservationDirectory);
+    long TableHandle, string ObservationDirectory, GingerChatSearchReview? SearchReview = null);
+// An incomplete candidate read is explicitly represented here, never inferred
+// from the empty array used by an overflow observation.
+internal sealed record GingerChatSearchReview(string Reason, long CandidateCount, string EvidenceDirectory);
 internal sealed record GingerChatScanResult(GingerChatScanRow Row, string? Proposal,
     int DeferredCount, int AlreadyLinkedCount, bool ReachedEnd);
 internal sealed record GingerChatComparison(string Proposal, string? Candidate);
@@ -43,7 +46,7 @@ internal sealed class GingerChatScanFlow(
                 else
                 {
                     GingerChatComparison? comparison = null;
-                    if (GingerChatPreparation.NeedsFilters(row.Item.Candidates.Length))
+                    if (row.SearchReview is null && GingerChatPreparation.NeedsFilters(row.Item.Candidates.Length))
                     {
                         report(GingerChatStage.Filtering, $"Строка {row.Item.Position}: проверяю звёздочки слов слева и перечитываю кандидатов.");
                         var filtered = await filter(row, token);
@@ -53,8 +56,9 @@ internal sealed class GingerChatScanFlow(
                             throw new InvalidDataException("Товар изменился во время подготовки поиска. Нужно новое чтение.");
                         row = filtered;
                     }
-                    GingerChatPreparation.RequireCandidateLimit(row.Item.Candidates.Length);
-                    if (row.Item.Candidates.Length != 0)
+                    if (row.SearchReview is null)
+                        GingerChatPreparation.RequireCandidateLimit(row.Item.Candidates.Length);
+                    if (row.SearchReview is null && row.Item.Candidates.Length != 0)
                     {
                         report(GingerChatStage.Comparing, $"Строка {row.Item.Position}: сравниваю кандидатов ({row.Item.Candidates.Length}). Компьютером сейчас не управляю.");
                         comparison = await compare(row.Item, token);
@@ -69,7 +73,9 @@ internal sealed class GingerChatScanFlow(
                     // The durable inbox must accept this exact observation before any next-row input.
                     await defer(row, token);
                     deferred++;
-                    report(GingerChatStage.Skipping, comparison is null
+                    report(GingerChatStage.Skipping, row.SearchReview is { } searchReview
+                        ? $"Строка {row.Item.Position}: поиск требует объяснения. Сохранил для ручного разбора: {row.Item.Title}\n{searchReview.Reason}"
+                        : comparison is null
                         ? $"Строка {row.Item.Position}: кандидатов после фильтров нет. Сохранил для разбора: {row.Item.Title}"
                         : $"Строка {row.Item.Position}: однозначный выбор не подтверждён. Сохранил для ручного разбора: {row.Item.Title}\n{comparison.Proposal}");
                     token.ThrowIfCancellationRequested();
@@ -121,6 +127,11 @@ internal sealed class GingerChatScanFlow(
             string.IsNullOrWhiteSpace(row.Item.Document) || string.IsNullOrWhiteSpace(row.Item.Title) ||
             string.IsNullOrWhiteSpace(row.ObservationDirectory) || row.Item.Candidates.Length > 256)
             throw new InvalidDataException("Неполное наблюдение строки Ginger; продолжение запрещено.");
+        if (row.SearchReview is { } review && (row.Item.Linked ||
+            string.IsNullOrWhiteSpace(review.Reason) || review.Reason.Length > 600 ||
+            !Path.IsPathFullyQualified(review.EvidenceDirectory) || review.CandidateCount < 0 ||
+            (review.CandidateCount <= 256 ? review.CandidateCount != row.Item.Candidates.Length : row.Item.Candidates.Length != 0)))
+            throw new InvalidDataException("Неполное основание ручной проверки поиска Ginger; продолжение запрещено.");
     }
 
     private static bool SameDocument(GingerChatScanRow first, GingerChatScanRow second) =>

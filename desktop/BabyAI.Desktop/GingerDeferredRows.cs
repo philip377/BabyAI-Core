@@ -15,6 +15,7 @@ internal sealed class GingerDeferredRows
     internal const int MaxEntryBytes = 65_536;
     internal const string NoCandidatesReason = "Кандидатов после подготовки фильтров нет. Нужна ручная проверка.";
     internal const string ManualReviewReason = "Однозначный кандидат не подтверждён. Нужна ручная проверка.";
+    internal const string SearchReviewPrefix = "Поиск требует объяснения: ";
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly string[] Fields = ["Id", "ChatId", "Supplier", "Document", "Position", "Title",
         "Reason", "ObservationDirectory", "CreatedAt"];
@@ -45,6 +46,20 @@ internal sealed class GingerDeferredRows
             item.Candidates.Any(string.IsNullOrWhiteSpace))
             throw new InvalidDataException("Для ручного разбора нужна несопоставленная строка с непустым списком до 256 кандидатов.");
         return Append(item, chatId, observationDirectory, ManualReviewReason);
+    }
+
+    internal GingerDeferredRow AddSearchReview(GingerChatItem item, string chatId, string evidenceDirectory,
+        string reason, long candidateCount)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ValidateText(reason, 600, "причина поиска");
+        if (item.Linked || item.Candidates is null || candidateCount < 0 ||
+            (candidateCount <= 256 ? item.Candidates.Length != candidateCount : item.Candidates.Length != 0) ||
+            item.Candidates.Any(string.IsNullOrWhiteSpace))
+            throw new InvalidDataException("Для разбора поиска нужна проверенная несопоставленная строка и явное число кандидатов.");
+        // This directory contains the original request, result and lesson versions.
+        // Overflow is a search problem, not an assertion that the catalog is empty.
+        return Append(item, chatId, evidenceDirectory, SearchReviewPrefix + reason);
     }
 
     private GingerDeferredRow Append(GingerChatItem item, string chatId, string observationDirectory, string reason)
@@ -162,7 +177,7 @@ internal sealed class GingerDeferredRows
                 ValidateObservationDirectory(row.ObservationDirectory);
                 if (!IsId(row.Id) || row.Id != Path.GetFileNameWithoutExtension(path) ||
                     row.Id != CreateId(row.Supplier, row.Document, row.Position, row.Title) ||
-                    (row.Reason != NoCandidatesReason && row.Reason != ManualReviewReason) ||
+                    !ValidReason(row.Reason) ||
                     row.CreatedAt == default || row.CreatedAt.Offset != TimeSpan.Zero)
                     throw new InvalidDataException("Не совпадает содержимое записи отложенной строки.");
                 result.Add(row);
@@ -175,6 +190,15 @@ internal sealed class GingerDeferredRows
     private static bool IsPendingName(string name) => name.Length == 105 && name[64] == '.' &&
         name.EndsWith(".pending", StringComparison.Ordinal) && IsId(name[..64]) &&
         Guid.TryParseExact(name.Substring(65, 32), "N", out _);
+
+    private static bool ValidReason(string? reason)
+    {
+        if (reason is NoCandidatesReason or ManualReviewReason) return true;
+        if (reason is null || !reason.StartsWith(SearchReviewPrefix, StringComparison.Ordinal)) return false;
+        var detail = reason[SearchReviewPrefix.Length..];
+        ValidateText(detail, 600, "причина поиска");
+        return true;
+    }
 
     private static bool IsId(string? value) => value is { Length: 64 } &&
         value.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');

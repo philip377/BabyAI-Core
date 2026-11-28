@@ -64,9 +64,10 @@ namespace BabyAI.Desktop
         internal readonly List<int> NextPositions = [];
         internal readonly List<GingerDesktopObservation> FilterInputs = [];
         internal readonly Queue<Func<GingerDesktopObservation, GingerDesktopObservation>> FilterReplies = [];
+        internal readonly Queue<Func<GingerDesktopObservation, GingerDesktopObservation>> RefreshReplies = [];
         internal readonly List<string> Journal = [];
         internal Action<GingerDesktopObservation>? BeforeNext;
-        internal int StartReads, FilterReads, Disposals;
+        internal int StartReads, FilterReads, FreshReads, Disposals;
         internal bool UseSearchPlanner;
         internal int FilterActions;
         internal GingerDeferredRow? Revisit;
@@ -75,6 +76,7 @@ namespace BabyAI.Desktop
     internal sealed class GingerDesktopSession : IDisposable
     {
         private readonly Scenario _scenario = Scenario.Current ?? throw new InvalidOperationException("Missing synthetic scenario");
+        private readonly GingerReasonedFilterFlow _reasonedFilters = new();
         internal Action<string>? FilterProgress { get; set; }
         internal int? FilterCandidateTarget { get; init; }
         internal Func<GingerDesktopObservation, IReadOnlyList<GingerSearchFilterEffect>, CancellationToken, Task<GingerSearchWordDecision>>? ChooseSearchWord { get; set; }
@@ -87,8 +89,12 @@ namespace BabyAI.Desktop
             _scenario.FilterReads++;
             _scenario.FilterInputs.Add(observation);
             if (_scenario.UseSearchPlanner)
-                return new GingerReasonedFilterFlow().PrepareAsync(observation, ChooseSearchWord!,
-                    (before, refreshToken) => Task.FromResult(before),
+                return _reasonedFilters.PrepareAsync(observation, ChooseSearchWord!,
+                    (before, refreshToken) => {
+                        refreshToken.ThrowIfCancellationRequested();
+                        _scenario.FreshReads++;
+                        return Task.FromResult(_scenario.RefreshReplies.Count == 0 ? before : _scenario.RefreshReplies.Dequeue()(before));
+                    },
                     (before, word, actionToken) => {
                         _scenario.FilterActions++;
                         return Task.FromResult(_scenario.FilterReplies.Dequeue()(before));
@@ -104,7 +110,9 @@ namespace BabyAI.Desktop
             _scenario.NextPositions.Add(position.Value);
             if (_scenario.NextPositions.Count > 3) throw new InvalidOperationException("Unbounded scan");
             _scenario.BeforeNext?.Invoke(before);
-            return Task.FromResult(_scenario.Rows.Single(row => row.Position == position));
+            var observed = _scenario.Rows.Single(row => row.Position == position);
+            return observed.NeedsFilters && prepareFiltersOnOverflow
+                ? PrepareFiltersAsync(observed, token) : Task.FromResult(observed);
         }
         public void Dispose() => _scenario.Disposals++;
     }
@@ -181,6 +189,7 @@ namespace BabyAI.Desktop
         internal bool Running => _gingerRunning;
         internal bool HasCancellation => _chatCancellation is not null || _gingerCancellation is not null;
         internal FakeConfirmation? Confirmation => _gingerChatConfirmation;
+        internal void CancelRun() => _gingerCancellation?.Cancel();
         internal MainWindow(FakeBridge bridge) => _bridge = bridge;
         internal Task RunAsync(GingerDeferredRow? revisit = null) => RunGingerFromChatAsync(
             "Продолжи сопоставление", expectedChatId: "chat-current", revisit: revisit);
@@ -211,7 +220,8 @@ namespace BabyAI.Desktop
             var scenario = Scenario.Current!;
             scenario.StartReads++;
             scenario.Revisit = revisit;
-            return Task.FromResult(scenario.Rows[0]);
+            var observed = scenario.Rows[0];
+            return observed.NeedsFilters ? session.PrepareFiltersAsync(observed, token) : Task.FromResult(observed);
         }
         private void ShowBottleResearch(string chatId, string source) => ResearchSource = source;
         private void ShowGingerChatReview(GingerChatAnswerReview review)

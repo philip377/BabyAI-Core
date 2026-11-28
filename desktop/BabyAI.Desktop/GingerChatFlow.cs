@@ -24,7 +24,7 @@ internal sealed class GingerChatFlow(
     Func<CancellationToken, Task<GingerChatItem>> read,
     Func<CancellationToken, Task<GingerChatItem>> filter,
     Func<GingerChatItem, CancellationToken, Task<string>> compare,
-    Action<GingerChatStage, string> report)
+    Action<GingerChatStage, string> report, bool reportFailures = true)
 {
     public async Task<string> RunAsync(CancellationToken token)
     {
@@ -69,7 +69,9 @@ internal sealed class GingerChatFlow(
         }
         catch (Exception ex)
         {
-            report(GingerChatStage.Failed, "Процесс остановлен: " + ex.Message);
+            // An owning chat handler may distinguish manual review from errors.
+            // Let that handler publish the outcome once, after classification.
+            if (reportFailures) report(GingerChatStage.Failed, "Процесс остановлен: " + ex.Message);
             throw;
         }
     }

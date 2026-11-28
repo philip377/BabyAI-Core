@@ -209,26 +209,47 @@ public sealed partial class MainWindow
                 supplier => new GingerLearning().ReadLanguageLessons(supplier), RequireSearchRun, chatId!, taskRunId);
             session.ChooseSearchWord = async (before, effects, token) =>
             {
-                Report(GingerChatStage.Filtering, "Qwen выбирает слово для поиска по названию, урокам и результатам предыдущих фильтров…");
+                Report(GingerChatStage.Filtering, "Проверяю допустимые слова поиска; при необходимости обращаюсь к Qwen…");
                 return await searchPlanner.ChooseAsync(before, effects, token);
             };
             static GingerChatScanRow Row(GingerDesktopObservation value) => new(Item(value), value.Count,
                 value.Data.GetProperty("process_id").GetInt64(), value.Source.GetProperty("TableHandle").GetInt64(), value.Directory);
+            async Task<GingerChatScanRow> ObserveForScan(Func<Task<GingerDesktopObservation>> action, CancellationToken token)
+            {
+                try
+                {
+                    observation = await action();
+                    token.ThrowIfCancellationRequested();
+                    return Row(observation);
+                }
+                catch (GingerSearchReviewRequiredException ex) when (revisit is null)
+                {
+                    token.ThrowIfCancellationRequested();
+                    observation = ex.Observation;
+                    // Initial preparation and Next may both encounter overflow.
+                    // Keep the actual row from the signal, never the prior row.
+                    var item = new GingerChatItem(observation.Supplier, observation.Document, observation.Position,
+                        observation.Title, observation.Linked, observation.NeedsFilters ? [] : observation.Candidates);
+                    return new(item, observation.Count, observation.ProcessId, observation.TableHandle,
+                        observation.Directory, new(ex.Reason, observation.CandidateCount, ex.EvidenceDirectory));
+                }
+            }
             async Task<GingerChatScanRow> Read(CancellationToken token)
             {
                 SetGingerCaptureMode(true);
-                observation = await ReadGingerChatStartAsync(session, revisit, token);
-                return Row(observation);
+                return await ObserveForScan(() => ReadGingerChatStartAsync(session, revisit, token), token);
             }
             async Task<GingerChatScanRow> Filter(GingerChatScanRow before, CancellationToken token)
             {
                 if (observation?.Directory != before.ObservationDirectory)
                     throw new InvalidDataException("Наблюдение строки изменилось до подготовки фильтров.");
-                observation = await session.PrepareFiltersAsync(observation, token);
-                // Even a plan with no new stars needs a fresh read before deferring.
-                if (observation.Candidates.Length == 0)
-                    observation = await session.ObserveAsync(token);
-                return Row(observation);
+                var current = observation;
+                return await ObserveForScan(async () =>
+                {
+                    var prepared = await session.PrepareFiltersAsync(current, token);
+                    // Even a plan with no new stars needs a fresh read before deferring.
+                    return prepared.Candidates.Length == 0 ? await session.ObserveAsync(token) : prepared;
+                }, token);
             }
             async Task<GingerChatComparison> Compare(GingerChatItem item, CancellationToken token)
             {
@@ -269,7 +290,7 @@ public sealed partial class MainWindow
                 // An explicit review of a saved row must stay on that row, even when still empty.
                 var one = new GingerChatFlow(async token => (await Read(token)).Item,
                     async token => (await Filter(Row(observation!), token)).Item,
-                    async (item, token) => (await Compare(item, token)).Proposal, Report);
+                    async (item, token) => (await Compare(item, token)).Proposal, Report, reportFailures: false);
                 proposal = await one.RunAsync(cancellation.Token);
             }
             else
@@ -279,14 +300,18 @@ public sealed partial class MainWindow
                     {
                         if (observation?.Directory != before.ObservationDirectory)
                             throw new InvalidDataException("Наблюдение изменилось до перехода к следующей строке.");
+                        await RequireSearchRun(token);
                         SetGingerCaptureMode(true);
-                        observation = await session.ObserveAsync(token, observation, before.Item.Position + 1,
-                            prepareFiltersOnOverflow: true);
-                        return Row(observation);
+                        return await ObserveForScan(() => session.ObserveAsync(token, observation, before.Item.Position + 1,
+                            prepareFiltersOnOverflow: true), token);
                     },
                     async (before, token) =>
                     {
-                        var saved = await Task.Run(() => before.Item.Candidates.Length == 0
+                        await RequireSearchRun(token);
+                        var saved = await Task.Run(() => before.SearchReview is { } searchReview
+                            ? new GingerDeferredRows().AddSearchReview(before.Item, chatId!, searchReview.EvidenceDirectory,
+                                searchReview.Reason, searchReview.CandidateCount)
+                            : before.Item.Candidates.Length == 0
                             ? new GingerDeferredRows().Add(before.Item, chatId!, before.ObservationDirectory)
                             : new GingerDeferredRows().AddManualReview(before.Item, chatId!, before.ObservationDirectory), token);
                         deferred.Add(saved);
@@ -335,6 +360,17 @@ public sealed partial class MainWindow
                     : $"Строка {observation?.Position}: нужна ручная проверка. Однозначная пара не подтверждена.";
                 if (deferred.Count > 0) summary += $" Отложено для разбора: {deferred.Count}.";
             }
+        }
+        catch (GingerSearchReviewRequiredException ex)
+        {
+            // Explicit revisits stay on the requested item; the normal scan
+            // consumes this typed outcome before it reaches this boundary.
+            observation = ex.Observation;
+            taskState = GingerChatTaskState.Review;
+            notificationKind = GingerNotificationKind.ManualReview;
+            summary = $"Строка {observation.Position}: поиск требует объяснения. {ex.Reason}";
+            InvalidateGingerChatContext();
+            Report(GingerChatStage.Review, summary + " Переход к следующей строке не выполнялся.");
         }
         catch (TimeoutException ex)
         {

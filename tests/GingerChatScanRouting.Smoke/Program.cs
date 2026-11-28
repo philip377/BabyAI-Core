@@ -57,6 +57,10 @@ internal static class ScanRoutingTests
         await BroadThenBoundedUsesFreshObservation();
         await StillBroadCannotCompareDeferOrAdvance();
         await ModelSearchRoutesThroughChat();
+        await SearchDeclineDefersFreshRowThenShowsNextPair();
+        await SearchDeclineAtEndHasNoPairCards();
+        await SearchFailuresNeverBecomeDeferrals();
+        await RevisitSearchDeclineStaysOnItsRow();
         Check(TestEnvironment.SyntheticRoot is null && Scenario.Current is null, "Fixture isolation leaked");
         Console.WriteLine($"PASS: {_checks} scan-routing integration checks against linked MainWindow/flow/store/evidence/reviews; fake UI/bridge/session, temp data only; no Ginger or model started");
     }
@@ -392,7 +396,8 @@ internal static class ScanRoutingTests
             Directory.CreateDirectory(afterPath);
             var after = Observation(afterPath, before.Position, before.Count, false, ["Chosen candidate"], enabled: true);
             fixture.Scenario.FilterReplies.Enqueue(_ => after);
-            fixture.Bridge.Replies.Enqueue(() => Result("Chosen candidate"));
+            fixture.Bridge.Replies.Enqueue(() => Result(mode is "manual" or "blocked"
+                ? fixture.Scenario.Rows[1].Candidates[0] : "Chosen candidate"));
             fixture.Bridge.SearchReply = request => {
                 if (mode == "failed") throw new InvalidDataException("Synthetic model failure");
                 if (mode == "changed-chat") fixture.Bridge.CurrentChat = "another-chat";
@@ -439,14 +444,16 @@ internal static class ScanRoutingTests
                     "Chat lost host explanation or promoted raw model rationale");
                 Check(Directory.GetFiles(before.Directory, "search-decision-*.json").Length == 1, "Chat omitted search evidence");
             }
-            else
+            else if (mode is "manual" or "blocked")
             {
-                Check(fixture.Scenario.FilterActions == 0 && fixture.Bridge.Comparisons.Count == 0 &&
-                    fixture.Scenario.NextPositions.Count == 0 && fixture.Store.Read().Count == 0,
-                    "Rejected model search clicked, compared, deferred or advanced");
+                Check(fixture.Scenario.FilterActions == 0 && fixture.Scenario.FreshReads == 1 &&
+                    fixture.Scenario.NextPositions.SequenceEqual(new[] { 2 }) && fixture.Store.Read().Count == 1,
+                    "Valid semantic refusal did not defer after a fresh read and continue once");
+                Check(fixture.Bridge.Comparisons.Single().Source == fixture.Scenario.Rows[1].Title &&
+                    fixture.Window.Confirmation?.Observation == fixture.Scenario.Rows[1],
+                    "Search refusal was compared or left stale confirmation on the skipped row");
                 var saved = Directory.GetFiles(before.Directory, "search-decision-*.json");
-                Check(saved.Length == (mode is "manual" or "blocked" ? 1 : 0),
-                    "Invalid evidence was saved or valid refusal/veto lost its journal");
+                Check(saved.Length == 1, "Valid search refusal lost its decision journal");
                 if (mode == "blocked")
                 {
                     using var record = JsonDocument.Parse(File.ReadAllText(saved.Single()));
@@ -454,12 +461,211 @@ internal static class ScanRoutingTests
                     Check(result.GetProperty("word").ValueKind == JsonValueKind.Null &&
                         result.GetProperty("search_evidence").GetProperty("proposal").GetProperty("word").GetString() == "Synthetic" &&
                         result.GetProperty("search_evidence").GetProperty("source_evidence").GetProperty("quote").GetString() == "Synthetic",
-                        "Veto journal lost the original non-actionable proposal");
+                        "Deferred veto lost the non-actionable raw proposal");
                 }
+            }
+            else
+            {
+                Check(fixture.Scenario.FilterActions == 0 && fixture.Bridge.Comparisons.Count == 0 &&
+                    fixture.Scenario.NextPositions.Count == 0 && fixture.Store.Read().Count == 0,
+                    "Rejected model search clicked, compared, deferred or advanced");
+                var saved = Directory.GetFiles(before.Directory, "search-decision-*.json");
+                Check(saved.Length == 0, "Invalid or stale search response was published as decision evidence");
                 NoCards(fixture);
             }
             Released(fixture);
         }
+    }
+
+    private static JsonElement SearchDecline(JsonElement request) => JsonSerializer.SerializeToElement(new {
+        ok = true, command = "ginger.search.word.preview", mode = "search_word",
+        request_id = request.GetProperty("request_id").GetString(), word = (string?)null,
+        reason = "Synthetic unresolved fragment; manual search review required", can_match = false,
+        search_evidence = new { version = 2, definitions = Array.Empty<object>(), proposal = (object?)null,
+            source_evidence = (object?)null, blocked_reason = "Synthetic unresolved fragment; manual search review required" }
+    });
+
+    private static GingerDesktopObservation CopyObservation(GingerDesktopObservation row, string directory, long? overflow = null)
+    {
+        var json = System.Text.Json.Nodes.JsonNode.Parse(row.Data.GetRawText())!.AsObject();
+        json["directory"] = directory;
+        if (overflow is not null)
+        {
+            json["status"] = "needs_filters";
+            json["candidate_count"] = overflow.Value;
+            json.Remove("candidates");
+        }
+        return new(directory, JsonSerializer.SerializeToElement(json));
+    }
+
+    private static async Task SearchDeclineDefersFreshRowThenShowsNextPair()
+    {
+        foreach (var mode in new[] { "current213", "initial278", "next400" })
+        {
+            using var fixture = new Fixture(count: mode == "next400" ? 3 : 2);
+            var index = mode == "next400" ? 1 : 0;
+            if (index == 1)
+            {
+                var linked = fixture.Scenario.Rows[0];
+                fixture.Scenario.Rows[0] = Observation(linked.Directory, linked.Position, linked.Count, true, linked.Candidates);
+            }
+            var original = fixture.Scenario.Rows[index];
+            var broad = mode == "current213"
+                ? ReplaceCandidates(fixture, 213)
+                : CopyObservation(original, original.Directory, mode == "initial278" ? 278 : 400);
+            fixture.Scenario.Rows[index] = broad;
+            var freshDirectory = Path.Combine(fixture.Root, "fresh-search-refusal");
+            Directory.CreateDirectory(freshDirectory);
+            var fresh = CopyObservation(broad, freshDirectory);
+            var final = fixture.Scenario.Rows[index + 1];
+            fixture.Scenario.UseSearchPlanner = true;
+            fixture.Scenario.RefreshReplies.Enqueue(input => {
+                Check(ReferenceEquals(input, broad), "Semantic refusal refreshed a stale observation");
+                return fresh;
+            });
+            fixture.Bridge.SearchReply = SearchDecline;
+            fixture.Bridge.Replies.Enqueue(() => Result(final.Candidates[1], "final-pair-after-search-review"));
+            var durableBeforeNext = false;
+            fixture.Scenario.BeforeNext = before => {
+                if (before.Position != broad.Position) return;
+                Check(ReferenceEquals(before, fresh), "Next-row input did not use the fresh refused observation");
+                var saved = fixture.Store.Read().Single();
+                Check(saved.Title == fresh.Title && saved.Position == fresh.Position &&
+                    saved.Supplier == fresh.Supplier && saved.Document == fresh.Document,
+                    "Search refusal deferred another row or a fabricated empty-source identity");
+                Check(saved.Reason != GingerDeferredRows.NoCandidatesReason && saved.Reason != GingerDeferredRows.ManualReviewReason,
+                    "Semantic search refusal masqueraded as an empty list or a completed candidate comparison");
+                Check(saved.ObservationDirectory == broad.Directory && saved.Reason == GingerDeferredRows.SearchReviewPrefix +
+                    "Synthetic unresolved fragment; manual search review required",
+                    "Search reminder lost its original decision folder or exact semantic refusal reason");
+                Check(Directory.GetFiles(broad.Directory, "search-decision-*.json").Length == 1 &&
+                    Directory.GetFiles(fresh.Directory, "comparison-*.json").Length == 0 && fixture.Bridge.Comparisons.Count == 0,
+                    "Durable search evidence was missing, or broad/overflow candidates were compared");
+                using var decision = JsonDocument.Parse(File.ReadAllText(Directory.GetFiles(broad.Directory, "search-decision-*.json").Single()));
+                Check(decision.RootElement.GetProperty("request").GetProperty("candidate_count").GetInt64() == broad.CandidateCount &&
+                    decision.RootElement.GetProperty("result").GetProperty("word").ValueKind == JsonValueKind.Null,
+                    "Saved decision lost the true broad candidate count or semantic null");
+                Check(fixture.Window.ReviewShows.Count == 0 && fixture.Window.LessonShows.Count == 0 && fixture.Window.ConfirmationOffers.Count == 0,
+                    "Search-deferred row showed comparison/rating/lesson/pair cards");
+                durableBeforeNext = true;
+            };
+            await fixture.Run();
+            Check(durableBeforeNext && fixture.Scenario.FilterReads == 1 && fixture.Scenario.FilterActions == 0 && fixture.Scenario.FreshReads == 1 &&
+                fixture.Bridge.SearchRequests.Count == 1, "Semantic refusal retried search or sent a filter action");
+            Check(fixture.Scenario.NextPositions.SequenceEqual(index == 0 ? new[] { 2 } : new[] { 2, 3 }),
+                "Overflow/current refusal skipped, retried, or remained on the wrong row");
+            Check(fixture.Bridge.Comparisons.Single().Source == final.Title &&
+                fixture.Bridge.Comparisons.Single().Candidates.SequenceEqual(final.Candidates), "Final comparison used refused-row candidates");
+            Check(fixture.Window.ShownReview?.Source == final.Title && fixture.Window.ShownLesson?.Source == final.Title &&
+                fixture.Window.Confirmation?.Observation == final && fixture.Window.Confirmation?.Candidate == final.Candidates[1],
+                "Final review, lesson, or confirmation belongs to the refused row");
+            JsonElement? rated = null;
+            await fixture.Window.ShownReview!.RateAsync("chat-current", 9, "Synthetic callback only", (report, _, _) => {
+                rated = report.Clone(); return Task.FromResult(new GingerAnswerRatingReceipt("synthetic", true));
+            });
+            Check(rated!.Value.GetProperty("request").GetProperty("source").GetString() == final.Title &&
+                rated.Value.GetProperty("request").GetProperty("candidates").EnumerateArray().Select(value => value.GetString()).SequenceEqual(final.Candidates),
+                "Rating retained source/candidates from the search-deferred row");
+            string? lessonSource = null;
+            string[]? lessonCandidates = null;
+            await fixture.Window.ShownLesson!.PreviewAsync("chat-current", "Synthetic unsaved lesson", (supplier, source, lesson, candidates, token) => {
+                lessonSource = source; lessonCandidates = candidates.ToArray(); return Task.FromResult(Result(null));
+            }, CancellationToken.None);
+            Check(lessonSource == final.Title && lessonCandidates!.SequenceEqual(final.Candidates), "Lesson editor retained overflow or old candidates");
+            Check(fixture.Window.Outcomes.Single() == (GingerChatTaskState.PairReady, 1) &&
+                fixture.Window.Notifications.Single() == GingerNotificationKind.PairReady,
+                "Search deferral did not report the final pair and actual durable count");
+            Check(!Directory.Exists(Path.Combine(fixture.Root, "BabyAI", "ginger-learning")), "Review callbacks saved learning without a save action");
+            Released(fixture);
+        }
+    }
+
+    private static async Task SearchDeclineAtEndHasNoPairCards()
+    {
+        foreach (var overflow in new[] { false, true })
+        {
+            using var fixture = new Fixture(count: 1);
+            var before = ReplaceCandidates(fixture, 213);
+            if (overflow) fixture.Scenario.Rows[0] = CopyObservation(before, before.Directory, 278);
+            fixture.Scenario.UseSearchPlanner = true;
+            fixture.Bridge.SearchReply = SearchDecline;
+            await fixture.Run();
+            Check(fixture.Store.Read().Single().Position == 1 && fixture.Scenario.NextPositions.Count == 0 &&
+                fixture.Bridge.Comparisons.Count == 0 && fixture.Scenario.FilterActions == 0,
+                "End-of-price semantic refusal was compared, clicked, or advanced");
+            Check(fixture.Window.Outcomes.Single() == (GingerChatTaskState.End, 1) &&
+                fixture.Window.Notifications.Single() == GingerNotificationKind.ManualReview,
+                "End-of-price semantic refusal claimed a pair or lost the saved review count");
+            NoCards(fixture); Released(fixture);
+        }
+    }
+
+    private static async Task SearchFailuresNeverBecomeDeferrals()
+    {
+        foreach (var mode in new[] { "deferred-save", "evidence-save", "changed-source", "changed-chat", "cancel", "read-error", "read-timeout", "malformed" })
+        {
+            using var fixture = new Fixture(count: 2);
+            var before = ReplaceCandidates(fixture, 213);
+            fixture.Scenario.UseSearchPlanner = true;
+            if (mode == "deferred-save")
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(fixture.DeferredRoot)!);
+                File.WriteAllText(fixture.DeferredRoot, "Synthetic deferred-store obstruction");
+            }
+            fixture.Bridge.SearchReply = request => {
+                if (mode == "evidence-save")
+                {
+                    Directory.Delete(before.Directory);
+                    File.WriteAllText(before.Directory, "Synthetic decision-journal obstruction");
+                }
+                return mode == "malformed" ? Parse("{}") : SearchDecline(request);
+            };
+            fixture.Scenario.RefreshReplies.Enqueue(input => {
+                if (mode == "changed-source") return fixture.Scenario.Rows[1];
+                if (mode == "changed-chat") fixture.Bridge.CurrentChat = "another-chat";
+                if (mode == "cancel") fixture.Window.CancelRun();
+                if (mode == "read-error") throw new IOException("Synthetic fresh-read failure");
+                if (mode == "read-timeout") throw new TimeoutException("Synthetic fresh-read timeout");
+                return input;
+            });
+            await fixture.Run();
+            Check(fixture.Scenario.NextPositions.Count == 0 && fixture.Scenario.FilterActions == 0 && fixture.Bridge.Comparisons.Count == 0,
+                "Failed or stale semantic search caused a next/filter/compare operation: " + mode);
+            if (mode == "deferred-save")
+                Check(File.ReadAllText(fixture.DeferredRoot) == "Synthetic deferred-store obstruction", "Deferred-save failure overwrote its obstruction");
+            else Check(fixture.Store.Read().Count == 0, "A search error was stored as an ordinary review: " + mode);
+            var state = mode is "changed-chat" or "cancel" ? GingerChatTaskState.Cancelled
+                : mode == "read-timeout" ? GingerChatTaskState.TimedOut : GingerChatTaskState.Failed;
+            Check(fixture.Window.Outcomes.Single() == (state, 0), "Search failure was counted as a semantic deferral: " + mode);
+            Check(fixture.Window.Notifications.Single() == (state == GingerChatTaskState.Cancelled
+                ? GingerNotificationKind.Cancelled : GingerNotificationKind.Failed), "Search error notification claimed review/completion");
+            if (mode == "evidence-save")
+                Check(File.ReadAllText(before.Directory) == "Synthetic decision-journal obstruction" && fixture.Scenario.FreshReads == 0,
+                    "Evidence write failure was ignored before fresh read");
+            NoCards(fixture); Released(fixture);
+        }
+    }
+
+    private static async Task RevisitSearchDeclineStaysOnItsRow()
+    {
+        using var fixture = new Fixture(count: 2);
+        var before = ReplaceCandidates(fixture, 213);
+        var reminder = fixture.Store.AddManualReview(Item(before), "saved-chat", before.Directory);
+        var path = Path.Combine(fixture.DeferredRoot, reminder.Id + ".json");
+        var original = File.ReadAllBytes(path);
+        fixture.Scenario.UseSearchPlanner = true;
+        fixture.Bridge.SearchReply = SearchDecline;
+        await fixture.Run(reminder);
+        Check(fixture.Scenario.NextPositions.Count == 0 && fixture.Bridge.Comparisons.Count == 0 && fixture.Scenario.FilterActions == 0,
+            "Explicit revisit used a semantic refusal to advance/compare/filter");
+        Check(fixture.Store.Read().Single() == reminder && File.ReadAllBytes(path).SequenceEqual(original),
+            "Explicit revisit rewrote the original reminder");
+        Check(fixture.Window.Outcomes.Single() == (GingerChatTaskState.Review, 0) &&
+            fixture.Window.Notifications.Single() == GingerNotificationKind.ManualReview,
+            "Explicit revisit refusal became a failed scan or a completed pair");
+        Check(!fixture.Window.Progress.Stages.Any(stage => stage.Stage == GingerChatStage.Failed),
+            "Explicit semantic review was briefly reported as a failure before the final review outcome");
+        NoCards(fixture); Released(fixture);
     }
 
     private static GingerDesktopObservation Observation(string directory, int position, int count, bool linked, string[] candidates, bool enabled = false)

@@ -243,7 +243,9 @@ internal static class Program
         foreach (var shape in new[] { "no-proposal", "blocked-positive-proposal", "blocked-null-proposal", "host-neutral-refusal" })
         {
             JsonElement received = default;
+            var decisions = 0;
             var veto = planner((request, _) => {
+                decisions++;
                 var node = Node(request, shape == "blocked-positive-proposal" ? "ALDHEYX" : null);
                 node["word"] = null;
                 node["reason"] = shape == "host-neutral-refusal"
@@ -257,25 +259,36 @@ internal static class Program
                 received = JsonSerializer.SerializeToElement(node);
                 return Task.FromResult(received);
             });
-            var refreshes = 0; var actions = 0; string? stopMessage = null;
-            await Rejected(async () => {
-                try
-                {
-                    await new GingerReasonedFilterFlow().PrepareAsync(observed, veto.ChooseAsync,
-                        (before, _) => { refreshes++; return Task.FromResult(before); },
-                        (before, _, _) => { actions++; return Task.FromResult(before); }, CancellationToken.None);
-                }
-                catch (InvalidDataException error) { stopMessage = error.Message; throw; }
-            }, shape);
-            Check(refreshes == 0 && actions == 0, "Veto/refusal reached a fresh read or input: " + shape);
+            var fresh = Observation(Path.Combine(root, "fresh-" + shape));
+            var refreshes = 0; var actions = 0;
+            GingerSearchReviewRequiredException? review = null;
+            try
+            {
+                await new GingerReasonedFilterFlow().PrepareAsync(observed, veto.ChooseAsync,
+                    (before, _) => {
+                        refreshes++;
+                        var decisionId = received.GetProperty("request_id").GetString();
+                        Check(File.Exists(Path.Combine(root, "search-decision-" + decisionId + ".json")),
+                            "Refusal was refreshed before its evidence was durable: " + shape);
+                        return Task.FromResult(fresh);
+                    },
+                    (before, _, _) => { actions++; return Task.FromResult(before); }, CancellationToken.None);
+            }
+            catch (GingerSearchReviewRequiredException error) { review = error; }
+            Check(review is not null, "Validated refusal did not become a typed manual-review outcome: " + shape);
+            Check(refreshes == 1 && actions == 0 && decisions == 1,
+                "Veto/refusal did not perform exactly one fresh read without input or model retry: " + shape);
+            Check(ReferenceEquals(review!.Observation, fresh) && review.EvidenceDirectory == observed.Directory,
+                "Refusal lost the fresh observation or original evidence directory: " + shape);
+            Check(review.Reason == received.GetProperty("reason").GetString() && review.Message == review.Reason,
+                "Refusal changed the host reason or added an inference claim: " + shape);
             var id = received.GetProperty("request_id").GetString();
             using var saved = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "search-decision-" + id + ".json")));
             Check(JsonElement.DeepEquals(saved.RootElement.GetProperty("result"), received),
                 "Veto/refusal evidence was not saved unchanged: " + shape);
             if (shape == "host-neutral-refusal")
-                Check(stopMessage is not null &&
-                    stopMessage.Contains("Qwen не предложила безопасное следующее слово. Нужна ручная проверка.", StringComparison.Ordinal) &&
-                    !stopMessage.Contains("В уроках конфликт", StringComparison.Ordinal) &&
+                Check(review.Reason == "Qwen не предложила безопасное следующее слово. Нужна ручная проверка." &&
+                    !review.Reason.Contains("В уроках конфликт", StringComparison.Ordinal) &&
                     saved.RootElement.GetProperty("result").GetProperty("search_evidence").GetProperty("proposal")
                         .GetProperty("reason").GetString() == "В уроках конфликт: название и упаковка несовместимы.",
                     "Host abstention promoted the untrusted model explanation or lost diagnostic evidence");
