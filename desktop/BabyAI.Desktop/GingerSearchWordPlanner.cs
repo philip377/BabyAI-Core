@@ -135,7 +135,11 @@ internal sealed class GingerSearchWordPlanner(
         }
         // A model abstention must use the host's blocked reason. For a successful
         // choice the host reason intentionally differs from the raw model reason.
-        if (word is null || word != proposedWord || proposedRole is not ("brand" or "name" or "variant")) throw Invalid();
+        // The Python host validates the full single-bottle volume and canonical
+        // concentration. This boundary confirms the interpretation's cited source
+        // and host provenance; it does not repeat the parser or authorize matching.
+        if (word is null || word != proposedWord ||
+            proposedRole is not ("brand" or "name" or "variant" or "volume" or "concentration")) throw Invalid();
     }
 
     private static void RequireFields(JsonElement value, params string[] names)

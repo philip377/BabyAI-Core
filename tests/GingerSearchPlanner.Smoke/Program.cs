@@ -17,7 +17,7 @@ internal static class Program
         { _checks++; return; }
         throw new Exception("Accepted " + label);
     }
-    private static JsonElement Reply(JsonElement request, string? word = "ALDHEYX")
+    private static JsonElement Reply(JsonElement request, string? word = "ALDHEYX", string role = "name")
     {
         var requestId = request.GetProperty("request_id").GetString();
         var reason = word is null ? "Qwen не предложила безопасное следующее слово. Нужна ручная проверка."
@@ -36,7 +36,7 @@ internal static class Program
             search_evidence = new {
                 version = 2, definitions = Array.Empty<object>(), blocked_reason = word is null ? reason : null,
                 source_evidence = sourceEvidence,
-                proposal = new { request_id = requestId, word, role = word is null ? "unknown" : "name",
+                proposal = new { request_id = requestId, word, role = word is null ? "unknown" : role,
                     reason = "Непроверенное объяснение модели." }
             }
         });
@@ -138,8 +138,8 @@ internal static class Program
             ("unbound veto reason", node => { node["word"] = null; Evidence(node)["blocked_reason"] = "Blocked"; }),
             ("positive proposal with unblocked null envelope", node => node["word"] = null)
         };
-        foreach (var role in new[] { "packaging", "service", "concentration", "volume", "tester", "gender", "unknown" })
-            mutations.Add(("non-name success role " + role, node => Proposal(node)["role"] = role));
+        foreach (var role in new[] { "packaging", "service", "tester", "gender", "unknown" })
+            mutations.Add(("unsupported success role " + role, node => Proposal(node)["role"] = role));
         foreach (var (label, change) in mutations)
             await Reject(label, request => { var node = Node(request); change(node); return JsonSerializer.SerializeToElement(node); });
 
@@ -294,6 +294,100 @@ internal static class Program
                     "Host abstention promoted the untrusted model explanation or lost diagnostic evidence");
         }
     }
+    private static async Task AttributeRoleCases(string root)
+    {
+        const string source = "Kenzo L*eau (L) 100ml edt";
+        foreach (var (word, role, quote) in new[] { ("100", "volume", "100"), ("EDT", "concentration", "edt") })
+        {
+            var directory = Path.Combine(root, "attribute-" + role);
+            Directory.CreateDirectory(directory);
+            var observed = Observation(directory, word: word, sourceTitle: source);
+            IReadOnlyList<GingerLearning.LanguageLesson> lessons = [];
+            var current = true;
+            GingerSearchWordPlanner Planner(Func<JsonElement, CancellationToken, Task<JsonElement>> consult) =>
+                new(consult, _ => lessons, token => {
+                    token.ThrowIfCancellationRequested();
+                    if (!current) throw new OperationCanceledException("Synthetic changed chat");
+                    return Task.CompletedTask;
+                }, "attribute-chat", "attribute-run");
+
+            JsonElement received = default;
+            var valid = Planner((request, _) => {
+                received = Reply(request, word, role);
+                return Task.FromResult(received);
+            });
+            var decision = await valid.ChooseAsync(observed, [], CancellationToken.None);
+            Check(decision.Word == word && decision.RequireCurrent is not null,
+                "Host-validated " + role + " word lost its context guard");
+            Check(received.GetProperty("search_evidence").GetProperty("source_evidence").GetProperty("quote").GetString() == quote,
+                "Attribute citation no longer preserves the exact literal word/case inside the source");
+            using (var saved = JsonDocument.Parse(File.ReadAllText(Directory.GetFiles(directory, "search-decision-*.json").Single())))
+                Check(JsonElement.DeepEquals(saved.RootElement.GetProperty("result"), received) &&
+                    saved.RootElement.GetProperty("request").GetProperty("source").GetString() == source,
+                    "Attribute role or original request/evidence was rewritten");
+            current = false;
+            await Rejected(() => decision.RequireCurrent!(CancellationToken.None), role + " late chat change");
+            current = true;
+            lessons = [new(observed.Supplier, "Synthetic revised lesson", "Synthetic interpretation", true,
+                DateTimeOffset.UtcNow, Guid.NewGuid().ToString("N"))];
+            await Rejected(() => decision.RequireCurrent!(CancellationToken.None), role + " late lesson change");
+            lessons = [];
+
+            var mutations = new (string Label, Action<JsonObject> Change)[] {
+                ("stale envelope", node => node["request_id"] = new string('0', 32)),
+                ("stale proposal", node => node["search_evidence"]!["proposal"]!["request_id"] = new string('0', 32)),
+                ("wrong quote", node => node["search_evidence"]!["source_evidence"]!["quote"] = role == "volume" ? "100ml" : "EDT"),
+                ("unknown visible word", node => {
+                    node["word"] = "Kenzo";
+                    node["search_evidence"]!["proposal"]!["word"] = "Kenzo";
+                    node["search_evidence"]!["source_evidence"]!["quote"] = "Kenzo";
+                }),
+                ("dishonest match permission", node => node["can_match"] = true),
+                ("wrong origin", node => node["search_evidence"]!["source_evidence"]!["origin"] = "lesson"),
+                ("model-authored citation", node => node["search_evidence"]!["source_evidence"]!["derived_by"] = "model")
+            };
+            foreach (var (label, change) in mutations)
+            {
+                var before = Directory.GetFiles(directory, "search-decision-*").Length;
+                var invalid = Planner((request, _) => {
+                    var node = JsonNode.Parse(Reply(request, word, role).GetRawText())!.AsObject();
+                    change(node);
+                    return Task.FromResult(JsonSerializer.SerializeToElement(node));
+                });
+                await Rejected(async () => { await invalid.ChooseAsync(observed, [], CancellationToken.None); }, role + " " + label);
+                Check(Directory.GetFiles(directory, "search-decision-*").Length == before,
+                    "Rejected attribute reply was saved: " + role + " " + label);
+            }
+            var duplicates = JsonSerializer.SerializeToNode(observed.Data)!;
+            var secondWord = duplicates["words"]![0]!.DeepClone();
+            secondWord["ObservedPosition"] = 2;
+            duplicates["words"]!.AsArray().Add(secondWord);
+            var duplicate = new GingerDesktopObservation(directory, JsonSerializer.SerializeToElement(duplicates));
+            foreach (var (label, input, history) in new[] {
+                ("checked word", Observation(directory, enabled: true, word: word, sourceTitle: source), Array.Empty<GingerSearchFilterEffect>()),
+                ("duplicate word", duplicate, Array.Empty<GingerSearchFilterEffect>()),
+                ("repeated word", observed, new[] { new GingerSearchFilterEffect(word, 300, 278) })
+            })
+            {
+                var before = Directory.GetFiles(directory, "search-decision-*").Length;
+                await Rejected(async () => { await valid.ChooseAsync(input, history, CancellationToken.None); }, role + " " + label);
+                Check(Directory.GetFiles(directory, "search-decision-*").Length == before,
+                    "Unchecked/unique/history guard failure saved an attribute decision");
+            }
+            var veto = Planner((request, _) => {
+                var node = JsonNode.Parse(Reply(request, word, role).GetRawText())!;
+                node["word"] = null;
+                node["reason"] = "Host rejected ambiguous attribute; manual review required.";
+                node["search_evidence"]!["blocked_reason"] = node["reason"]!.DeepClone();
+                return Task.FromResult(JsonSerializer.SerializeToElement(node));
+            });
+            Check((await veto.ChooseAsync(observed, [], CancellationToken.None)).Word is null,
+                "New attribute role bypassed an explicit host veto");
+            var missing = Observation(Path.Combine(directory, "missing"), word: word, sourceTitle: source);
+            await Rejected(async () => { await valid.ChooseAsync(missing, [], CancellationToken.None); }, role + " failed evidence save");
+        }
+    }
+
     private static GingerDesktopObservation Observation(string path, int count = 278, bool enabled = false,
         string word = "ALDHEYX", string? sourceTitle = null)
     {
@@ -380,6 +474,7 @@ internal static class Program
             var nullDecision = await nullPlanner.ChooseAsync(observed, [], CancellationToken.None);
             Check(nullDecision.Word is null, "Manual-review decision became an action");
             await EvidenceContractCases(consult => Planner(consult), observed, root);
+            await AttributeRoleCases(root);
             var nonexistent = Observation(Path.Combine(root, "missing-directory"));
             await Rejected(async () => { await planner.ChooseAsync(nonexistent, [], CancellationToken.None); }, "failed evidence save");
 

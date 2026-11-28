@@ -91,7 +91,7 @@ def test_unknown_definition_applies_only_when_complete_term_is_in_source():
 
 
 @pytest.mark.parametrize("role", ["packaging", "service", "concentration", "volume", "tester", "gender", "unknown"])
-def test_nonidentity_role_is_vetoed_without_fallback_or_retry(role):
+def test_unconfirmed_role_is_vetoed_without_fallback_or_retry(role):
     chosen = proposal(role=role)
     model = Script(chosen)
     result = consult_search_word(model, REQUEST)
@@ -108,7 +108,10 @@ def test_generic_attribute_cannot_pass_as_name_even_with_literal_citation(word):
     model = Script(proposal(word))
     assert consult_search_word(model, request)["word"] is None
     assert len(model.calls) == 1
-    assert model.calls[0]["eligible_words"] == ["Zephra"]
+    attribute_role = ("concentration" if word.lower() in {"edp", "edt", "edc"} else
+                      "volume" if word in {"30ml", "100мл"} else None)
+    assert model.calls[0]["eligible_words"] == ([word, "Zephra"] if attribute_role else ["Zephra"])
+    assert model.calls[0].get("attribute_roles", {}) == ({word: attribute_role} if attribute_role else {})
 
 
 def test_empty_lesson_does_not_extract_and_model_refusal_is_not_reported_as_verified_conflict():
@@ -164,14 +167,15 @@ def test_eligible_list_preserves_full_observations_but_removes_blocked_and_used_
     request = dict(history=[dict(word="Quiet", before_count=180, after_count=90)])
     result, model = run_with_rules(rules, proposal("River"), **request)
     assert result["word"] == "River"
-    assert model.calls[1]["eligible_words"] == ["River"]
+    assert model.calls[1]["eligible_words"] == ["River", "75", "EDP"]
+    assert model.calls[1]["attribute_roles"] == {"75": "volume", "EDP": "concentration"}
     assert model.calls[1]["words"] == REQUEST["words"]
     assert model.calls[1]["history"] == request["history"]
 
 
 def test_no_eligible_word_skips_inference_and_never_fabricates_a_proposal():
     model = Script()
-    request = REQUEST | dict(words=[dict(word="EDP", search="EDP", checked=False)])
+    request = REQUEST | dict(words=[dict(word="ml", search="ml", checked=False)])
     result = consult_search_word(model, request)
     assert result["word"] is None and "Нет допустимого" in result["reason"]
     assert result["search_evidence"]["proposal"] is None and not model.calls
@@ -230,7 +234,7 @@ def test_role_and_word_are_checked_even_when_an_exact_source_span_exists():
 def test_unexplained_single_letter_in_two_contexts_stops_before_choice(letter):
     request = REQUEST | dict(source=f"Lunora {letter}*name ({letter}) 100ml edt",
         words=[dict(word=word, search="", checked=checked) for word, checked in
-               [("Lunora", True), (letter, None), ("name", True), ("100", None), ("ml", None), ("edt", True)]])
+               [("Lunora", True), (letter, None), ("name", True), ("100", True), ("ml", None), ("edt", True)]])
     model = Script()
     result = consult_search_word(model, request)
     assert result["word"] is None and result["can_match"] is False
