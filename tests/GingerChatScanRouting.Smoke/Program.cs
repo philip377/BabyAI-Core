@@ -53,6 +53,9 @@ internal static class ScanRoutingTests
         await DeferredWriteFailureCannotAdvance();
         await LaterFailureCannotRestoreFirstReview();
         await RevisitManualStaysOnItsRow();
+        await BoundedStartsDoNotTouchFilters();
+        await BroadThenBoundedUsesFreshObservation();
+        await StillBroadCannotCompareDeferOrAdvance();
         Check(TestEnvironment.SyntheticRoot is null && Scenario.Current is null, "Fixture isolation leaked");
         Console.WriteLine($"PASS: {_checks} scan-routing integration checks against linked MainWindow/flow/store/evidence/reviews; fake UI/bridge/session, temp data only; no Ginger or model started");
     }
@@ -239,6 +242,144 @@ internal static class ScanRoutingTests
         Check(fixture.Window.Outcomes.Single() == (GingerChatTaskState.Review, 0), "Revisit incorrectly counted a new deferral/end");
         _ = Evidence(first);
         Released(fixture);
+    }
+
+    private static GingerDesktopObservation ReplaceCandidates(Fixture fixture, int count)
+    {
+        var broad = fixture.Scenario.Rows[0] with {
+            Candidates = Enumerable.Range(1, count).Select(index => "Unfiltered candidate " + index).ToArray()
+        };
+        fixture.Scenario.Rows[0] = broad;
+        return broad;
+    }
+
+    private static async Task BoundedStartsDoNotTouchFilters()
+    {
+        foreach (var count in new[] { 1, 10 })
+        foreach (var revisit in new[] { false, true })
+        {
+            using var fixture = new Fixture(count: 2);
+            var before = ReplaceCandidates(fixture, count);
+            GingerDeferredRow? reminder = revisit ? fixture.Store.AddManualReview(Item(before), "saved-chat", before.Directory) : null;
+            fixture.Scenario.FilterReplies.Enqueue(_ => throw new InvalidOperationException("Already bounded input must not touch filters"));
+            fixture.Bridge.Replies.Enqueue(() => Result(before.Candidates[^1]));
+            await fixture.Run(reminder);
+            Check(fixture.Scenario.StartReads == 1 && fixture.Scenario.FilterReads == 0 &&
+                fixture.Scenario.FilterInputs.Count == 0 && fixture.Scenario.NextPositions.Count == 0,
+                "A directly bounded row caused unnecessary filter/navigation input");
+            Check(fixture.Bridge.Comparisons.Single().Candidates.SequenceEqual(before.Candidates) &&
+                ReferenceEquals(fixture.Window.Confirmation!.Observation, before), "Direct bounded comparison changed its observation");
+            Check(fixture.Window.Outcomes.Single() == (GingerChatTaskState.PairReady, 0) &&
+                !fixture.Window.Progress.Stages.Any(stage => stage.Stage == GingerChatStage.Filtering),
+                "Direct bounded route failed or claimed filter preparation");
+            _ = Evidence(before);
+            Released(fixture);
+        }
+    }
+
+    private static GingerDesktopObservation FilteredObservation(Fixture fixture, GingerDesktopObservation before, int count)
+    {
+        var directory = Path.Combine(fixture.Root, "filtered-observation");
+        Directory.CreateDirectory(directory);
+        return before with {
+            Candidates = Enumerable.Range(1, count).Select(index => "Fresh filtered candidate " + index).ToArray(),
+            Directory = directory
+        };
+    }
+
+    private static async Task BroadThenBoundedUsesFreshObservation()
+    {
+        foreach (var initialCount in new[] { 11, 256 })
+        foreach (var finalCount in new[] { 1, 10 })
+        foreach (var revisit in new[] { false, true })
+        {
+            using var fixture = new Fixture(count: 2);
+            var before = ReplaceCandidates(fixture, initialCount);
+            var fresh = FilteredObservation(fixture, before, finalCount);
+            GingerDeferredRow? reminder = revisit ? fixture.Store.AddManualReview(Item(before), "saved-chat", before.Directory) : null;
+            fixture.Scenario.FilterReplies.Enqueue(input =>
+            {
+                Check(ReferenceEquals(input, before), "Filtering used a stale/different observation");
+                Check(fixture.Bridge.Comparisons.Count == 0 && fixture.Scenario.NextPositions.Count == 0,
+                    "Broad row was compared or advanced before filter preparation");
+                return fresh;
+            });
+            fixture.Bridge.Replies.Enqueue(() => Result(fresh.Candidates[^1], "fresh-filtered-result"));
+            await fixture.Run(reminder);
+
+            Check(fixture.Scenario.StartReads == 1 && fixture.Scenario.FilterReads == 1 &&
+                fixture.Scenario.FilterInputs.Count == 1 && fixture.Scenario.NextPositions.Count == 0,
+                "Broad-to-bounded route repeated reading/filtering or advanced the row");
+            var comparison = fixture.Bridge.Comparisons.Single();
+            Check(comparison.Supplier == fresh.Supplier && comparison.Source == fresh.Title &&
+                comparison.Candidates.SequenceEqual(fresh.Candidates), "Bridge received stale/truncated unfiltered candidates");
+            Check(Directory.GetFiles(before.Directory).Length == 0, "Fresh comparison was saved beside the old observation");
+            var report = Evidence(fresh);
+            Check(report.GetProperty("request").GetProperty("candidates").EnumerateArray().Select(value => value.GetString())
+                .SequenceEqual(fresh.Candidates), "Full evidence did not retain fresh filtered candidates");
+            Check(report.GetProperty("result").GetProperty("candidate").GetString() == fresh.Candidates[^1],
+                "Filtered candidate was reinterpreted in evidence");
+            Check(fixture.Window.ReviewShows.Count == 1 && fixture.Window.LessonShows.Count == 1 &&
+                fixture.Window.ConfirmationOffers.Count == 1 && ReferenceEquals(fixture.Window.Confirmation!.Observation, fresh) &&
+                fixture.Window.Confirmation.Candidate == fresh.Candidates[^1], "Review/confirmation retained the broad observation");
+            Check(fixture.Store.Read().Count == (revisit ? 1 : 0) &&
+                fixture.Window.Outcomes.Single() == (GingerChatTaskState.PairReady, 0), "Bounded pair was spuriously deferred");
+            Check(fixture.Window.Progress.Stages.Count(stage => stage.Stage == GingerChatStage.Filtering) == 1 &&
+                fixture.Window.Progress.Stages.Count(stage => stage.Stage == GingerChatStage.Comparing) == 1,
+                "UI stages did not reflect one filter followed by one comparison");
+
+            string[]? lessonCandidates = null;
+            await fixture.Window.ShownLesson!.PreviewAsync("chat-current", "Synthetic lesson after filtering",
+                (supplier, source, lesson, candidates, token) =>
+                { lessonCandidates = candidates.ToArray(); return Task.FromResult(Result(null)); }, CancellationToken.None);
+            Check(lessonCandidates!.SequenceEqual(fresh.Candidates), "Lesson card retained broad candidates after filtering");
+            Released(fixture);
+        }
+    }
+
+    private static async Task StillBroadCannotCompareDeferOrAdvance()
+    {
+        foreach (var initialCount in new[] { 11, 256 })
+        foreach (var finalCount in new[] { 11, 256 })
+        foreach (var revisit in new[] { false, true })
+        {
+            using var fixture = new Fixture(count: 2);
+            var before = ReplaceCandidates(fixture, initialCount);
+            var fresh = FilteredObservation(fixture, before, finalCount);
+            GingerDeferredRow? reminder = revisit ? fixture.Store.AddManualReview(Item(before), "saved-chat", before.Directory) : null;
+            var reminderPath = reminder is null ? null : Path.Combine(fixture.DeferredRoot, reminder.Id + ".json");
+            var reminderBytes = reminderPath is null ? null : File.ReadAllBytes(reminderPath);
+            fixture.Scenario.FilterReplies.Enqueue(input =>
+            {
+                Check(ReferenceEquals(input, before), "Still-broad filter received another row");
+                return fresh;
+            });
+            // A valid queued answer ensures any accidental bridge call could succeed;
+            // the regression must fail because comparison was invoked, not a fake error.
+            fixture.Bridge.Replies.Enqueue(() => Result(fresh.Candidates[0]));
+            await fixture.Run(reminder);
+
+            Check(fixture.Scenario.StartReads == 1 && fixture.Scenario.FilterReads == 1 &&
+                fixture.Scenario.FilterInputs.Count == 1, "Still-broad route replanned/replayed its filter budget");
+            Check(fixture.Bridge.Comparisons.Count == 0 && fixture.Bridge.Replies.Count == 1 &&
+                fixture.Scenario.NextPositions.Count == 0, "Still-broad route invoked model comparison or next-row input");
+            Check(Directory.GetFiles(before.Directory).Length == 0 && Directory.GetFiles(fresh.Directory).Length == 0,
+                "Still-broad route published comparison evidence without a bounded comparison");
+            var saved = fixture.Store.Read();
+            Check(saved.Count == (revisit ? 1 : 0), "Still-broad row became a new manual/empty deferral");
+            if (reminder is not null)
+                Check(saved.Single() == reminder && File.ReadAllBytes(reminderPath!).SequenceEqual(reminderBytes!),
+                    "Still-broad revisit rewrote the existing reminder");
+            Check(fixture.Window.Outcomes.Single() == (GingerChatTaskState.Failed, 0),
+                "Still-broad route claimed completion or durable manual deferral");
+            Check(fixture.Window.Progress.Stages.Count(stage => stage.Stage == GingerChatStage.Filtering) == 1 &&
+                !fixture.Window.Progress.Stages.Any(stage => stage.Stage is GingerChatStage.Comparing or GingerChatStage.Skipping or GingerChatStage.Empty),
+                "Still-broad progress entered comparison/deferral/empty state");
+            Check(fixture.Window.Progress.Details.Contains($"осталось {finalCount} кандидатов", StringComparison.Ordinal) &&
+                fixture.Window.Progress.Details.Contains("Сузьте поиск вручную", StringComparison.Ordinal),
+                "Still-broad final transcript lost the actionable count/manual-search explanation");
+            NoCards(fixture); Released(fixture);
+        }
     }
 
     private sealed class Fixture : IDisposable

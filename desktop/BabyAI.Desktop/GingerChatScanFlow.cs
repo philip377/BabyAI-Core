@@ -43,7 +43,7 @@ internal sealed class GingerChatScanFlow(
                 else
                 {
                     GingerChatComparison? comparison = null;
-                    if (row.Item.Candidates.Length == 0)
+                    if (GingerChatPreparation.NeedsFilters(row.Item.Candidates.Length))
                     {
                         report(GingerChatStage.Filtering, $"Строка {row.Item.Position}: проверяю звёздочки слов слева и перечитываю кандидатов.");
                         var filtered = await filter(row, token);
@@ -53,6 +53,7 @@ internal sealed class GingerChatScanFlow(
                             throw new InvalidDataException("Товар изменился во время подготовки поиска. Нужно новое чтение.");
                         row = filtered;
                     }
+                    GingerChatPreparation.RequireCandidateLimit(row.Item.Candidates.Length);
                     if (row.Item.Candidates.Length != 0)
                     {
                         report(GingerChatStage.Comparing, $"Строка {row.Item.Position}: сравниваю кандидатов ({row.Item.Candidates.Length}). Компьютером сейчас не управляю.");

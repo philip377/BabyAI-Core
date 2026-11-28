@@ -11,6 +11,9 @@ internal static class ScanFlowTests
         new(new GingerChatItem("Supplier", "Document", position, "Product " + position, linked, candidates),
             count, 123, 456, Path.Combine(Path.GetTempPath(), "scan-observation-" + position));
 
+    private static string[] Candidates(int count, string prefix = "Candidate ") =>
+        Enumerable.Range(1, count).Select(index => prefix + index).ToArray();
+
     // This harness provides only observation, navigation, durable deferral and comparison.
     // It has no matching delegate, no driver and no live application access.
     private sealed class Harness(params GingerChatScanRow[] rows) : IDisposable
@@ -94,6 +97,8 @@ internal static class ScanFlowTests
     internal static async Task Run()
     {
         await CheckSuccessfulScan();
+        await CheckCandidateBudget();
+        await CheckSingleRowCandidateBudget();
         await CheckManualReviewScan();
         await CheckManualReviewFailures();
         await CheckInvalidComparisons();
@@ -102,7 +107,149 @@ internal static class ScanFlowTests
         await CheckFailuresAndStop();
         await CheckChangedObservations();
         CheckNavigationOnlyContract();
-        Console.WriteLine("Ginger scan: empty and manual-review durable deferral before next, exact typed choices, full explanations, 500-row bound, failures, Stop, changed observations and no matching writer passed; Ginger was not started.");
+        Console.WriteLine("Ginger scan: shared 10-candidate preparation budget and one filter attempt in scan/revisit, empty and manual-review durable deferral before next, exact typed choices, full explanations, 500-row bound, failures, Stop, changed observations and no matching writer passed; Ginger was not started.");
+    }
+
+    private static async Task CheckCandidateBudget()
+    {
+        foreach (var initialCount in new[] { 11, 100, 256 })
+        foreach (var finalCount in new[] { 1, 10 })
+        {
+            using var scan = new Harness(Row(1, 2, false, Candidates(initialCount)), Row(2, 2));
+            var fresh = Candidates(finalCount, "Fresh filtered ");
+            scan.FilterResult = row => row with { Item = row.Item with { Candidates = fresh },
+                ObservationDirectory = row.ObservationDirectory + "-fresh" };
+            scan.OnCompare = item => Check(item.Candidates.SequenceEqual(fresh),
+                "Broad search compared a slice of old candidates instead of the complete fresh list");
+            var result = await scan.Run();
+            Check(scan.Calls.SequenceEqual(["read", "filter:1", "compare:1"]) &&
+                result.Row.Item.Candidates.SequenceEqual(fresh) && result.Row.ObservationDirectory.EndsWith("-fresh", StringComparison.Ordinal) &&
+                !result.ReachedEnd && result.DeferredCount == 0 && scan.Store.Read().Count == 0,
+                "Broad search did not filter exactly once before a fresh bounded comparison");
+        }
+        foreach (var count in new[] { 1, 10 })
+        {
+            using var scan = new Harness(Row(1, 1, false, Candidates(count)));
+            await scan.Run();
+            Check(scan.Calls.SequenceEqual(["read", "compare:1"]), "A list within the chat budget changed filters");
+        }
+        foreach (var (initialCount, finalCount) in new[] { (11, 11), (100, 11), (256, 256), (0, 11), (0, 256) })
+        {
+            using var scan = new Harness(Row(1, 2, false, Candidates(initialCount)), Row(2, 2));
+            scan.FilterResult = row => row with { Item = row.Item with { Candidates = Candidates(finalCount) } };
+            await Refuses<InvalidDataException>(scan);
+            Check(scan.Calls.SequenceEqual(["read", "filter:1"]) && scan.Store.Read().Count == 0 &&
+                !scan.Stages.Contains(GingerChatStage.Comparing) && !scan.Stages.Contains(GingerChatStage.Skipping),
+                "Residual broad search was compared, deferred, advanced or filtered again");
+            Check(scan.Reports.Last().Contains($"осталось {finalCount} кандидатов", StringComparison.Ordinal) &&
+                scan.Reports.Last().Contains("не более 10", StringComparison.Ordinal),
+                "Residual broad search did not explain its actual count and chat limit");
+        }
+        using (var scan = new Harness(Row(1, 1, false, Candidates(100))))
+        {
+            scan.FilterResult = row => row with { Item = row.Item with { Candidates = [] } };
+            var result = await scan.Run();
+            Check(result.ReachedEnd && result.DeferredCount == 1 &&
+                scan.Calls.SequenceEqual(["read", "filter:1", "save:1"]) &&
+                scan.Store.Read().Single().Reason == GingerDeferredRows.NoCandidatesReason,
+                "A genuinely empty filtered result did not retain empty-result handling");
+        }
+        foreach (var count in new[] { 11, 100, 256 })
+        {
+            using var scan = new Harness(Row(1, 1, true, Candidates(count)));
+            var result = await scan.Run();
+            Check(result.ReachedEnd && result.AlreadyLinkedCount == 1 && scan.Calls.SequenceEqual(["read"]) &&
+                scan.Store.Read().Count == 0, "An already-linked broad list was filtered, compared or deferred");
+        }
+        using (var scan = new Harness(Row(1, 2, false, Candidates(100)), Row(2, 2)))
+        {
+            scan.FilterResult = _ => throw new IOException("Filter outcome uncertain");
+            await Refuses<IOException>(scan);
+            Check(scan.Calls.SequenceEqual(["read", "filter:1"]) && scan.Store.Read().Count == 0,
+                "Broad-list filter error was retried, deferred or advanced");
+        }
+        using (var stop = new CancellationTokenSource())
+        using (var scan = new Harness(Row(1, 2, false, Candidates(100)), Row(2, 2)))
+        {
+            scan.FilterResult = row => { stop.Cancel(); return row with { Item = row.Item with { Candidates = ["Fresh"] } }; };
+            await Refuses<OperationCanceledException>(scan, stop.Token);
+            Check(scan.Calls.SequenceEqual(["read", "filter:1"]) && scan.Store.Read().Count == 0,
+                "Cancelled broad-list filter reached comparison, deferral or navigation");
+        }
+    }
+
+    private static async Task CheckSingleRowCandidateBudget()
+    {
+        // The same production single-row flow is used for explicit revisits.
+        async Task RunCase(GingerChatItem initial, Func<GingerChatItem, GingerChatItem> filterResult,
+            string[] expectedCalls, GingerChatStage expectedTerminal, string[]? expectedCandidates = null,
+            Type? expectedFailure = null, CancellationToken token = default)
+        {
+            var calls = new List<string>();
+            var stages = new List<GingerChatStage>();
+            var reports = new List<string>();
+            Exception? failure = null;
+            try
+            {
+                await new GingerChatFlow(
+                    _ => { calls.Add("read"); return Task.FromResult(initial); },
+                    _ => { calls.Add("filter"); return Task.FromResult(filterResult(initial)); },
+                    (item, _) =>
+                    {
+                        calls.Add("compare");
+                        Check(expectedCandidates is not null && item.Candidates.SequenceEqual(expectedCandidates),
+                            "Revisit compared stale, sliced or unexpected candidates");
+                        return Task.FromResult("Proposal for the fresh complete list");
+                    },
+                    (stage, text) => { stages.Add(stage); reports.Add(text); }).RunAsync(token);
+            }
+            catch (Exception ex) { failure = ex; }
+            Check(failure?.GetType() == expectedFailure, "Unexpected single-row outcome: " + failure);
+            Check(calls.SequenceEqual(expectedCalls) && stages.Last() == expectedTerminal,
+                "Revisit repeated filtering or performed work after a failed preparation");
+            if (expectedFailure is not null)
+                Check(!stages.Contains(GingerChatStage.Comparing) && !stages.Contains(GingerChatStage.Review),
+                    "Failed revisit reached comparison or review");
+            if (failure is InvalidDataException && expectedCandidates is { Length: > 10 })
+                Check(reports.Last().Contains($"осталось {expectedCandidates.Length} кандидатов", StringComparison.Ordinal) &&
+                    reports.Last().Contains("не более 10", StringComparison.Ordinal), "Revisit omitted its remaining candidate count");
+        }
+
+        foreach (var initialCount in new[] { 11, 100, 256 })
+        foreach (var finalCount in new[] { 1, 10 })
+        {
+            var fresh = Candidates(finalCount, "Fresh revisit ");
+            await RunCase(Row(1, 1, false, Candidates(initialCount)).Item,
+                item => item with { Candidates = fresh }, ["read", "filter", "compare"], GingerChatStage.Review, fresh);
+        }
+        foreach (var count in new[] { 1, 10 })
+        {
+            var candidates = Candidates(count);
+            await RunCase(Row(1, 1, false, candidates).Item, _ => throw new Exception("Unexpected filter"),
+                ["read", "compare"], GingerChatStage.Review, candidates);
+        }
+        foreach (var (initialCount, finalCount) in new[] { (11, 11), (100, 11), (256, 256), (0, 11), (0, 256) })
+        {
+            var fresh = Candidates(finalCount);
+            await RunCase(Row(1, 1, false, Candidates(initialCount)).Item, item => item with { Candidates = fresh },
+                ["read", "filter"], GingerChatStage.Failed, fresh, typeof(InvalidDataException));
+        }
+        await RunCase(Row(1, 1, false, Candidates(100)).Item, item => item with { Candidates = [] },
+            ["read", "filter"], GingerChatStage.Empty);
+        foreach (var count in new[] { 11, 100, 256 })
+            await RunCase(Row(1, 1, true, Candidates(count)).Item, _ => throw new Exception("Unexpected linked filter"),
+                ["read"], GingerChatStage.Review);
+        foreach (var change in new Func<GingerChatItem, GingerChatItem>[] {
+            item => item with { Supplier = "Other" }, item => item with { Document = "Other" },
+            item => item with { Position = 2 }, item => item with { Title = "Other" }, item => item with { Linked = true } })
+            await RunCase(Row(1, 2, false, Candidates(100)).Item, item => change(item) with { Candidates = ["Fresh"] },
+                ["read", "filter"], GingerChatStage.Failed, expectedFailure: typeof(InvalidDataException));
+        await RunCase(Row(1, 1, false, Candidates(100)).Item, _ => throw new IOException("Uncertain filter"),
+            ["read", "filter"], GingerChatStage.Failed, expectedFailure: typeof(IOException));
+        using var stop = new CancellationTokenSource();
+        await RunCase(Row(1, 1, false, Candidates(100)).Item,
+            item => { stop.Cancel(); return item with { Candidates = ["Fresh"] }; },
+            ["read", "filter"], GingerChatStage.Cancelled, expectedFailure: typeof(OperationCanceledException), token: stop.Token);
     }
 
     private static async Task CheckManualReviewScan()
@@ -393,9 +540,14 @@ internal static class ScanFlowTests
         foreach (var change in changes.Concat(new Func<GingerChatScanRow, GingerChatScanRow>[] {
             row => row with { Item = row.Item with { Title = "Changed product" } },
             row => row with { Item = row.Item with { Linked = true } } }))
+        foreach (var initialCount in new[] { 0, 100 })
         {
-            using var scan = new Harness(Row(1, 3), Row(2, 3), Row(3, 3));
-            scan.FilterResult = change;
+            using var scan = new Harness(Row(1, 3, false, Candidates(initialCount)), Row(2, 3), Row(3, 3));
+            scan.FilterResult = row =>
+            {
+                var changed = change(row);
+                return changed with { Item = changed.Item with { Candidates = ["Fresh"] } };
+            };
             await Refuses<InvalidDataException>(scan);
             Check(scan.Calls.SequenceEqual(["read", "filter:1"]) && scan.Store.Read().Count == 0,
                 "Changed filtered row was saved or advanced");

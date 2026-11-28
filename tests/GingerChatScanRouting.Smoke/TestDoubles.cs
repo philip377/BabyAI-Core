@@ -68,6 +68,8 @@ namespace BabyAI.Desktop
         internal static Scenario? Current;
         internal readonly List<GingerDesktopObservation> Rows = [];
         internal readonly List<int> NextPositions = [];
+        internal readonly List<GingerDesktopObservation> FilterInputs = [];
+        internal readonly Queue<Func<GingerDesktopObservation, GingerDesktopObservation>> FilterReplies = [];
         internal readonly List<string> Journal = [];
         internal Action<GingerDesktopObservation>? BeforeNext;
         internal int StartReads, FilterReads, Disposals;
@@ -85,7 +87,8 @@ namespace BabyAI.Desktop
         {
             token.ThrowIfCancellationRequested();
             _scenario.FilterReads++;
-            return Task.FromResult(observation);
+            _scenario.FilterInputs.Add(observation);
+            return Task.FromResult(_scenario.FilterReplies.Count == 0 ? observation : _scenario.FilterReplies.Dequeue()(observation));
         }
         internal Task<GingerDesktopObservation> ObserveAsync(CancellationToken token,
             GingerDesktopObservation? before = null, int? position = null, bool prepareFiltersOnOverflow = false)
